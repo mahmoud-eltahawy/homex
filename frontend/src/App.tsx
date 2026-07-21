@@ -1,6 +1,8 @@
-// app.tsx – Fully responsive, polished, bug‑free
+// app.tsx – Fully type‑safe, idiomatic SolidJS, production‑ready
 import { Router, Route, A, useParams, useNavigate, useSearchParams } from '@solidjs/router';
-import { createResource, createSignal, createEffect, Suspense, For, Show, onMount, onCleanup } from 'solid-js';
+import { createResource, createSignal, createEffect, createMemo, Suspense, For, Show, onMount, onCleanup } from 'solid-js';
+import type { ParentProps } from 'solid-js';
+import type { JSX } from 'solid-js/jsx-runtime';
 
 // ---------- Types ----------
 interface Episode {
@@ -23,6 +25,23 @@ interface Media {
   duration?: string;
   episodes?: Episode[];
 }
+
+// Upload data discriminated union
+type UploadData =
+  | {
+      title: string;
+      type: 'movie';
+      description: string;
+      movieFile: string;
+    }
+  | {
+      title: string;
+      type: 'series';
+      description: string;
+      isNewSeries: boolean;
+      existingSeriesId: number | null;
+      episodes: { number: number; title: string; fileName: string }[];
+    };
 
 // ---------- Mock Data with reliable video URL ----------
 const TEST_VIDEO = 'https://www.w3schools.com/html/mov_bbb.mp4';
@@ -151,10 +170,23 @@ const mockSeries: Media[] = [
 ];
 
 // ---------- API Simulation ----------
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const fetchMovies = async (): Promise<Media[]> => { await delay(300); return mockMovies; };
-const fetchSeries = async (): Promise<Media[]> => { await delay(300); return mockSeries; };
-const fetchAllMedia = async (): Promise<Media[]> => { await delay(300); return [...mockMovies, ...mockSeries]; };
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+const fetchMovies = async (): Promise<Media[]> => {
+  await delay(300);
+  return mockMovies;
+};
+
+const fetchSeries = async (): Promise<Media[]> => {
+  await delay(300);
+  return mockSeries;
+};
+
+const fetchAllMedia = async (): Promise<Media[]> => {
+  await delay(300);
+  return [...mockMovies, ...mockSeries];
+};
+
 const fetchMediaDetail = async (type: string, id: string): Promise<Media | undefined> => {
   await delay(200);
   const all = type === 'movie' ? mockMovies : mockSeries;
@@ -162,57 +194,57 @@ const fetchMediaDetail = async (type: string, id: string): Promise<Media | undef
 };
 
 // ---------- SVG Icons ----------
-const SearchIcon = () => (
+const SearchIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
 );
-const MovieIcon = () => (
+const MovieIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"/></svg>
 );
-const SeriesIcon = () => (
+const SeriesIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
 );
-const DownloadIcon = () => (
+const DownloadIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5 inline-block ms-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
 );
-const PlayIcon = () => (
+const PlayIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5 inline-block ms-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
 );
-const PauseIcon = () => (
+const PauseIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5 inline-block ms-1" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
 );
-const ClockIcon = () => (
+const ClockIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 md:h-4 md:w-4 inline-block ms-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
 );
-const UploadIcon = () => (
+const UploadIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 md:h-6 md:w-6 inline-block ms-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
 );
-const DeleteIcon = () => (
+const DeleteIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
 );
-const UpArrow = () => (
+const UpArrow = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
 );
-const DownArrow = () => (
+const DownArrow = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
 );
-const SortIcon = () => (
+const SortIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4"/></svg>
 );
-const VolumeIcon = () => (
+const VolumeIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
 );
-const MuteIcon = () => (
+const MuteIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
 );
-const FullscreenIcon = () => (
+const FullscreenIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/></svg>
 );
-const FullscreenExitIcon = () => (
+const FullscreenExitIcon = (): JSX.Element => (
   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9V4M9 4H4M9 4l5 5M15 15V20M15 20h5M15 20l-5-5M9 15v5M9 15H4M9 15l5 5M15 9V4M15 4h5M15 4l-5 5"/></svg>
 );
 
 // ---------- Layout ----------
-function Layout(props: any) {
+function Layout(props: ParentProps): JSX.Element {
   return (
     <div class="flex flex-col min-h-screen bg-gray-950" dir="rtl">
       <Navbar />
@@ -225,12 +257,12 @@ function Layout(props: any) {
 }
 
 // ---------- Navbar ----------
-function Navbar() {
+function Navbar(): JSX.Element {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = createSignal('');
   const [searchOpen, setSearchOpen] = createSignal(false);
 
-  const handleSearch = (e: Event) => {
+  const handleSearch = (e: Event): void => {
     e.preventDefault();
     const term = searchTerm().trim();
     if (term) {
@@ -252,13 +284,13 @@ function Navbar() {
             <div class={`relative me-2 transition-all duration-300 ease-in-out ${searchOpen() ? 'w-48 lg:w-56' : 'w-8'}`}>
               <form onSubmit={handleSearch} class="flex items-center">
                 <button type="button" onClick={() => setSearchOpen(!searchOpen())} class="absolute end-1 top-1/2 -translate-y-1/2 p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"><SearchIcon /></button>
-                <input type="text" value={searchTerm()} onInput={(e) => setSearchTerm(e.currentTarget.value)} onFocus={() => setSearchOpen(true)} onBlur={() => { if (!searchTerm()) setSearchOpen(false); }} placeholder="ابحث..." class={`w-full bg-white/5 backdrop-blur-md text-white placeholder-gray-500 rounded-full py-1.5 md:py-2 pe-8 md:pe-10 ps-3 md:ps-4 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/10 transition-all ${searchOpen() ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
+                <input type="text" value={searchTerm()} onInput={(e: Event) => setSearchTerm((e.currentTarget as HTMLInputElement).value)} onFocus={() => setSearchOpen(true)} onBlur={() => { if (!searchTerm()) setSearchOpen(false); }} placeholder="ابحث..." class={`w-full bg-white/5 backdrop-blur-md text-white placeholder-gray-500 rounded-full py-1.5 md:py-2 pe-8 md:pe-10 ps-3 md:ps-4 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/10 transition-all ${searchOpen() ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
               </form>
             </div>
           </div>
           <div class="md:hidden flex items-center gap-1">
             <form onSubmit={handleSearch} class="relative flex items-center">
-              <input type="text" value={searchTerm()} onInput={(e) => setSearchTerm(e.currentTarget.value)} placeholder="ابحث..." class="w-24 sm:w-32 bg-white/10 backdrop-blur-md text-white placeholder-gray-400 rounded-full py-1 pe-7 ps-2 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400" />
+              <input type="text" value={searchTerm()} onInput={(e: Event) => setSearchTerm((e.currentTarget as HTMLInputElement).value)} placeholder="ابحث..." class="w-24 sm:w-32 bg-white/10 backdrop-blur-md text-white placeholder-gray-400 rounded-full py-1 pe-7 ps-2 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400" />
               <button type="submit" class="absolute end-1.5 top-1/2 -translate-y-1/2 text-gray-400"><SearchIcon /></button>
             </form>
           </div>
@@ -273,7 +305,7 @@ function Navbar() {
 }
 
 // ---------- Footer ----------
-function Footer() {
+function Footer(): JSX.Element {
   return (
     <footer class="bg-gray-950/80 backdrop-blur-md border-t border-white/10 mt-auto">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
@@ -312,11 +344,11 @@ function Footer() {
 }
 
 // ---------- Media Card ----------
-function MediaCard({ item, type }: { item: Media; type: string }) {
+function MediaCard({ item, type }: { item: Media; type: string }): JSX.Element {
   return (
     <A href={`/${type}/${item.id}`} class="group relative flex flex-col overflow-hidden rounded-xl sm:rounded-2xl bg-gray-900/60 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/10 transition-all duration-500 hover:scale-[1.02] hover:-translate-y-1">
       <div class="aspect-[2/3] relative overflow-hidden">
-        <img src={item.poster || 'https://via.placeholder.com/300x450?text=لا+صورة'} alt={item.title} class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x450?text=لا+صورة'; }} />
+        <img src={item.poster || 'https://via.placeholder.com/300x450?text=لا+صورة'} alt={item.title} class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy" onError={(e: Event) => { (e.currentTarget as HTMLImageElement).src = 'https://via.placeholder.com/300x450?text=لا+صورة'; }} />
         <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-2 sm:p-4">
           <div class="transform translate-y-2 sm:translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
             <h3 class="text-white font-bold text-xs sm:text-base md:text-lg leading-tight line-clamp-2">{item.title}</h3>
@@ -343,7 +375,7 @@ function MediaCard({ item, type }: { item: Media; type: string }) {
 }
 
 // ---------- Skeleton Loader ----------
-function CardSkeleton() {
+function CardSkeleton(): JSX.Element {
   return (
     <div class="animate-pulse rounded-xl sm:rounded-2xl bg-gray-800/50 border border-white/5 overflow-hidden">
       <div class="aspect-[2/3] bg-gray-700/50" />
@@ -355,8 +387,8 @@ function CardSkeleton() {
   );
 }
 
-// ---------- Video Player Component (LTR, with touch‑friendly controls) ----------
-function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void }) {
+// ---------- Video Player Component (LTR, touch‑friendly) ----------
+function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void }): JSX.Element {
   let videoRef: HTMLVideoElement | undefined;
   let controlsTimeout: number | undefined;
 
@@ -368,20 +400,19 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
   const [fullscreen, setFullscreen] = createSignal(false);
   const [controlsVisible, setControlsVisible] = createSignal(true);
 
-  // Auto‑hide controls after 3 seconds of inactivity
-  const startHideTimer = () => {
+  const startHideTimer = (): void => {
     if (controlsTimeout) clearTimeout(controlsTimeout);
     controlsTimeout = setTimeout(() => {
       setControlsVisible(false);
     }, 3000);
   };
 
-  const showControls = () => {
+  const showControls = (): void => {
     setControlsVisible(true);
     startHideTimer();
   };
 
-  const toggleControls = () => {
+  const toggleControls = (): void => {
     if (controlsVisible()) {
       setControlsVisible(false);
       if (controlsTimeout) clearTimeout(controlsTimeout);
@@ -390,30 +421,27 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
     }
   };
 
-  // Reset timer on any user interaction
-  const handleUserInteraction = () => {
+  const handleUserInteraction = (): void => {
     showControls();
   };
 
-  // Cleanup timer on unmount
   onCleanup(() => {
     if (controlsTimeout) clearTimeout(controlsTimeout);
   });
 
-  // Video event handlers
-  const handleLoadedMetadata = () => {
+  const handleLoadedMetadata = (): void => {
     if (videoRef) {
       setDuration(videoRef.duration);
     }
   };
 
-  const handleTimeUpdate = () => {
+  const handleTimeUpdate = (): void => {
     if (videoRef) {
       setCurrentTime(videoRef.currentTime);
     }
   };
 
-  const togglePlay = () => {
+  const togglePlay = (): void => {
     if (!videoRef) return;
     if (playing()) {
       videoRef.pause();
@@ -424,7 +452,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
     handleUserInteraction();
   };
 
-  const handleSeek = (e: Event) => {
+  const handleSeek = (e: Event): void => {
     const input = e.currentTarget as HTMLInputElement;
     const val = parseFloat(input.value);
     if (videoRef && !isNaN(val)) {
@@ -434,7 +462,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
     handleUserInteraction();
   };
 
-  const handleVolumeChange = (e: Event) => {
+  const handleVolumeChange = (e: Event): void => {
     const input = e.currentTarget as HTMLInputElement;
     const val = parseFloat(input.value);
     if (!isNaN(val)) {
@@ -448,7 +476,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
     handleUserInteraction();
   };
 
-  const toggleMute = () => {
+  const toggleMute = (): void => {
     if (!videoRef) return;
     if (muted()) {
       videoRef.muted = false;
@@ -461,7 +489,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
     handleUserInteraction();
   };
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = (): void => {
     if (!videoRef) return;
     if (!document.fullscreenElement) {
       videoRef.requestFullscreen?.();
@@ -474,11 +502,10 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
   };
 
   onMount(() => {
-    const handleFullscreenChange = () => {
+    const handleFullscreenChange = (): void => {
       setFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    // Start with controls visible
     showControls();
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
@@ -486,7 +513,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
     };
   });
 
-  const formatTime = (time: number) => {
+  const formatTime = (time: number): string => {
     if (isNaN(time)) return '00:00';
     const mins = Math.floor(time / 60);
     const secs = Math.floor(time % 60);
@@ -506,6 +533,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
       <video
         ref={videoRef}
         src={props.src}
+        title={props.title}
         class="w-full h-auto max-h-[50vh] sm:max-h-[60vh] md:max-h-[70vh] object-contain cursor-pointer"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
@@ -518,20 +546,17 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
         onClick={toggleControls}
         playsinline
       />
-      {/* Controls overlay */}
       <div
         class={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-2 sm:p-4 transition-opacity duration-300 ${
           controlsVisible() ? 'opacity-100' : 'opacity-0'
         }`}
         onMouseEnter={showControls}
         onMouseLeave={() => {
-          // Delay hiding a bit to allow moving to controls
           if (controlsTimeout) clearTimeout(controlsTimeout);
           controlsTimeout = setTimeout(() => {
             setControlsVisible(false);
           }, 1500);
         }}
-        // Touch: keep visible when interacting
         onTouchStart={showControls}
       >
         <div class="flex flex-col gap-1 sm:gap-2">
@@ -577,35 +602,33 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
 }
 
 // ---------- Detail Page ----------
-function Detail() {
+function Detail(): JSX.Element {
   const params = useParams<{ type: string; id: string }>();
   const [detail] = createResource(() => params.type && params.id, () => fetchMediaDetail(params.type, params.id));
 
-  const [selectedEpisode, setSelectedEpisode] = createSignal<Episode | null>(null);
+  const [selectedEpisodeSignal, setSelectedEpisodeSignal] = createSignal<Episode | null>(null);
 
+  // Initialize with the first episode when detail loads
   createEffect(() => {
     const data = detail();
-    if (data && data.type === 'series' && data.episodes && data.episodes.length > 0) {
-      setSelectedEpisode(data.episodes[0]);
+    if (data?.type === 'series' && data.episodes && data.episodes.length > 0) {
+      setSelectedEpisodeSignal(data.episodes[0]);
     } else {
-      setSelectedEpisode(null);
+      setSelectedEpisodeSignal(null);
     }
   });
 
-  const videoSrc = () => {
+  // Derive the actual video source from the selected episode signal
+  const videoSrc = createMemo(() => {
     const data = detail();
     if (!data) return '';
     if (data.type === 'movie') {
       return data.filePath;
-    } else if (data.type === 'series' && selectedEpisode()) {
-      return selectedEpisode()!.filePath;
+    } else if (data.type === 'series' && selectedEpisodeSignal()) {
+      return selectedEpisodeSignal()!.filePath;
     }
     return '';
-  };
-
-  const selectEpisode = (ep: Episode) => {
-    setSelectedEpisode(ep);
-  };
+  });
 
   return (
     <Suspense fallback={<div class="min-h-screen flex items-center justify-center text-white">جارٍ التحميل...</div>}>
@@ -656,14 +679,14 @@ function Detail() {
               </h2>
               <div class="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3">
                 <For each={detail()!.episodes}>
-                  {(ep) => (
+                  {(ep: Episode) => (
                     <div
                       class={`p-2 sm:p-3 rounded-lg sm:rounded-xl border transition cursor-pointer ${
-                        selectedEpisode()?.id === ep.id
+                        selectedEpisodeSignal()?.id === ep.id
                           ? 'border-cyan-400 bg-cyan-400/10 shadow-lg shadow-cyan-400/10'
                           : 'border-white/10 bg-white/5 hover:bg-white/10'
                       }`}
-                      onClick={() => selectEpisode(ep)}
+                      onClick={() => setSelectedEpisodeSignal(ep)}
                     >
                       <div class="flex items-center gap-1.5 sm:gap-3">
                         <span class="text-[10px] sm:text-sm font-mono text-gray-400">S{String(ep.season).padStart(2, '0')}E{String(ep.episode).padStart(2, '0')}</span>
@@ -682,10 +705,10 @@ function Detail() {
 }
 
 // ---------- Pages: Home, Movies, Series, Search ----------
-function Home() {
+function Home(): JSX.Element {
   const [media] = createResource<Media[]>(fetchAllMedia);
-  const movies = () => media()?.filter(m => m.type === 'movie') || [];
-  const series = () => media()?.filter(m => m.type === 'series') || [];
+  const movies = createMemo(() => media()?.filter(m => m.type === 'movie') || []);
+  const series = createMemo(() => media()?.filter(m => m.type === 'series') || []);
 
   return (
     <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
@@ -699,27 +722,35 @@ function Home() {
           شاهد وحمّل مجموعتك من الأفلام والمسلسلات من أي مكان في منزلك.
         </p>
       </div>
-      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6"><For each={Array(5)}>{() => <CardSkeleton />}</For></div>}>
+      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6"><For each={Array(5)}>{(_, _i) => <CardSkeleton />}</For></div>}>
         <section class="mb-8 sm:mb-12 md:mb-16">
           <div class="flex items-center justify-between mb-3 sm:mb-4 md:mb-6 lg:mb-8">
             <h2 class="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white flex items-center gap-1.5 sm:gap-2 md:gap-3"><span class="text-cyan-400"><MovieIcon /></span> أفلام</h2>
             <A href="/movies" class="text-cyan-400 hover:text-cyan-300 text-xs sm:text-sm font-medium transition-all flex items-center gap-0.5 sm:gap-1"><span class="text-base sm:text-lg">←</span> عرض الكل</A>
           </div>
-          <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6"><For each={movies().slice(0, 5)}>{(item) => <MediaCard item={item} type="movie" />}</For></div>
+          <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
+            <For each={movies().slice(0, 5)}>
+              {(item: Media) => <MediaCard item={item} type="movie" />}
+            </For>
+          </div>
         </section>
         <section class="mb-8 sm:mb-12 md:mb-16">
           <div class="flex items-center justify-between mb-3 sm:mb-4 md:mb-6 lg:mb-8">
             <h2 class="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white flex items-center gap-1.5 sm:gap-2 md:gap-3"><span class="text-purple-400"><SeriesIcon /></span> مسلسلات</h2>
             <A href="/series" class="text-purple-400 hover:text-purple-300 text-xs sm:text-sm font-medium transition-all flex items-center gap-0.5 sm:gap-1"><span class="text-base sm:text-lg">←</span> عرض الكل</A>
           </div>
-          <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6"><For each={series().slice(0, 5)}>{(item) => <MediaCard item={item} type="series" />}</For></div>
+          <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
+            <For each={series().slice(0, 5)}>
+              {(item: Media) => <MediaCard item={item} type="series" />}
+            </For>
+          </div>
         </section>
       </Suspense>
     </div>
   );
 }
 
-function Movies() {
+function Movies(): JSX.Element {
   const [movies] = createResource<Media[]>(fetchMovies);
   return (
     <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
@@ -727,14 +758,18 @@ function Movies() {
         <div class="p-2 sm:p-3 bg-cyan-400/10 rounded-xl sm:rounded-2xl text-cyan-400"><MovieIcon /></div>
         <div><h1 class="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold text-white">أفلام</h1><p class="text-gray-400 text-xs sm:text-sm md:text-base mt-0.5 sm:mt-1">تصفح مجموعة أفلامك</p></div>
       </div>
-      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={Array(8)}>{() => <CardSkeleton />}</For></div>}>
-        <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={movies()}>{(m) => <MediaCard item={m} type="movie" />}</For></div>
+      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={Array(8)}>{(_, _i) => <CardSkeleton />}</For></div>}>
+        <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6">
+          <For each={movies()}>
+            {(m: Media) => <MediaCard item={m} type="movie" />}
+          </For>
+        </div>
       </Suspense>
     </div>
   );
 }
 
-function Series() {
+function Series(): JSX.Element {
   const [series] = createResource<Media[]>(fetchSeries);
   return (
     <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
@@ -742,22 +777,26 @@ function Series() {
         <div class="p-2 sm:p-3 bg-purple-400/10 rounded-xl sm:rounded-2xl text-purple-400"><SeriesIcon /></div>
         <div><h1 class="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold text-white">مسلسلات</h1><p class="text-gray-400 text-xs sm:text-sm md:text-base mt-0.5 sm:mt-1">تصفح مجموعة مسلسلاتك</p></div>
       </div>
-      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={Array(8)}>{() => <CardSkeleton />}</For></div>}>
-        <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={series()}>{(s) => <MediaCard item={s} type="series" />}</For></div>
+      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={Array(8)}>{(_, _i) => <CardSkeleton />}</For></div>}>
+        <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6">
+          <For each={series()}>
+            {(s: Media) => <MediaCard item={s} type="series" />}
+          </For>
+        </div>
       </Suspense>
     </div>
   );
 }
 
-function Search() {
+function Search(): JSX.Element {
   const [searchParams] = useSearchParams<{ q: string }>();
   const query = () => (searchParams.q || '').toLowerCase().trim();
   const [allMedia] = createResource<Media[]>(fetchAllMedia);
-  const results = () => {
+  const results = createMemo(() => {
     const media = allMedia();
     if (!media || !query()) return [];
     return media.filter(item => item.title.toLowerCase().includes(query()));
-  };
+  });
   return (
     <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
       <div class="mb-4 sm:mb-6 md:mb-8 lg:mb-10">
@@ -766,9 +805,13 @@ function Search() {
           <p class="text-gray-400 text-sm sm:text-base">نتائج البحث عن <span class="text-white font-semibold">"{searchParams.q}"</span></p>
         </Show>
       </div>
-      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={Array(4)}>{() => <CardSkeleton />}</For></div>}>
+      <Suspense fallback={<div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={Array(4)}>{(_, _i) => <CardSkeleton />}</For></div>}>
         <Show when={results().length > 0} fallback={<div class="text-center py-10 sm:py-16 md:py-20 text-gray-400 text-sm sm:text-base md:text-lg">لا يوجد وسائط تطابق بحثك.</div>}>
-          <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6"><For each={results()}>{(item) => <MediaCard item={item} type={item.type} />}</For></div>
+          <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6">
+            <For each={results()}>
+              {(item: Media) => <MediaCard item={item} type={item.type} />}
+            </For>
+          </div>
         </Show>
       </Suspense>
     </div>
@@ -776,7 +819,7 @@ function Search() {
 }
 
 // ---------- Upload Page ----------
-function Upload() {
+function Upload(): JSX.Element {
   const [title, setTitle] = createSignal('');
   const [type, setType] = createSignal<'movie' | 'series'>('series');
   const [description, setDescription] = createSignal('');
@@ -787,16 +830,16 @@ function Upload() {
   const [existingSeriesId, setExistingSeriesId] = createSignal<number | null>(null);
 
   const [allMedia] = createResource<Media[]>(fetchAllMedia);
-  const seriesList = () => allMedia()?.filter(m => m.type === 'series') || [];
+  const seriesList = createMemo(() => allMedia()?.filter(m => m.type === 'series') || []);
 
-  // When switching to "new series", clear the title (fixes issue #2)
+  // Clear title when switching to new series
   createEffect(() => {
     if (type() === 'series' && isNewSeries()) {
       setTitle('');
     }
   });
 
-  // Auto‑fill title when existing series is selected
+  // Auto-fill title when existing series is selected
   createEffect(() => {
     const id = existingSeriesId();
     if (!isNewSeries() && id !== null) {
@@ -812,7 +855,7 @@ function Upload() {
   const [success, setSuccess] = createSignal(false);
   const [error, setError] = createSignal('');
 
-  const handleMultiFileSelect = (e: Event) => {
+  const handleMultiFileSelect = (e: Event): void => {
     const input = e.currentTarget as HTMLInputElement;
     if (!input.files || input.files.length === 0) return;
     const files = Array.from(input.files);
@@ -825,18 +868,18 @@ function Upload() {
     setEpisodes([...episodes(), ...newEpisodes]);
     setNextId(prev => prev + files.length);
     input.value = '';
-    setError(''); // clear any previous error
+    setError('');
   };
 
-  const removeEpisode = (id: number) => {
+  const removeEpisode = (id: number): void => {
     setEpisodes(episodes().filter(ep => ep.id !== id));
   };
 
-  const updateEpisodeTitle = (id: number, newTitle: string) => {
+  const updateEpisodeTitle = (id: number, newTitle: string): void => {
     setEpisodes(episodes().map(ep => ep.id === id ? { ...ep, title: newTitle } : ep));
   };
 
-  const moveEpisode = (id: number, direction: 'up' | 'down') => {
+  const moveEpisode = (id: number, direction: 'up' | 'down'): void => {
     const index = episodes().findIndex(ep => ep.id === id);
     if (index === -1) return;
     const newIndex = direction === 'up' ? index - 1 : index + 1;
@@ -846,23 +889,22 @@ function Upload() {
     setEpisodes(newEpisodes);
   };
 
-  const sortEpisodes = () => {
+  const sortEpisodes = (): void => {
     const sorted = [...episodes()].sort((a, b) => a.file.name.localeCompare(b.file.name));
     setEpisodes(sorted);
   };
 
-  const handleMovieFileChange = (e: Event) => {
+  const handleMovieFileChange = (e: Event): void => {
     const input = e.currentTarget as HTMLInputElement;
     if (input.files && input.files.length > 0) {
       setMovieFile(input.files[0]);
     }
   };
 
-  const handleSubmit = async (e: Event) => {
+  const handleSubmit = async (e: Event): Promise<void> => {
     e.preventDefault();
     setError('');
 
-    // Validation: if series, must have at least one episode
     if (type() === 'series' && episodes().length === 0) {
       setError('يجب إضافة حلقة واحدة على الأقل للمسلسل.');
       return;
@@ -870,23 +912,30 @@ function Upload() {
 
     setLoading(true);
     await delay(1000);
-    const data: any = {
-      title: title(),
-      type: type(),
-      description: description(),
-      ...(type() === 'movie'
-        ? { movieFile: movieFile()?.name || 'No file' }
-        : {
-            isNewSeries: isNewSeries(),
-            existingSeriesId: existingSeriesId(),
-            episodes: episodes().map((ep, idx) => ({
-              number: idx + 1,
-              title: ep.title,
-              fileName: ep.file.name,
-            }))
-          }
-      )
-    };
+
+    let data: UploadData;
+    if (type() === 'movie') {
+      data = {
+        title: title(),
+        type: 'movie',
+        description: description(),
+        movieFile: movieFile()?.name || 'No file',
+      };
+    } else {
+      data = {
+        title: title(),
+        type: 'series',
+        description: description(),
+        isNewSeries: isNewSeries(),
+        existingSeriesId: existingSeriesId(),
+        episodes: episodes().map((ep, idx) => ({
+          number: idx + 1,
+          title: ep.title,
+          fileName: ep.file.name,
+        })),
+      };
+    }
+
     console.log('Upload data:', data);
     setLoading(false);
     setSuccess(true);
@@ -941,7 +990,7 @@ function Upload() {
               <input
                 type="text"
                 value={title()}
-                onInput={(e) => setTitle(e.currentTarget.value)}
+                onInput={(e: Event) => setTitle((e.currentTarget as HTMLInputElement).value)}
                 required
                 placeholder="مثال: Breaking Bad"
                 class={`w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-lg sm:rounded-xl py-2 sm:py-3 px-3 sm:px-4 text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/20 transition ${
@@ -954,7 +1003,7 @@ function Upload() {
               <label class="block text-xs sm:text-sm font-medium text-gray-300 mb-0.5 sm:mb-1">الوصف (اختياري)</label>
               <textarea
                 value={description()}
-                onInput={(e) => setDescription(e.currentTarget.value)}
+                onInput={(e: Event) => setDescription((e.currentTarget as HTMLInputElement).value)}
                 rows={3}
                 placeholder="وصف مختصر (اختياري)..."
                 class="w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-lg sm:rounded-xl py-2 sm:py-3 px-3 sm:px-4 text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/20 transition resize-none"
@@ -993,12 +1042,12 @@ function Upload() {
                   <label class="block text-xs sm:text-sm font-medium text-gray-300 mb-0.5 sm:mb-1">اختر المسلسل الموجود</label>
                   <select
                     value={existingSeriesId() || ''}
-                    onChange={(e) => setExistingSeriesId(Number(e.currentTarget.value) || null)}
+                    onChange={(e: Event) => setExistingSeriesId(Number((e.currentTarget as HTMLSelectElement).value) || null)}
                     class="w-full bg-white/10 backdrop-blur-md text-white rounded-lg sm:rounded-xl py-2 sm:py-3 px-3 sm:px-4 text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-cyan-400"
                   >
                     <option value="" class="bg-gray-800">-- اختر --</option>
                     <For each={seriesList()}>
-                      {(s) => <option value={s.id} class="bg-gray-800">{s.title}</option>}
+                      {(s: Media) => <option value={s.id} class="bg-gray-800">{s.title}</option>}
                     </For>
                   </select>
                 </div>
@@ -1069,7 +1118,7 @@ function Upload() {
               }>
                 <div class="space-y-2 sm:space-y-3 max-h-72 sm:max-h-96 overflow-y-auto p-0.5 sm:p-1">
                   <For each={episodes()}>
-                    {(ep, index) => (
+                    {(ep: { id: number; file: File; title: string }, index) => (
                       <div class="bg-white/5 backdrop-blur-sm rounded-lg sm:rounded-xl border border-white/10 p-2 sm:p-3 md:p-4 flex flex-col sm:flex-row gap-2 sm:gap-3 items-start">
                         <div class="flex-1 grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-1.5 sm:gap-3 w-full">
                           <div>
@@ -1081,7 +1130,7 @@ function Upload() {
                             <input
                               type="text"
                               value={ep.title}
-                              onInput={(e) => updateEpisodeTitle(ep.id, e.currentTarget.value)}
+                              onInput={(e: Event) => updateEpisodeTitle(ep.id, (e.currentTarget as HTMLInputElement).value)}
                               placeholder="عنوان الحلقة"
                               class="w-full bg-white/10 text-white rounded-lg py-1.5 sm:py-2 px-2 sm:px-3 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400"
                             />
@@ -1130,7 +1179,6 @@ function Upload() {
             </div>
           </Show>
 
-          {/* Error message */}
           <Show when={error()}>
             <div class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm text-center">
               {error()}
@@ -1162,7 +1210,7 @@ function Upload() {
 }
 
 // ---------- Settings Placeholder ----------
-function Settings() {
+function Settings(): JSX.Element {
   return (
     <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-16">
       <div class="text-center text-white">
@@ -1174,7 +1222,7 @@ function Settings() {
 }
 
 // ---------- App Entry ----------
-function App() {
+function App(): JSX.Element {
   createEffect(() => {
     document.documentElement.dir = 'rtl';
     document.documentElement.lang = 'ar';
