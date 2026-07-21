@@ -10,7 +10,7 @@ use axum::{
     Router,
     extract::Request,
     http::{
-        HeaderValue, Method, StatusCode,
+        HeaderName, HeaderValue, Method, StatusCode,
         header::{ACCEPT, CONTENT_TYPE},
     },
     middleware::{self, Next},
@@ -25,7 +25,7 @@ use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
-use tracing::{Level, info};
+use tracing::{Level, info, instrument, warn};
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 use turso::Database;
 
@@ -60,12 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{host}:{port}").parse::<SocketAddr>()?
     };
     let listener = TcpListener::bind(&addr).await?;
-    info!("listening at {}", addr);
 
     let router = Router::new()
         .nest("/api", api_handler(Arc::clone(&state)))
         .merge(static_file_handler());
 
+    info!("listening at http://{}", addr);
     axum::serve(
         listener,
         router
@@ -83,23 +83,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn cors_layer() -> Result<CorsLayer, Box<dyn std::error::Error>> {
+    const METHODS: [Method; 7] = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+        Method::HEAD,
+        Method::PATCH,
+    ];
+    const HEADERS: [HeaderName; 2] = [ACCEPT, CONTENT_TYPE];
+    const SECONDS: u64 = 60 * 60 * 24;
     let res = CorsLayer::new()
-        .allow_headers([ACCEPT, CONTENT_TYPE])
-        .max_age(Duration::from_secs(86400))
+        .allow_headers(HEADERS)
+        .max_age(Duration::from_secs(SECONDS))
         .allow_origin(
             std::env::var("CORS_ORIGIN")
                 .unwrap_or_else(|_| "*".to_string())
                 .parse::<HeaderValue>()?,
         )
-        .allow_methods(vec![
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-            Method::OPTIONS,
-            Method::HEAD,
-            Method::PATCH,
-        ]);
+        .allow_methods(METHODS);
     Ok(res)
 }
 
@@ -109,10 +112,17 @@ fn api_handler(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+#[instrument]
 fn static_file_handler() -> Router {
-    let Ok(public_dir) = env::var("PUBLIC_DIR")
-        .unwrap_or("Downloads".to_string())
-        .parse::<PathBuf>();
+    let Ok(public_dir) = match env::var("PUBLIC_DIR") {
+        Ok(v) => v,
+        Err(err) => {
+            tracing::debug!("Error : {err}");
+            warn!("PUBLIC_DIR var was not provided : we will default to Downloads directory");
+            "Downloads".to_string()
+        }
+    }
+    .parse::<PathBuf>();
     let mut home = home_dir().expect("home directory can not be found!!!");
     home.push(public_dir);
     let public_dir = home.canonicalize().expect("public dir path does not exist");
