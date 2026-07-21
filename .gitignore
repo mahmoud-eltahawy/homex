@@ -1,0 +1,5 @@
+backend/target
+backend/homex_data.db-wal
+backend/homex_data.db
+homex/node_modules
+homex/dist
