@@ -1,6 +1,6 @@
-// app.tsx – Fully responsive, refined for all screen sizes
+// app.tsx – Fully responsive, polished, bug‑free
 import { Router, Route, A, useParams, useNavigate, useSearchParams } from '@solidjs/router';
-import { createResource, createSignal, createEffect, Suspense, For, Show, onMount } from 'solid-js';
+import { createResource, createSignal, createEffect, Suspense, For, Show, onMount, onCleanup } from 'solid-js';
 
 // ---------- Types ----------
 interface Episode {
@@ -355,16 +355,52 @@ function CardSkeleton() {
   );
 }
 
-// ---------- Video Player Component (LTR layout) ----------
+// ---------- Video Player Component (LTR, with touch‑friendly controls) ----------
 function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void }) {
   let videoRef: HTMLVideoElement | undefined;
+  let controlsTimeout: number | undefined;
+
   const [playing, setPlaying] = createSignal(false);
   const [currentTime, setCurrentTime] = createSignal(0);
   const [duration, setDuration] = createSignal(0);
   const [volume, setVolume] = createSignal(1);
   const [muted, setMuted] = createSignal(false);
   const [fullscreen, setFullscreen] = createSignal(false);
+  const [controlsVisible, setControlsVisible] = createSignal(true);
 
+  // Auto‑hide controls after 3 seconds of inactivity
+  const startHideTimer = () => {
+    if (controlsTimeout) clearTimeout(controlsTimeout);
+    controlsTimeout = setTimeout(() => {
+      setControlsVisible(false);
+    }, 3000);
+  };
+
+  const showControls = () => {
+    setControlsVisible(true);
+    startHideTimer();
+  };
+
+  const toggleControls = () => {
+    if (controlsVisible()) {
+      setControlsVisible(false);
+      if (controlsTimeout) clearTimeout(controlsTimeout);
+    } else {
+      showControls();
+    }
+  };
+
+  // Reset timer on any user interaction
+  const handleUserInteraction = () => {
+    showControls();
+  };
+
+  // Cleanup timer on unmount
+  onCleanup(() => {
+    if (controlsTimeout) clearTimeout(controlsTimeout);
+  });
+
+  // Video event handlers
   const handleLoadedMetadata = () => {
     if (videoRef) {
       setDuration(videoRef.duration);
@@ -385,6 +421,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
       videoRef.play();
     }
     setPlaying(!playing());
+    handleUserInteraction();
   };
 
   const handleSeek = (e: Event) => {
@@ -394,6 +431,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
       videoRef.currentTime = val;
       setCurrentTime(val);
     }
+    handleUserInteraction();
   };
 
   const handleVolumeChange = (e: Event) => {
@@ -407,6 +445,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
         setMuted(val === 0);
       }
     }
+    handleUserInteraction();
   };
 
   const toggleMute = () => {
@@ -419,6 +458,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
       videoRef.muted = true;
       setMuted(true);
     }
+    handleUserInteraction();
   };
 
   const toggleFullscreen = () => {
@@ -430,6 +470,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
       document.exitFullscreen?.();
       setFullscreen(false);
     }
+    handleUserInteraction();
   };
 
   onMount(() => {
@@ -437,7 +478,12 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
       setFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    // Start with controls visible
+    showControls();
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      if (controlsTimeout) clearTimeout(controlsTimeout);
+    };
   });
 
   const formatTime = (time: number) => {
@@ -460,7 +506,7 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
       <video
         ref={videoRef}
         src={props.src}
-        class="w-full h-auto max-h-[50vh] sm:max-h-[60vh] md:max-h-[70vh] object-contain"
+        class="w-full h-auto max-h-[50vh] sm:max-h-[60vh] md:max-h-[70vh] object-contain cursor-pointer"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onPlay={() => setPlaying(true)}
@@ -469,10 +515,25 @@ function VideoPlayer(props: { src: string; title?: string; onEnded?: () => void 
           setPlaying(false);
           if (props.onEnded) props.onEnded();
         }}
-        onClick={togglePlay}
+        onClick={toggleControls}
         playsinline
       />
-      <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-2 sm:p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+      {/* Controls overlay */}
+      <div
+        class={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-2 sm:p-4 transition-opacity duration-300 ${
+          controlsVisible() ? 'opacity-100' : 'opacity-0'
+        }`}
+        onMouseEnter={showControls}
+        onMouseLeave={() => {
+          // Delay hiding a bit to allow moving to controls
+          if (controlsTimeout) clearTimeout(controlsTimeout);
+          controlsTimeout = setTimeout(() => {
+            setControlsVisible(false);
+          }, 1500);
+        }}
+        // Touch: keep visible when interacting
+        onTouchStart={showControls}
+      >
         <div class="flex flex-col gap-1 sm:gap-2">
           <div class="flex items-center gap-1 sm:gap-2">
             <span class="text-white text-[10px] sm:text-xs font-mono">{formatTime(currentTime())}</span>
@@ -728,6 +789,14 @@ function Upload() {
   const [allMedia] = createResource<Media[]>(fetchAllMedia);
   const seriesList = () => allMedia()?.filter(m => m.type === 'series') || [];
 
+  // When switching to "new series", clear the title (fixes issue #2)
+  createEffect(() => {
+    if (type() === 'series' && isNewSeries()) {
+      setTitle('');
+    }
+  });
+
+  // Auto‑fill title when existing series is selected
   createEffect(() => {
     const id = existingSeriesId();
     if (!isNewSeries() && id !== null) {
@@ -741,6 +810,7 @@ function Upload() {
 
   const [loading, setLoading] = createSignal(false);
   const [success, setSuccess] = createSignal(false);
+  const [error, setError] = createSignal('');
 
   const handleMultiFileSelect = (e: Event) => {
     const input = e.currentTarget as HTMLInputElement;
@@ -755,6 +825,7 @@ function Upload() {
     setEpisodes([...episodes(), ...newEpisodes]);
     setNextId(prev => prev + files.length);
     input.value = '';
+    setError(''); // clear any previous error
   };
 
   const removeEpisode = (id: number) => {
@@ -789,6 +860,14 @@ function Upload() {
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
+    setError('');
+
+    // Validation: if series, must have at least one episode
+    if (type() === 'series' && episodes().length === 0) {
+      setError('يجب إضافة حلقة واحدة على الأقل للمسلسل.');
+      return;
+    }
+
     setLoading(true);
     await delay(1000);
     const data: any = {
@@ -1051,6 +1130,13 @@ function Upload() {
             </div>
           </Show>
 
+          {/* Error message */}
+          <Show when={error()}>
+            <div class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm text-center">
+              {error()}
+            </div>
+          </Show>
+
           <button
             type="submit"
             disabled={loading()}
@@ -1075,6 +1161,18 @@ function Upload() {
   );
 }
 
+// ---------- Settings Placeholder ----------
+function Settings() {
+  return (
+    <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-16">
+      <div class="text-center text-white">
+        <h1 class="text-3xl font-bold mb-4">الإعدادات</h1>
+        <p class="text-gray-400">سيتم إضافة صفحة الإعدادات قريباً.</p>
+      </div>
+    </div>
+  );
+}
+
 // ---------- App Entry ----------
 function App() {
   createEffect(() => {
@@ -1089,6 +1187,7 @@ function App() {
         <Route path="/series" component={Series} />
         <Route path="/upload" component={Upload} />
         <Route path="/search" component={Search} />
+        <Route path="/settings" component={Settings} />
         <Route path="/:type/:id" component={Detail} />
       </Route>
     </Router>
