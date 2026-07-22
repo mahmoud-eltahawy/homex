@@ -1,5 +1,4 @@
 use leptos::prelude::*;
-use leptos::wasm_bindgen::closure::Closure;
 use leptos::wasm_bindgen::JsCast;
 use leptos::{either::Either, ev::fullscreenchange};
 use leptos_use::{use_document, use_event_listener, use_timeout_fn};
@@ -183,7 +182,6 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
         <VideoControls
             controls_visible=controls_visible
             show_controls=show_controls
-            controls_timeout=controls_timeout
             current_time=current_time
             duration=duration
             playing=playing
@@ -195,6 +193,7 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
             toggle_fullscreen=toggle_fullscreen
             handle_seek=handle_seek
             handle_volume=handle_volume
+            start_hide_timer=start_hide_timer
         />
     </div>
     }
@@ -219,7 +218,6 @@ fn VideoElement(
 pub fn VideoControls(
     controls_visible: RwSignal<bool>,
     show_controls: impl Fn() + Clone + 'static,
-    controls_timeout: RwSignal<Option<i32>>,
     current_time: RwSignal<f64>,
     duration: RwSignal<f64>,
     playing: RwSignal<bool>,
@@ -231,10 +229,22 @@ pub fn VideoControls(
     toggle_fullscreen: impl Fn(MouseEvent) + 'static,
     handle_seek: impl Fn(web_sys::Event) + 'static,
     handle_volume: impl Fn(web_sys::Event) + 'static,
+    start_hide_timer: impl Fn() + 'static + Clone,
 ) -> impl IntoView {
-    view! { <div class=move || format!("absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-5 transition-opacity duration-300 {}", if controls_visible.get() { "opacity-100" } else { "opacity-0" })
+    let class = move || {
+        format!("absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-5 transition-opacity duration-300 {}", if controls_visible.get() { "opacity-100" } else { "opacity-0" })
+    };
+    let on_mouse_leave = {
+        let start = start_hide_timer.clone();
+        move |_| {
+            start();
+        }
+    };
+    view! {
+    <div
+        class=class
         on:mouseenter={let show = show_controls.clone(); move |_| show()}
-        on:mouseleave={ let controls_timeout = controls_timeout.clone(); move |_| { if let Some(id) = controls_timeout.get() { let _ = web_sys::window().unwrap().clear_timeout_with_handle(id); } let window = web_sys::window().unwrap(); let cb = Closure::once_into_js(move || controls_visible.set(false)); let handle = window.set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 1500).unwrap(); controls_timeout.set(Some(handle)); }}
+        on:mouseleave={on_mouse_leave}
         on:touchstart={let show = show_controls.clone(); move |_| show()}>
         <div class="flex flex-col gap-2">
             <SeekBar
@@ -342,8 +352,15 @@ pub fn ControlButtons(
 
 fn format_time(time: f64) -> String {
     if time.is_nan() {
-        "00:00".into()
+        return "00:00".into();
+    }
+    let t = time as u64;
+    let h = t / 3600;
+    let m = (t % 3600) / 60;
+    let s = t % 60;
+    if h > 0 {
+        format!("{:02}:{:02}:{:02}", h, m, s)
     } else {
-        format!("{:02}:{:02}", (time / 60.0) as u32, (time % 60.0) as u32)
+        format!("{:02}:{:02}", m, s)
     }
 }
