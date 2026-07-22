@@ -20,6 +20,7 @@ gloo = { version = "0.12.0"}
 gloo-timers = { version = "0.4.0",features = ["futures"]}
 serde = { version = "1.0.229", features = ["derive"] }
 tower-http = { version = "0.7.0",features = ["fs"], optional = true }
+leptos-use = "0.19"
 
 [features]
 hydrate = [
@@ -35,6 +36,7 @@ ssr = [
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",
+    "leptos-use/ssr", 
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode
