@@ -1351,8 +1351,7 @@ fn EpisodeItem(episodes: RwSignal<Vec<EpUpload>>, ep_id: u32, index: usize) -> i
 
 #[component]
 fn EpisodesToolbar(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) -> impl IntoView {
-    let sort =
-        move |_| episodes.update(|eps| eps.sort_by(|a, b| a.file.name().cmp(&b.file.name())));
+    let sort = move |_| episodes.update(|eps| eps.sort_by_key(|x| x.file.name()));
     let file_handler = move |ev: web_sys::Event| {
         if let Some(input) = ev
             .target()
@@ -1371,7 +1370,7 @@ fn EpisodesToolbar(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) ->
                         }
                     })
                     .collect();
-                new_eps.sort_by(|a, b| a.file.name().cmp(&b.file.name()));
+                new_eps.sort_by_key(|x| x.file.name());
                 episodes.update(|eps| eps.extend(new_eps));
                 next_id.update(|id| *id += files.length());
                 input.set_value("");

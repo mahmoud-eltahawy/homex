@@ -55,105 +55,84 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
             }
         }
     };
-    let handle_loaded_metadata = {
-        let video_ref = video_ref.clone();
-        move |_| {
-            if let Some(video) = video_ref.get() {
-                duration.set(video.duration());
+    let handle_loaded_metadata = move |_| {
+        if let Some(video) = video_ref.get() {
+            duration.set(video.duration());
+        }
+    };
+    let handle_time_update = move |_| {
+        if let Some(video) = video_ref.get() {
+            current_time.set(video.current_time());
+        }
+    };
+    let toggle_play = move |_| {
+        if let Some(video) = video_ref.get() {
+            if playing.get() {
+                video.pause().ok();
+            } else {
+                let _ = video.play();
             }
         }
     };
-    let handle_time_update = {
-        let video_ref = video_ref.clone();
-        move |_| {
-            if let Some(video) = video_ref.get() {
-                current_time.set(video.current_time());
-            }
-        }
-    };
-    let toggle_play = {
-        let video_ref = video_ref.clone();
-        move |_| {
-            if let Some(video) = video_ref.get() {
-                if playing.get() {
-                    video.pause().ok();
-                } else {
-                    let _ = video.play();
+    let handle_seek = move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        {
+            if let Ok(val) = input.value().parse::<f64>() {
+                if let Some(video) = video_ref.get() {
+                    video.set_current_time(val);
+                    current_time.set(val);
                 }
             }
         }
     };
-    let handle_seek = {
-        let video_ref = video_ref.clone();
-        move |ev: web_sys::Event| {
-            if let Some(input) = ev
-                .target()
-                .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-            {
-                if let Ok(val) = input.value().parse::<f64>() {
-                    if let Some(video) = video_ref.get() {
-                        video.set_current_time(val);
-                        current_time.set(val);
+    let handle_volume = move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        {
+            if let Ok(val) = input.value().parse::<f64>() {
+                if let Some(video) = video_ref.get() {
+                    video.set_volume(val);
+                    video.set_muted(val == 0.0);
+                    volume.set(val);
+                    muted.set(val == 0.0);
+                    if val > 0.0 {
+                        last_volume.set(val);
                     }
                 }
             }
         }
     };
-    let handle_volume = {
-        let video_ref = video_ref.clone();
-        move |ev: web_sys::Event| {
-            if let Some(input) = ev
-                .target()
-                .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-            {
-                if let Ok(val) = input.value().parse::<f64>() {
-                    if let Some(video) = video_ref.get() {
-                        video.set_volume(val);
-                        video.set_muted(val == 0.0);
-                        volume.set(val);
-                        muted.set(val == 0.0);
-                        if val > 0.0 {
-                            last_volume.set(val);
-                        }
-                    }
-                }
+    let toggle_mute = move |_| {
+        if let Some(video) = video_ref.get() {
+            if muted.get() {
+                video.set_muted(false);
+                let restore = last_volume.get().max(0.1);
+                video.set_volume(restore);
+                volume.set(restore);
+                muted.set(false);
+            } else {
+                last_volume.set(volume.get().max(0.1));
+                video.set_muted(true);
+                muted.set(true);
             }
         }
     };
-    let toggle_mute = {
-        let video_ref = video_ref.clone();
-        move |_| {
-            if let Some(video) = video_ref.get() {
-                if muted.get() {
-                    video.set_muted(false);
-                    let restore = last_volume.get().max(0.1);
-                    video.set_volume(restore);
-                    volume.set(restore);
-                    muted.set(false);
-                } else {
-                    last_volume.set(volume.get().max(0.1));
-                    video.set_muted(true);
-                    muted.set(true);
-                }
-            }
-        }
-    };
-    let toggle_fullscreen = {
-        let video_ref = video_ref.clone();
-        move |_| {
-            if let Some(video) = video_ref.get() {
-                if document().fullscreen_element().is_none() {
-                    let _ = video.request_fullscreen();
-                } else {
-                    let _ = document().exit_fullscreen();
-                }
+    let toggle_fullscreen = move |_| {
+        if let Some(video) = video_ref.get() {
+            if document().fullscreen_element().is_none() {
+                let _ = video.request_fullscreen();
+            } else {
+                document().exit_fullscreen();
             }
         }
     };
     Effect::new(move || {
         if let Some(video) = video_ref.get() {
             video.set_src(&src.get());
-            let _ = video.load();
+            video.load();
             playing.set(false);
             current_time.set(0.0);
             duration.set(0.0);

@@ -210,7 +210,7 @@ pub(crate) fn EpisodeCard(
         selected_episode
             .get()
             .as_ref()
-            .map_or(false, |s| s.id == ep.id)
+            .is_some_and(|s| s.id == ep.id)
     };
     let class = move || {
         format!(

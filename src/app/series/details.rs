@@ -27,7 +27,7 @@ impl LazyRoute for SeriesDetailPage {
         let selected_season = RwSignal::new(1);
 
         Self {
-            series: Resource::new(move || id(), |id| fetch_series_detail(id)),
+            series: Resource::new(id, fetch_series_detail),
             episodes: Resource::new(
                 move || (id(), selected_season.get()),
                 |(series_id, season)| fetch_season(series_id, season),
