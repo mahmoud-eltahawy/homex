@@ -9,7 +9,7 @@ use leptos_router::{
     path,
 };
 use serde::{Deserialize, Serialize};
-use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement, MouseEvent};
+use web_sys::{HtmlInputElement, HtmlSelectElement, MouseEvent};
 
 // ---------- MOCK DATA ----------
 
@@ -705,11 +705,6 @@ fn MediaTypeBadge(media_type: MediaType) -> impl IntoView {
 fn MediaCardInfo(title: String, year: Option<u32>, size: String) -> impl IntoView {
     view! { <div class="p-4 flex flex-col gap-1"><h3 class="text-white font-semibold truncate text-sm">{title}</h3><div class="flex items-center justify-between text-gray-500 text-xs"><span class="flex items-center gap-1">{year.map(|y| format!("{} · ", y))}{size}</span><span class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">"← التفاصيل"</span></div></div> }
 }
-#[component]
-fn CardSkeleton() -> impl IntoView {
-    view! { <div class="animate-pulse rounded-2xl bg-[#1a1a24]/60 border border-white/5 overflow-hidden shadow-xl"><div class="aspect-[2/3] bg-gradient-to-b from-[#2a2a3a] to-[#1a1a24]"></div><div class="p-4 space-y-2"><div class="h-3 bg-[#2a2a3a] rounded w-3/4"></div><div class="h-2 bg-[#2a2a3a] rounded w-1/2"></div></div></div> }
-}
-
 // ---------- VIDEO PLAYER ----------
 #[component]
 fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>) -> impl IntoView {
@@ -1323,7 +1318,7 @@ fn HomeHero() -> impl IntoView {
 fn MediaSection(
     title: String,
     icon: impl IntoView,
-    items: Signal<Vec<Media>>,
+    items: Vec<Media>,
     kind: MediaType,
 ) -> impl IntoView {
     let navigate = use_navigate();
@@ -1361,13 +1356,13 @@ fn MediaSection(
         <div
             class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6"
         >
-            <For
-                each={move || items.get().into_iter().take(5).collect::<Vec<_>>()}
-                key=|m| m.id
-                let:item
-            >
-                <MediaCard item=item.clone() kind=kind.clone()/>
-            </For>
+            {
+             items.into_iter().take(5).map(|item| {
+                 view!{
+                    <MediaCard item=item.clone() kind=kind.clone()/>
+                 }
+             }).collect_view()
+            }
         </div>
     </section>
     }
@@ -1376,26 +1371,12 @@ fn MediaSection(
 fn Home() -> impl IntoView {
     let media = Resource::new(|| (), |_| async move { fetch_all_media().await });
 
-    let fallback = || {
-        view! {
-            <div
-                class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6"
-            >
-                <For
-                    each={move || (0..5).collect::<Vec<_>>()}
-                    key=|i| *i
-                    let:_
-                >{CardSkeleton}
-                </For>
-            </div>
-        }
-    };
     view! {
     <div
         class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
     >
         <HomeHero/>
-        <Suspense fallback=fallback>
+        <Suspense fallback=CardsLoading>
             {move || {
                 let (movies,series) : (Vec<_>,Vec<_>) = media
                     .get()
@@ -1407,13 +1388,13 @@ fn Home() -> impl IntoView {
                     <MediaSection
                         title="أفلام".to_string()
                         icon=MovieIcon()
-                        items=Signal::derive(move || movies.clone())
+                        items=movies.clone()
                         kind=MediaType::Movie
                     />
                     <MediaSection
                         title="مسلسلات".to_string()
                         icon=SeriesIcon()
-                        items=Signal::derive(move || series.clone())
+                        items=series.clone()
                         kind=MediaType::Series
                     />
                 }
@@ -1425,17 +1406,86 @@ fn Home() -> impl IntoView {
 // ---------- MOVIES / SERIES ----------
 #[component]
 fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
-    view! { <div class="flex items-center gap-4 mb-6 md:mb-8"><div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div><div><h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1><p class="text-gray-400 text-sm md:text-base mt-0.5">تصفح مجموعة {title}ك</p></div></div> }
+    view! {
+    <div
+        class="flex items-center gap-4 mb-6 md:mb-8"><div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400"
+    >
+            {icon}
+        </div>
+        <div>
+            <h1
+                class="text-3xl sm:text-4xl md:text-5xl font-black text-white"
+            >
+                {title.clone()}
+            </h1>
+            <p
+                class="text-gray-400 text-sm md:text-base mt-0.5"
+            >
+                "تصفح مجموعة"
+                {title}"ك"
+            </p>
+        </div>
+    </div>
+    }
+}
+
+#[component]
+fn CardSkeleton() -> impl IntoView {
+    view! {
+    <div
+        class="animate-pulse rounded-2xl bg-[#1a1a24]/60 border border-white/5 overflow-hidden shadow-xl"
+    >
+        <div
+            class="aspect-[2/3] bg-gradient-to-b from-[#2a2a3a] to-[#1a1a24]"
+        ></div>
+        <div
+            class="p-4 space-y-2"><div class="h-3 bg-[#2a2a3a] rounded w-3/4"
+        ></div>
+        <div
+            class="h-2 bg-[#2a2a3a] rounded w-1/2"
+        ></div>
+        </div>
+    </div>
+    }
+}
+
+#[component]
+fn CardsLoading() -> impl IntoView {
+    let cards = (0..8).map(|_| CardSkeleton()).collect_view();
+    view! {
+        <div
+            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"
+        >
+            {cards}
+        </div>
+    }
 }
 #[component]
 fn Movies() -> impl IntoView {
     let movies = Resource::new(|| (), |_| async move { fetch_movies().await });
-    view! { <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <MediaPageHeader title="أفلام".to_string() icon=MovieIcon()/>
-        <Suspense fallback=|| view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"><For each={move || (0..8).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For></div> }>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                <For each={move || movies.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
-                    <MediaCard item=item.clone() kind=MediaType::Movie/>
+
+    view! {
+    <div
+        class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+    >
+        <MediaPageHeader
+            title="أفلام".to_string()
+            icon=MovieIcon()
+        />
+        <Suspense
+            fallback=CardsLoading>
+            <div
+                class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"
+            >
+                <For
+                    each={move || movies.get().and_then(|x| x.ok()).unwrap_or_default()}
+                    key=|m| m.id
+                    let:item
+                >
+                    <MediaCard
+                        item=item.clone()
+                        kind=MediaType::Movie
+                    />
                 </For>
             </div>
         </Suspense>
@@ -1444,9 +1494,10 @@ fn Movies() -> impl IntoView {
 #[component]
 fn Series() -> impl IntoView {
     let series = Resource::new(|| (), |_| async move { fetch_series().await });
-    view! { <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    view! {
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <MediaPageHeader title="مسلسلات".to_string() icon=SeriesIcon()/>
-        <Suspense fallback=|| view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"><For each={move || (0..8).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For></div> }>
+        <Suspense fallback=CardsLoading>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
                 <For each={move || series.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
                     <MediaCard item=item.clone() kind=MediaType::Series/>
@@ -1457,6 +1508,26 @@ fn Series() -> impl IntoView {
 }
 
 // ---------- SEARCH PAGE ----------
+
+#[component]
+fn SearchHeaderResults() -> impl IntoView {
+    let query_map = use_query_map();
+    let q = query_map.with(|m| m.get("q").map(|s| s.to_string()).unwrap_or_default());
+
+    view! {
+        <p
+            class="text-gray-400 text-sm sm:text-base"
+        >
+            "نتائج البحث عن"
+            <span
+                class="text-white font-semibold"
+            >
+                {format!("\"{}\"", q)}
+            </span>
+        </p>
+    }
+}
+
 #[component]
 fn SearchHeader() -> impl IntoView {
     let query_map = use_query_map();
@@ -1469,13 +1540,40 @@ fn SearchHeader() -> impl IntoView {
                 .to_lowercase()
         })
     };
-    view! { <div class="mb-6 md:mb-8">
-        <h1 class="text-3xl sm:text-4xl font-black text-white mb-1">نتائج البحث</h1>
-        {move || if query().is_empty() { Either::Left(view! { <p class="text-gray-400 text-sm sm:text-base">أدخل كلمة بحث للعثور على الوسائط.</p> }) }
-            else { let q = query_map.with(|m| m.get("q").map(|s| s.to_string()).unwrap_or_default()); Either::Right(view! { <p class="text-gray-400 text-sm sm:text-base">نتائج البحث عن <span class="text-white font-semibold">{format!("\"{}\"", q)}</span></p> }) }
+
+    view! {
+    <div class="mb-6 md:mb-8">
+        <h1
+            class="text-3xl sm:text-4xl font-black text-white mb-1"
+        >
+            "نتائج البحث"
+        </h1>
+        {
+            move || if query().is_empty() {
+                 Either::Left(view! {
+                     <p
+                         class="text-gray-400 text-sm sm:text-base">
+                         "أدخل كلمة بحث للعثور على الوسائط."
+                     </p>
+                 })
+             } else {
+                 Either::Right(SearchHeaderResults())
+              }
         }
     </div> }
 }
+
+#[component]
+fn NoSearchResults() -> impl IntoView {
+    view! {
+    <div
+        class="text-center py-16 text-gray-400 text-sm sm:text-base"
+    >
+        "لا يوجد وسائط تطابق بحثك."
+    </div>
+    }
+}
+
 #[component]
 fn Search() -> impl IntoView {
     let query_map = use_query_map();
@@ -1507,14 +1605,24 @@ fn Search() -> impl IntoView {
     });
     view! { <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SearchHeader/>
-        <Suspense fallback=|| view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"><For each={move || (0..4).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For></div> }>
-            {move || if results.get().is_empty() { Either::Left(view! { <div class="text-center py-16 text-gray-400 text-sm sm:text-base">لا يوجد وسائط تطابق بحثك.</div> }) }
-                else { Either::Right(view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                    <For each={move || results.get()} key=|m| m.id let:item>
-                        <MediaCard item=item.clone() kind=item.media_type/>
-                    </For>
-                </div> }) }
-            }
+        <Suspense fallback=CardsLoading>
+            {move || if results.get().is_empty() {
+                Either::Left(NoSearchResults())
+            } else {
+                Either::Right(view! {
+                    <div
+                        class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"
+                    >
+                        <For
+                            each={move || results.get()}
+                            key=|m| m.id
+                            let:item
+                        >
+                            <MediaCard item=item.clone() kind=item.media_type/>
+                        </For>
+                    </div>
+                })
+            }}
         </Suspense>
     </div> }
 }
@@ -1529,37 +1637,110 @@ struct EpUpload {
 
 #[component]
 fn UploadHeader() -> impl IntoView {
-    view! { <div class="mb-8 md:mb-10 text-center"><div class="inline-flex items-center justify-center p-4 bg-cyan-400/10 rounded-3xl mb-4"><span class="text-cyan-400">{UploadIcon()}</span></div><h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">رفع وسائط جديدة</h1><p class="text-gray-400 text-sm sm:text-base mt-2">"أضف فيلمًا أو مسلسلًا إلى مكتبتك المنزلية"</p></div> }
+    view! {
+    <div
+        class="mb-8 md:mb-10 text-center"
+    >
+        <div
+            class="inline-flex items-center justify-center p-4 bg-cyan-400/10 rounded-3xl mb-4"
+        >
+            <span
+                class="text-cyan-400"
+            >
+                <UploadIcon/>
+            </span>
+        </div>
+        <h1
+            class="text-3xl sm:text-4xl md:text-5xl font-black text-white"
+        >
+            "رفع وسائط جديدة"
+        </h1>
+        <p
+            class="text-gray-400 text-sm sm:text-base mt-2"
+        >
+            "أضف فيلمًا أو مسلسلًا إلى مكتبتك المنزلية"
+        </p>
+    </div>
+    }
 }
 #[component]
-fn TypeSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
-    view! { <div class="flex justify-center"><div class="inline-flex bg-white/5 rounded-2xl p-1" role="group">
-        <button type="button" on:click=move |_| media_type.set(MediaType::Series) class=move || format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Series) { "bg-purple-500/20 text-purple-400 shadow-lg shadow-purple-500/10" } else { "text-gray-400 hover:text-white" })>{SeriesIcon()} "مسلسل"</button>
-        <button type="button" on:click=move |_| media_type.set(MediaType::Movie) class=move || format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Movie) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })>{MovieIcon()} "فيلم"</button>
-    </div></div> }
+fn MediaKindSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
+    let class1 = move || {
+        format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Series) { "bg-purple-500/20 text-purple-400 shadow-lg shadow-purple-500/10" } else { "text-gray-400 hover:text-white" })
+    };
+    let class2 = move || {
+        format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Movie) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })
+    };
+    view! {
+        <div
+            class="flex justify-center"
+        >
+            <div
+                class="inline-flex bg-white/5 rounded-2xl p-1"
+                role="group"
+            >
+                <button
+                    type="button"
+                    on:click=move |_|
+                    media_type.set(MediaType::Series)
+                    class=class1
+                >
+                    <SeriesIcon/>
+                    "مسلسل"
+                </button>
+                <button
+                    type="button"
+                    on:click=move |_| media_type.set(MediaType::Movie)
+                    class=class2
+                >
+                    <MovieIcon/>
+                    "فيلم"
+                </button>
+            </div>
+        </div>
+    }
 }
 #[component]
 fn TitleInput(title: RwSignal<String>, disabled: Signal<bool>) -> impl IntoView {
-    view! { <div><label class="block text-sm font-medium text-gray-300 mb-1.5">العنوان *</label><input type="text" prop:value=title on:input=move |ev| set_title_target(ev, title) required placeholder="مثال: Breaking Bad" class=move || format!("w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition {}", if disabled.get() { "opacity-60 cursor-not-allowed" } else { "" }) disabled=disabled.get()/></div> }
+    let class = move || {
+        format!("w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition {}", if disabled.get() { "opacity-60 cursor-not-allowed" } else { "" })
+    };
+    view! {
+    <div>
+        <label
+            class="block text-sm font-medium text-gray-300 mb-1.5"
+        >
+            "العنوان *"
+        </label>
+        <input
+            type="text"
+            prop:value=title
+            on:input=move |ev| title.set(event_target_value(&ev))
+            required
+            placeholder="مثال: Breaking Bad"
+            class=class
+            disabled=disabled.get()
+        />
+    </div>
+    }
 }
 #[component]
 fn DescriptionInput(description: RwSignal<String>) -> impl IntoView {
-    view! { <div><label class="block text-sm font-medium text-gray-300 mb-1.5">الوصف (اختياري)</label><textarea prop:value=description on:input=move |ev| set_description_target(ev, description) rows=3 placeholder="وصف مختصر (اختياري)..." class="w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition resize-none"/></div> }
-}
-fn set_title_target(ev: web_sys::Event, setter: RwSignal<String>) {
-    if let Some(input) = ev
-        .target()
-        .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-    {
-        setter.set(input.value());
-    }
-}
-fn set_description_target(ev: web_sys::Event, setter: RwSignal<String>) {
-    if let Some(textarea) = ev
-        .target()
-        .and_then(|t| t.dyn_into::<HtmlTextAreaElement>().ok())
-    {
-        setter.set(textarea.value());
+    view! {
+        <div>
+            <label
+                class="block text-sm font-medium text-gray-300 mb-1.5"
+            >
+                "الوصف (اختياري)"
+            </label>
+            <textarea
+                prop:value=description
+                on:input=move |ev| description.set(event_target_value(&ev))
+                rows=3
+                placeholder="وصف مختصر (اختياري)..."
+                class="w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition resize-none"
+            />
+        </div>
     }
 }
 
@@ -1753,7 +1934,7 @@ fn Upload() -> impl IntoView {
         <UploadHeader/>
         <div class="backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl">
             <form on:submit=handle_submit class="space-y-6 md:space-y-8">
-                <TypeSelector media_type=media_type/>
+                <MediaKindSelector media_type=media_type/>
                 <div class="space-y-4"><TitleInput title=title disabled=disabled/><DescriptionInput description=description/></div>
                 {move || if matches!(media_type.get(), MediaType::Series) { Some(view! {
                     <Suspense fallback=|| view! { <div class="text-gray-400 text-sm">"جارٍ تحميل قائمة المسلسلات..."</div> }>
