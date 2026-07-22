@@ -524,7 +524,20 @@ fn SearchToggle(search_open: RwSignal<bool>) -> impl IntoView {
 }
 #[component]
 fn SearchInput(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl IntoView {
-    view! { <input type="text" prop:value=search_term on:input=move |ev| set_search_target(ev, search_term) on:focus=move |_| search_open.set(true) on:blur=move |_| if search_term.get().is_empty() { search_open.set(false); } placeholder="ابحث..." class=move || format!("w-full bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full py-2.5 pe-4 ps-12 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}", if search_open.get() { "opacity-100 scale-100" } else { "opacity-0 scale-95 pointer-events-none" }) /> }
+    let class = move || {
+        format!("w-full bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full py-2.5 pe-4 ps-12 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}", if search_open.get() { "opacity-100 scale-100" } else { "opacity-0 scale-95 pointer-events-none" })
+    };
+    view! {
+    <input
+        type="text"
+        prop:value=search_term
+        on:input=move |ev| search_term.set(event_target_value(&ev))
+        on:focus=move |_| search_open.set(true)
+        on:blur=move |_| search_open.set(!search_term.get().is_empty())
+        placeholder="ابحث..."
+        class=class
+    />
+    }
 }
 #[component]
 fn MobileSearch(search_term: RwSignal<String>) -> impl IntoView {
@@ -539,7 +552,7 @@ fn MobileSearch(search_term: RwSignal<String>) -> impl IntoView {
             );
         }
     };
-    let on_input = move |ev| set_search_target(ev, search_term);
+    let on_input = move |ev| search_term.set(event_target_value(&ev));
     view! {
     <div
         class="md:hidden flex items-center gap-2"
@@ -568,14 +581,6 @@ fn MobileSearch(search_term: RwSignal<String>) -> impl IntoView {
 #[component]
 fn MobileNav() -> impl IntoView {
     view! { <div class="md:hidden flex gap-1 pb-2"><NavLink href="/movies" label="أفلام"/><NavLink href="/series" label="مسلسلات"/></div> }
-}
-fn set_search_target(ev: web_sys::Event, setter: RwSignal<String>) {
-    if let Some(input) = ev
-        .target()
-        .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-    {
-        setter.set(input.value());
-    }
 }
 #[component]
 fn Footer() -> impl IntoView {
@@ -1774,11 +1779,46 @@ fn SeriesSettings(
 
 #[component]
 fn MovieFileInput(movie_file: RwSignal<Option<web_sys::File>>) -> impl IntoView {
-    view! { <div><label class="block text-sm font-medium text-gray-300 mb-1.5">ملف الفيلم</label><div class="flex flex-wrap items-center gap-4">
-        <input type="file" id="movieFileInput" class="hidden" accept="video/*" on:change=move |ev| { if let Some(input) = ev.target().and_then(|t| t.dyn_into::<HtmlInputElement>().ok()) { movie_file.set(input.files().and_then(|f| f.get(0))); } }/>
-        <label for="movieFileInput" class="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-2 px-5 rounded-xl cursor-pointer transition text-sm">{UploadIcon()} اختر ملف</label>
-        <span class="text-sm text-gray-400">{move || movie_file.get().as_ref().map(|f| f.name()).unwrap_or_else(|| "لم يتم اختيار ملف".to_string())}</span>
-    </div></div> }
+    let on_change = move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        {
+            movie_file.set(input.files().and_then(|f| f.get(0)));
+        }
+    };
+    view! {
+    <div>
+        <label
+            class="block text-sm font-medium text-gray-300 mb-1.5"
+        >
+            "ملف الفيل"
+        </label>
+        <div
+            class="flex flex-wrap items-center gap-4"
+        >
+            <input
+                type="file"
+                id="movieFileInput"
+                class="hidden"
+                accept="video/*"
+                on:change=on_change
+            />
+            <label
+                for="movieFileInput"
+                class="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-2 px-5 rounded-xl cursor-pointer transition text-sm"
+            >
+                <UploadIcon/>
+                "اختر ملف"
+            </label>
+            <span
+                class="text-sm text-gray-400"
+            >
+            {move || movie_file.get().as_ref().map(|f| f.name()).unwrap_or_else(|| "لم يتم اختيار ملف".to_string())}
+            </span>
+        </div>
+    </div>
+    }
 }
 
 #[component]
@@ -1866,12 +1906,41 @@ fn EpisodesToolbar(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) ->
         }
     };
     view! {
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">{SeriesIcon()} الحلقات</h2>
-            <div class="flex flex-wrap items-center gap-2">
-                <input type="file" id="multiEpisodeInput" class="hidden" multiple accept="video/*" on:change=file_handler/>
-                <label for="multiEpisodeInput" class="inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm">{UploadIcon()} "اختيار ملفات"</label>
-                <button type="button" on:click=sort class="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-1.5 px-3 rounded-lg transition text-sm">{SortIcon()} "ترتيب"</button>
+    <div
+        class="flex flex-wrap items-center justify-between gap-3"
+    >
+        <h2
+            class="text-lg font-bold text-white flex items-center gap-2"
+        >
+            <SeriesIcon/>
+            "الحلقات"
+        </h2>
+        <div
+            class="flex flex-wrap items-center gap-2"
+        >
+            <input
+                type="file"
+                id="multiEpisodeInput"
+                class="hidden"
+                multiple
+                accept="video/*"
+                on:change=file_handler
+            />
+            <label
+                for="multiEpisodeInput"
+                class="inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm"
+                >
+                    <UploadIcon/>
+                    "اختيار ملفات"
+                </label>
+                <button
+                    type="button"
+                    on:click=sort
+                    class="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-1.5 px-3 rounded-lg transition text-sm"
+                >
+                    <SortIcon/>
+                    "ترتيب"
+                </button>
             </div>
         </div>
     }
@@ -1883,11 +1952,24 @@ fn EpisodesSection(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) ->
         <div class="space-y-4">
             <EpisodesToolbar episodes=episodes next_id=next_id/>
             <div class="space-y-3 max-h-80 overflow-y-auto p-1">
-                <For each={move || episodes.get().into_iter().enumerate().collect::<Vec<_>>()} key=|(i, _)| *i let:item>
-                    {move || { let (i, ep) = item.clone(); view! { <EpisodeItem episodes=episodes ep_id=ep.id index=i/> } }}
+                <For
+                    each={move || episodes.get().into_iter().enumerate().collect::<Vec<_>>()}
+                    key=|(i, _)| *i
+                    let:item
+                >
+                    {move || {
+                        let (i, ep) = item.clone();
+                        view! {
+                            <EpisodeItem episodes=episodes ep_id=ep.id index=i/>
+                        }
+                    }}
                 </For>
             </div>
-            <p class="text-xs text-gray-500">"يتم ترقيم الحلقات تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."</p>
+            <p
+                class="text-xs text-gray-500"
+            >
+                "يتم ترقيم الحلقات تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
+            </p>
         </div>
     }
 }
@@ -1930,19 +2012,42 @@ fn Upload() -> impl IntoView {
         is_new_series.set(true);
         existing_series_id.set(None);
     };
-    view! { <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    let media_input = move || match media_type.get() {
+        MediaType::Series => Either::Left(view! {
+            <Suspense fallback=|| view! { <div class="text-gray-400 text-sm">"جارٍ تحميل قائمة المسلسلات..."</div> }>
+                <SeriesSettings is_new_series=is_new_series existing_series_id=existing_series_id series_list=Signal::derive(move || series_list.get())/>
+            </Suspense>
+            <EpisodesSection episodes=episodes next_id=next_id/>
+        }),
+        MediaType::Movie => Either::Right(view! { <MovieFileInput movie_file=movie_file/> }),
+    };
+    view! {
+    <div
+        class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8"
+    >
         <UploadHeader/>
-        <div class="backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl">
-            <form on:submit=handle_submit class="space-y-6 md:space-y-8">
-                <MediaKindSelector media_type=media_type/>
-                <div class="space-y-4"><TitleInput title=title disabled=disabled/><DescriptionInput description=description/></div>
-                {move || if matches!(media_type.get(), MediaType::Series) { Some(view! {
-                    <Suspense fallback=|| view! { <div class="text-gray-400 text-sm">"جارٍ تحميل قائمة المسلسلات..."</div> }>
-                        <SeriesSettings is_new_series=is_new_series existing_series_id=existing_series_id series_list=Signal::derive(move || series_list.get())/>
-                    </Suspense>
-                }) } else { None }}
-                {move || if matches!(media_type.get(), MediaType::Movie) { Some(view! { <MovieFileInput movie_file=movie_file/> }) } else { None }}
-                {move || if matches!(media_type.get(), MediaType::Series) { Some(view! { <EpisodesSection episodes=episodes next_id=next_id/> }) } else { None }}
+        <div
+            class="backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl"
+        >
+            <form
+                on:submit=handle_submit
+                class="space-y-6 md:space-y-8"
+            >
+                <MediaKindSelector
+                    media_type=media_type
+                />
+                <div
+                    class="space-y-4"
+                >
+                    <TitleInput
+                        title=title
+                        disabled=disabled
+                    />
+                    <DescriptionInput
+                        description=description
+                    />
+                </div>
+                {media_input}
                 <UploadSubmitButton/>
             </form>
         </div>
