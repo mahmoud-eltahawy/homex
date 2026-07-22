@@ -22,10 +22,33 @@ struct Episode {
     file_path: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum MediaType {
     Movie,
     Series,
+}
+
+impl TryFrom<&str> for MediaType {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let res = match value.to_lowercase().as_str() {
+            "movie" => Self::Movie,
+            "series" => Self::Series,
+            _ => return Err("Media type either movie or series only"),
+        };
+        Ok(res)
+    }
+}
+
+impl std::fmt::Display for MediaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let res = match self {
+            MediaType::Movie => "movie",
+            MediaType::Series => "series",
+        };
+        write!(f, "{}", res)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -273,88 +296,104 @@ async fn fetch_media_detail(media_type: String, id: i64) -> Result<Media, Server
 fn icon(children: impl IntoView, class: &str) -> impl IntoView {
     view! { <svg xmlns="http://www.w3.org/2000/svg" class=format!("{} fill-none stroke-current", class) viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{children}</svg> }.into_any()
 }
-fn search_icon() -> impl IntoView {
+#[component]
+fn SearchIcon() -> impl IntoView {
     icon(
         view! { <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/> },
         "h-5 w-5",
     )
 }
-fn movie_icon() -> impl IntoView {
+#[component]
+fn MovieIcon() -> impl IntoView {
     icon(
         view! { <path d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"/> },
         "h-5 w-5",
     )
 }
-fn series_icon() -> impl IntoView {
+#[component]
+fn SeriesIcon() -> impl IntoView {
     icon(
         view! { <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/> },
         "h-5 w-5",
     )
 }
-fn download_icon() -> impl IntoView {
+#[component]
+fn DownloadIcon() -> impl IntoView {
     icon(
         view! { <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/> },
         "h-5 w-5",
     )
 }
-fn play_icon() -> impl IntoView {
+#[component]
+fn PlayIcon() -> impl IntoView {
     icon(view! { <polygon points="5,3 19,12 5,21"/> }, "h-6 w-6")
 }
-fn pause_icon() -> impl IntoView {
+#[component]
+fn PauseIcon() -> impl IntoView {
     icon(
         view! { <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/> },
         "h-6 w-6",
     )
 }
-fn clock_icon() -> impl IntoView {
+#[component]
+fn ClockIcon() -> impl IntoView {
     icon(
         view! { <circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/> },
         "h-4 w-4",
     )
 }
-fn upload_icon() -> impl IntoView {
+#[component]
+fn UploadIcon() -> impl IntoView {
     icon(
         view! { <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/> },
         "h-6 w-6",
     )
 }
-fn delete_icon() -> impl IntoView {
+#[component]
+fn DeleteIcon() -> impl IntoView {
     icon(
         view! { <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/> },
         "h-5 w-5",
     )
 }
-fn up_arrow() -> impl IntoView {
+#[component]
+fn UpArrow() -> impl IntoView {
     icon(view! { <polyline points="18,15 12,9 6,15"/> }, "h-4 w-4")
 }
-fn down_arrow() -> impl IntoView {
+#[component]
+fn DownArrow() -> impl IntoView {
     icon(view! { <polyline points="6,9 12,15 18,9"/> }, "h-4 w-4")
 }
-fn sort_icon() -> impl IntoView {
+#[component]
+fn SortIcon() -> impl IntoView {
     icon(
         view! { <path d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4"/> },
         "h-5 w-5",
     )
 }
-fn volume_icon() -> impl IntoView {
+#[component]
+fn VolumeIcon() -> impl IntoView {
     icon(
         view! { <path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/> },
         "h-5 w-5",
     )
 }
-fn mute_icon() -> impl IntoView {
+#[component]
+fn MuteIcon() -> impl IntoView {
     icon(
         view! { <path d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd"/><path d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/> },
         "h-5 w-5",
     )
 }
-fn fullscreen_icon() -> impl IntoView {
+#[component]
+fn FullscreenIcon() -> impl IntoView {
     icon(
         view! { <path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/> },
         "h-5 w-5",
     )
 }
-fn fullscreen_exit_icon() -> impl IntoView {
+#[component]
+fn FullscreenExitIcon() -> impl IntoView {
     icon(
         view! { <path d="M9 9V4M9 4H4M9 4l5 5M15 15V20M15 20h5M15 20l-5-5M9 15v5M9 15H4M9 15l5 5M15 9V4M15 4h5M15 4l-5 5"/> },
         "h-5 w-5",
@@ -390,17 +429,55 @@ fn encode_uri_component(s: &str) -> String {
 // ---------- LAYOUT ----------
 #[component]
 fn Layout() -> impl IntoView {
-    view! { <div class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased" dir="rtl"><Navbar/><main class="flex-1 bg-gradient-to-b from-[#0a0a0f] via-[#12121a] to-[#0a0a0f] pt-20 md:pt-24 lg:pt-28 pb-8 md:pb-12"><Outlet/></main><Footer/></div> }
+    view! {
+    <div
+        class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased"
+        dir="rtl"
+    >
+        <Navbar/>
+        <main
+           class="flex-1 bg-gradient-to-b from-[#0a0a0f] via-[#12121a] to-[#0a0a0f] pt-20 md:pt-24 lg:pt-28 pb-8 md:pb-12"
+        >
+            <Outlet/>
+        </main>
+        <Footer/>
+    </div>
+    }
 }
 #[component]
 fn Navbar() -> impl IntoView {
-    let search_term = RwSignal::new(String::new());
-    let search_open = RwSignal::new(false);
-    view! { <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50"><div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><NavbarTop search_term=search_term search_open=search_open/><MobileNav/></div></nav> }
+    view! {
+        <nav
+            class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50"
+            >
+                <div
+                class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+            >
+                <NavbarTop/>
+                <MobileNav/>
+            </div>
+        </nav>
+    }
 }
 #[component]
-fn NavbarTop(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl IntoView {
-    view! { <div class="flex items-center justify-between h-16 md:h-20"><NavbarBrand/><DesktopNavLinks search_term=search_term search_open=search_open/><MobileSearch search_term=search_term/></div> }
+fn NavbarTop() -> impl IntoView {
+    let search_term = RwSignal::new(String::new());
+    let search_open = RwSignal::new(false);
+
+    view! {
+    <div
+        class="flex items-center justify-between h-16 md:h-20"
+    >
+        <NavbarBrand/>
+        <DesktopNavLinks
+            search_term=search_term
+            search_open=search_open
+        />
+        <MobileSearch
+            search_term=search_term
+        />
+    </div>
+    }
 }
 #[component]
 fn NavbarBrand() -> impl IntoView {
@@ -434,7 +511,16 @@ fn SearchBox(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl
 }
 #[component]
 fn SearchToggle(search_open: RwSignal<bool>) -> impl IntoView {
-    view! { <button type="button" on:click=move |_| search_open.set(!search_open.get()) class="absolute start-1 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors">{search_icon()}</button> }
+    let on_click = move |_| search_open.set(!search_open.get());
+    view! {
+        <button
+            type="button"
+            on:click=on_click
+            class="absolute start-1 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+        >
+            <SearchIcon/>
+        </button>
+    }
 }
 #[component]
 fn SearchInput(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl IntoView {
@@ -453,7 +539,31 @@ fn MobileSearch(search_term: RwSignal<String>) -> impl IntoView {
             );
         }
     };
-    view! { <div class="md:hidden flex items-center gap-2"><form on:submit=on_search class="relative flex items-center"><input type="text" prop:value=search_term on:input=move |ev| set_search_target(ev, search_term) placeholder="ابحث..." class="w-28 sm:w-36 bg-white/10 backdrop-blur-xl text-white placeholder-gray-400 rounded-full py-1.5 pe-3 ps-3 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400/50"/><button type="submit" class="absolute start-1.5 top-1/2 -translate-y-1/2 text-gray-400">{search_icon()}</button></form></div> }
+    let on_input = move |ev| set_search_target(ev, search_term);
+    view! {
+    <div
+        class="md:hidden flex items-center gap-2"
+    >
+        <form
+            on:submit=on_search
+            class="relative flex items-center"
+        >
+            <input
+                type="text"
+                prop:value=search_term
+                on:input=on_input
+                placeholder="ابحث..."
+                class="w-28 sm:w-36 bg-white/10 backdrop-blur-xl text-white placeholder-gray-400 rounded-full py-1.5 pe-3 ps-3 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400/50"
+            />
+            <button
+                type="submit"
+                class="absolute start-1.5 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+                <SearchIcon/>
+            </button>
+        </form>
+    </div>
+    }
 }
 #[component]
 fn MobileNav() -> impl IntoView {
@@ -490,12 +600,18 @@ fn FooterLibrary() -> impl IntoView {
 }
 #[component]
 fn FooterCopyright() -> impl IntoView {
-    view! { <div class="mt-10 pt-6 border-t border-white/5 text-center text-gray-500 text-xs tracking-wide"><p>"© 2025 وسائطي. صُنع بكل ❤️ لشبكتك المنزلية."</p></div> }
+    view! {
+        <div
+            class="mt-10 pt-6 border-t border-white/5 text-center text-gray-500 text-xs tracking-wide"
+        >
+            <p>"© 2025 وسائطي. صُنع بكل ❤️ لشبكتك المنزلية."</p>
+        </div>
+    }
 }
 
 // ---------- MEDIA CARD ----------
 #[component]
-fn MediaCard(item: Media, kind: String) -> impl IntoView {
+fn MediaCard(item: Media, kind: MediaType) -> impl IntoView {
     let navigate = use_navigate();
     let href = format!("/detail/{}/{}", kind, item.id);
 
@@ -547,11 +663,43 @@ fn MediaCardImage(
 }
 #[component]
 fn MediaCardMeta(year: Option<u32>, duration: Option<String>) -> impl IntoView {
-    view! { <div class="flex items-center gap-2 mt-1 text-gray-300 text-sm">{year.map(|y| view! { <span>{y}</span> })}<span class="flex items-center">{clock_icon()}{duration.clone()}</span></div> }
+    let year = year.map(|y| view! { <span>{y}</span> });
+    let duration = duration.map(|y| {
+        view! {
+            <span class="flex items-center">
+                <ClockIcon/>
+                {y}
+            </span>
+        }
+    });
+    view! {
+    <div
+        class="flex items-center gap-2 mt-1 text-gray-300 text-sm"
+    >
+        {year}
+        {duration}
+    </div>
+    }
 }
+
 #[component]
 fn MediaTypeBadge(media_type: MediaType) -> impl IntoView {
-    view! { <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">{match media_type { MediaType::Movie => Either::Left(movie_icon()), MediaType::Series => Either::Right(series_icon()) }}{match media_type { MediaType::Movie => "فيلم", MediaType::Series => "مسلسل" }}</div> }
+    let icon = match media_type {
+        MediaType::Movie => Either::Left(MovieIcon()),
+        MediaType::Series => Either::Right(SeriesIcon()),
+    };
+    let name = match media_type {
+        MediaType::Movie => "فيلم",
+        MediaType::Series => "مسلسل",
+    };
+    view! {
+    <div
+        class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10"
+    >
+        {icon}
+        {name}
+    </div>
+    }
 }
 #[component]
 fn MediaCardInfo(title: String, year: Option<u32>, size: String) -> impl IntoView {
@@ -811,20 +959,53 @@ fn ControlButtons(
     toggle_fullscreen: impl Fn(MouseEvent) + 'static,
     handle_volume: impl Fn(web_sys::Event) + 'static,
 ) -> impl IntoView {
-    view! { <div class="flex items-center gap-4 text-white">
-        <button on:click=toggle_play class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10">
-            {if playing.get() { Either::Left(pause_icon()) } else { Either::Right(play_icon()) }}
+    let play_icon = if playing.get() {
+        Either::Left(PauseIcon())
+    } else {
+        Either::Right(PlayIcon())
+    };
+    let mute_icon = if muted.get() || volume.get() == 0.0 {
+        Either::Left(MuteIcon())
+    } else {
+        Either::Right(VolumeIcon())
+    };
+    let volume = if muted.get() { 0.0 } else { volume.get() };
+    let full_screen = if fullscreen.get() {
+        Either::Left(FullscreenExitIcon())
+    } else {
+        Either::Right(FullscreenIcon())
+    };
+    view! {
+    <div class="flex items-center gap-4 text-white">
+        <button
+            on:click=toggle_play
+            class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
+        >
+            {play_icon}
         </button>
         <div class="flex items-center gap-2">
-            <button on:click=toggle_mute class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10">
-                {if muted.get() || volume.get() == 0.0 { Either::Left(mute_icon()) } else { Either::Right(volume_icon()) }}
+            <button
+                on:click=toggle_mute
+                class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
+            >
+                {mute_icon}
             </button>
-            <input type="range" min="0" max="1" step="0.01" value={if muted.get() { 0.0 } else { volume.get() }} on:input=handle_volume
-                class="w-16 sm:w-20 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"/>
+            <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={volume}
+                on:input=handle_volume
+                class="w-16 sm:w-20 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"
+            />
         </div>
         <div class="flex-1"></div>
-        <button on:click=toggle_fullscreen class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10">
-            {if fullscreen.get() { Either::Left(fullscreen_exit_icon()) } else { Either::Right(fullscreen_icon()) }}
+        <button
+            on:click=toggle_fullscreen
+            class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
+        >
+            {full_screen}
         </button>
     </div> }
 }
@@ -832,27 +1013,75 @@ fn ControlButtons(
 // ---------- DETAIL PAGE ----------
 #[component]
 fn DetailPoster(poster: String, title: String) -> impl IntoView {
-    view! { <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0"><img src=poster class="w-full rounded-2xl shadow-2xl border border-white/10" alt=title/></div> }
+    view! {
+    <div
+        class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0"><img src=poster class="w-full rounded-2xl shadow-2xl border border-white/10"
+        alt=title
+    />
+    </div>
+    }
 }
 #[component]
 fn DetailMetaBadge(media_type: MediaType) -> impl IntoView {
-    view! { <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">{match media_type { MediaType::Movie => Either::Left(movie_icon()), MediaType::Series => Either::Right(series_icon()) }}{match media_type { MediaType::Movie => "فيلم", MediaType::Series => "مسلسل" }}</div> }
+    let media_icon = match media_type {
+        MediaType::Movie => Either::Left(MovieIcon()),
+        MediaType::Series => Either::Right(SeriesIcon()),
+    };
+    let name = match media_type {
+        MediaType::Movie => "فيلم",
+        MediaType::Series => "مسلسل",
+    };
+    view! {
+    <div
+        class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5"
+    >
+        {media_icon}
+        {name}
+    </div>
+    }
 }
 #[component]
 fn DetailInfo(data: Media) -> impl IntoView {
+    let year = data.year.map(|y| view! { <span>{y}</span> });
+    let duration = data.duration.map(|y| {
+        view! {
+            <span
+                class="flex items-center gap-1"
+            >
+                <ClockIcon/>
+                {y}
+            </span>
+        }
+    });
+    let download = matches!(data.media_type,MediaType::Movie).then_some(
+        view! {
+        <a
+            href=data.file_path.clone()
+            class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
+            ><DownloadIcon/>
+             "تحميل"
+         </a>
+         });
     view! {
-        <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">{data.title.clone()}</h1>
-        <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
-            {data.year.map(|y| view! { <span>{y}</span> })}
-            <span class="flex items-center gap-1">{clock_icon()}{data.duration.clone()}</span>
+        <h1
+            class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2"
+        >
+            {data.title.clone()}
+        </h1>
+        <div
+            class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base"
+        >
+            {year}
+            {duration}
             <span>{data.size.clone()}</span>
         </div>
-        <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">{data.description.clone().unwrap_or_else(|| "لا يوجد وصف متاح.".into())}</p>
+        <p
+            class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg"
+        >
+            {data.description.clone().unwrap_or_else(|| "لا يوجد وصف متاح.".into())}
+        </p>
         <div class="mt-6 flex gap-3">
-            {match data.media_type {
-                MediaType::Movie => view! { <a href=data.file_path.clone() class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm">{download_icon()} "تحميل"</a> }.into_any(),
-                _ => view! {}.into_any(),
-            }}
+            {download}
         </div>
     }
 }
@@ -861,11 +1090,73 @@ fn EpisodeSelector(
     episodes: Vec<Episode>,
     selected_episode: RwSignal<Option<Episode>>,
 ) -> impl IntoView {
-    view! { <div class="mt-10"><h2 class="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center gap-2">{series_icon()} " الحلقات"</h2><div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3"><For each={move || episodes.clone()} key=|ep| ep.id let:ep><EpisodeCard ep=ep selected_episode=selected_episode/></For></div></div> }
+    view! {
+    <div
+        class="mt-10"
+    >
+        <h2
+            class="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center gap-2"
+        >
+            <SeriesIcon/>
+            " الحلقات"
+        </h2>
+        <div
+            class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            <For
+                each={move || episodes.clone()}
+                key=|ep| ep.id
+                let:ep
+            >
+                <EpisodeCard ep=ep selected_episode=selected_episode/>
+            </For>
+        </div>
+    </div>
+    }
 }
 #[component]
 fn EpisodeCard(ep: Episode, selected_episode: RwSignal<Option<Episode>>) -> impl IntoView {
-    view! { <div class=move || format!("p-3 rounded-xl border transition-all cursor-pointer backdrop-blur-sm {}", if selected_episode.get().as_ref().map_or(false, |s| s.id == ep.id) { "border-cyan-400 bg-cyan-400/10 shadow-lg shadow-cyan-400/10" } else { "border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20" }) on:click=move |_| selected_episode.set(Some(ep.clone()))><div class="flex items-center gap-3"><span class="text-sm font-mono text-gray-400">S{format!("{:02}", ep.season)}E{format!("{:02}", ep.episode)}</span><span class="text-sm text-white truncate">{ep.title.clone()}</span></div></div> }
+    let class = move || {
+        format!(
+            "p-3 rounded-xl border transition-all cursor-pointer backdrop-blur-sm {}",
+            if selected_episode
+                .get()
+                .as_ref()
+                .map_or(false, |s| s.id == ep.id)
+            {
+                "border-cyan-400 bg-cyan-400/10 shadow-lg shadow-cyan-400/10"
+            } else {
+                "border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20"
+            }
+        )
+    };
+    let title = ep.title.clone();
+    let episode = ep.episode.clone();
+    let season = ep.season.clone();
+    let on_click = move |_| selected_episode.set(Some(ep.clone()));
+    view! {
+    <div
+        class=class
+        on:click=on_click
+    >
+        <div
+            class="flex items-center gap-3"
+        >
+            <span
+                class="text-sm font-mono text-gray-400"
+            >
+                "S"
+                {format!("{:02}", season)}
+                "E"
+                {format!("{:02}", episode)}
+            </span>
+            <span
+                class="text-sm text-white truncate"
+            >
+                {title}
+            </span>
+        </div>
+    </div>
+    }
 }
 
 #[component]
@@ -901,15 +1192,41 @@ fn Detail() -> impl IntoView {
             String::new()
         }
     });
-    view! { <Suspense fallback=|| view! { <div class="min-h-screen flex items-center justify-center text-white text-lg">"جارٍ التحميل..."</div> }>
+    let fallback = || {
+        view! {
+            <div
+                class="min-h-screen flex items-center justify-center text-white text-lg"
+            >"جارٍ التحميل..."
+            </div>
+        }
+    };
+    view! {
+    <Suspense
+        fallback=fallback>
         {move || detail.get().and_then(|x| x.ok()).map(|data| view! {
-            <div class="relative min-h-screen bg-black text-white overflow-hidden">
-                <div class="absolute inset-0">
-                    <img src=data.poster.clone() class="w-full h-full object-cover scale-110 blur-3xl opacity-20" alt=""/>
-                    <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
+            <div
+                class="relative min-h-screen bg-black text-white overflow-hidden"
+            >
+                <div
+                    class="absolute inset-0"
+                >
+                    <img
+                        src=data.poster.clone()
+                        class="w-full h-full object-cover scale-110 blur-3xl opacity-20"
+                        alt=""
+                    />
+                    <div
+                        class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"
+                    ></div>
                 </div>
-                <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
-                    <DetailBody data=data video_src=video_src selected_episode=selected_episode/>
+                <div
+                    class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32"
+                >
+                    <DetailBody
+                         data=data
+                         video_src=video_src
+                         selected_episode=selected_episode
+                     />
                 </div>
             </div>
         })}
@@ -922,55 +1239,183 @@ fn DetailBody(
     video_src: Memo<String>,
     selected_episode: RwSignal<Option<Episode>>,
 ) -> impl IntoView {
-    view! { <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start"><DetailPoster poster=data.poster.clone() title=data.title.clone()/><div class="flex-1 w-full"><DetailMetaBadge media_type=data.media_type.clone()/><DetailInfo data=data.clone()/></div></div>
-    {move || if !video_src.get().is_empty() { Some(view! { <div class="mt-10"><VideoPlayer src=Signal::derive({move || video_src.get()}) title=data.title.clone()/></div> }) } else { None }}
-    {move || if matches!(data.media_type, MediaType::Series) && !data.episodes.is_empty() { Some(view! { <EpisodeSelector episodes=data.episodes.clone() selected_episode=selected_episode/> }) } else { None }} }
+    let title = data.title.clone();
+    let video_player = move || {
+        (!video_src.get().is_empty()).then_some(view! {
+            <div
+                class="mt-10"
+            >
+                <VideoPlayer
+                    src=Signal::derive({move || video_src.get()})
+                    title=title.clone()
+                />
+            </div>
+        })
+    };
+    let available_series =
+        matches!(data.media_type, MediaType::Series) && !data.episodes.is_empty();
+    let episodes = data.episodes.clone();
+    let selector = move || {
+        available_series.then_some(view! {
+            <EpisodeSelector
+                episodes=episodes.clone()
+                selected_episode=selected_episode
+            />
+        })
+    };
+    view! {
+        <div
+            class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start"
+        >
+            <DetailPoster
+                poster=data.poster.clone()
+                title=data.title.clone()
+            />
+            <div
+                class="flex-1 w-full"
+            >
+                <DetailMetaBadge
+                    media_type=data.media_type.clone()
+                />
+                <DetailInfo
+                    data=data.clone()
+                />
+            </div>
+        </div>
+        {video_player}
+        {selector}
+    }
 }
 
 // ---------- HOME PAGE ----------
 #[component]
 fn HomeHero() -> impl IntoView {
-    view! { <div class="py-12 sm:py-16 md:py-20 lg:py-24 text-center"><h1 class="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight leading-[1.1]"><span class="bg-gradient-to-r from-cyan-200 via-blue-300 to-indigo-400 bg-clip-text text-transparent">"سينماك"</span><br class="sm:hidden"/><span class="text-white">" الشخصية"</span></h1><p class="text-gray-400 text-base sm:text-lg md:text-xl max-w-2xl mx-auto mt-4 leading-relaxed">"شاهد وحمّل مجموعتك من الأفلام والمسلسلات من أي مكان في منزلك."</p></div> }
+    view! {
+    <div
+        class="py-12 sm:py-16 md:py-20 lg:py-24 text-center"
+    >
+        <h1
+            class="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight leading-[1.1]"
+        >
+            <span
+                class="bg-gradient-to-r from-cyan-200 via-blue-300 to-indigo-400 bg-clip-text text-transparent"
+            >
+                "سينماك"
+            </span>
+            <br
+                class="sm:hidden"
+            />
+            <span
+                class="text-white"
+            >
+                " الشخصية"
+            </span>
+        </h1>
+        <p
+            class="text-gray-400 text-base sm:text-lg md:text-xl max-w-2xl mx-auto mt-4 leading-relaxed"
+        >
+            "شاهد وحمّل مجموعتك من الأفلام والمسلسلات من أي مكان في منزلك."
+        </p>
+    </div>
+    }
 }
 #[component]
 fn MediaSection(
     title: String,
     icon: impl IntoView,
-    link: String,
     items: Signal<Vec<Media>>,
-    kind: String,
+    kind: MediaType,
 ) -> impl IntoView {
     let navigate = use_navigate();
-    view! { <section class="mb-12 md:mb-16">
-        <div class="flex items-center justify-between mb-6">
-            <h2 class="text-2xl sm:text-3xl md:text-4xl font-black text-white flex items-center gap-3"><span class="text-cyan-400">{icon}</span> {title.clone()}</h2>
-            <a href=link.clone() class="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-all flex items-center gap-1 group" on:click=move |ev: MouseEvent| { ev.prevent_default(); navigate(&link, Default::default()); }><span class="text-lg group-hover:translate-x-1 transition-transform">"←"</span>" عرض الكل"</a>
+    let on_click = move |ev: MouseEvent| {
+        ev.prevent_default();
+        navigate(&kind.to_string(), Default::default());
+    };
+    view! {
+    <section
+        class="mb-12 md:mb-16"
+    >
+        <div
+            class="flex items-center justify-between mb-6"
+        >
+            <h2
+                class="text-2xl sm:text-3xl md:text-4xl font-black text-white flex items-center gap-3"
+            >
+                <span class="text-cyan-400">
+                    {icon}
+                </span>
+                {title.clone()}
+            </h2>
+            <a
+                class="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-all flex items-center gap-1 group"
+                on:click=on_click
+            >
+                <span
+                    class="text-lg group-hover:translate-x-1 transition-transform"
+                >
+                    "←"
+                </span>
+                " عرض الكل"
+            </a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-            <For each={move || items.get().into_iter().take(5).collect::<Vec<_>>()} key=|m| m.id let:item>
+        <div
+            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6"
+        >
+            <For
+                each={move || items.get().into_iter().take(5).collect::<Vec<_>>()}
+                key=|m| m.id
+                let:item
+            >
                 <MediaCard item=item.clone() kind=kind.clone()/>
             </For>
         </div>
-    </section> }
+    </section>
+    }
 }
 #[component]
 fn Home() -> impl IntoView {
     let media = Resource::new(|| (), |_| async move { fetch_all_media().await });
 
-    view! { <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <HomeHero/>
-        <Suspense fallback=|| view! {
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                <For each={move || (0..5).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For>
+    let fallback = || {
+        view! {
+            <div
+                class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6"
+            >
+                <For
+                    each={move || (0..5).collect::<Vec<_>>()}
+                    key=|i| *i
+                    let:_
+                >{CardSkeleton}
+                </For>
             </div>
-        }>
+        }
+    };
+    view! {
+    <div
+        class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+    >
+        <HomeHero/>
+        <Suspense fallback=fallback>
             {move || {
-                let list = media.get().and_then(|x| x.ok()).unwrap_or_default();
-                let movies: Vec<Media> = list.iter().filter(|m| matches!(m.media_type, MediaType::Movie)).cloned().collect();
-                let series: Vec<Media> = list.iter().filter(|m| matches!(m.media_type, MediaType::Series)).cloned().collect();
+                let (movies,series) : (Vec<_>,Vec<_>) = media
+                    .get()
+                    .and_then(|x| x.ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .partition(|m| matches!(m.media_type, MediaType::Movie));
                 view! {
-                    <MediaSection title="أفلام".to_string() icon=movie_icon() link="/movies".to_string() items=Signal::derive(move || movies.clone()) kind="movie".to_string()/>
-                    <MediaSection title="مسلسلات".to_string() icon=series_icon() link="/series".to_string() items=Signal::derive(move || series.clone()) kind="series".to_string()/>
+                    <MediaSection
+                        title="أفلام".to_string()
+                        icon=MovieIcon()
+                        items=Signal::derive(move || movies.clone())
+                        kind=MediaType::Movie
+                    />
+                    <MediaSection
+                        title="مسلسلات".to_string()
+                        icon=SeriesIcon()
+                        items=Signal::derive(move || series.clone())
+                        kind=MediaType::Series
+                    />
                 }
             }}
         </Suspense>
@@ -986,11 +1431,11 @@ fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
 fn Movies() -> impl IntoView {
     let movies = Resource::new(|| (), |_| async move { fetch_movies().await });
     view! { <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <MediaPageHeader title="أفلام".to_string() icon=movie_icon()/>
+        <MediaPageHeader title="أفلام".to_string() icon=MovieIcon()/>
         <Suspense fallback=|| view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"><For each={move || (0..8).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For></div> }>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
                 <For each={move || movies.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
-                    <MediaCard item=item.clone() kind="movie".to_string()/>
+                    <MediaCard item=item.clone() kind=MediaType::Movie/>
                 </For>
             </div>
         </Suspense>
@@ -1000,11 +1445,11 @@ fn Movies() -> impl IntoView {
 fn Series() -> impl IntoView {
     let series = Resource::new(|| (), |_| async move { fetch_series().await });
     view! { <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <MediaPageHeader title="مسلسلات".to_string() icon=series_icon()/>
+        <MediaPageHeader title="مسلسلات".to_string() icon=SeriesIcon()/>
         <Suspense fallback=|| view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"><For each={move || (0..8).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For></div> }>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
                 <For each={move || series.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
-                    <MediaCard item=item.clone() kind="series".to_string()/>
+                    <MediaCard item=item.clone() kind=MediaType::Series/>
                 </For>
             </div>
         </Suspense>
@@ -1066,7 +1511,7 @@ fn Search() -> impl IntoView {
             {move || if results.get().is_empty() { Either::Left(view! { <div class="text-center py-16 text-gray-400 text-sm sm:text-base">لا يوجد وسائط تطابق بحثك.</div> }) }
                 else { Either::Right(view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
                     <For each={move || results.get()} key=|m| m.id let:item>
-                        <MediaCard item=item.clone() kind=match item.media_type { MediaType::Movie => "movie".into(), MediaType::Series => "series".into() }/>
+                        <MediaCard item=item.clone() kind=item.media_type/>
                     </For>
                 </div> }) }
             }
@@ -1084,13 +1529,13 @@ struct EpUpload {
 
 #[component]
 fn UploadHeader() -> impl IntoView {
-    view! { <div class="mb-8 md:mb-10 text-center"><div class="inline-flex items-center justify-center p-4 bg-cyan-400/10 rounded-3xl mb-4"><span class="text-cyan-400">{upload_icon()}</span></div><h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">رفع وسائط جديدة</h1><p class="text-gray-400 text-sm sm:text-base mt-2">"أضف فيلمًا أو مسلسلًا إلى مكتبتك المنزلية"</p></div> }
+    view! { <div class="mb-8 md:mb-10 text-center"><div class="inline-flex items-center justify-center p-4 bg-cyan-400/10 rounded-3xl mb-4"><span class="text-cyan-400">{UploadIcon()}</span></div><h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">رفع وسائط جديدة</h1><p class="text-gray-400 text-sm sm:text-base mt-2">"أضف فيلمًا أو مسلسلًا إلى مكتبتك المنزلية"</p></div> }
 }
 #[component]
 fn TypeSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
     view! { <div class="flex justify-center"><div class="inline-flex bg-white/5 rounded-2xl p-1" role="group">
-        <button type="button" on:click=move |_| media_type.set(MediaType::Series) class=move || format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Series) { "bg-purple-500/20 text-purple-400 shadow-lg shadow-purple-500/10" } else { "text-gray-400 hover:text-white" })>{series_icon()} "مسلسل"</button>
-        <button type="button" on:click=move |_| media_type.set(MediaType::Movie) class=move || format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Movie) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })>{movie_icon()} "فيلم"</button>
+        <button type="button" on:click=move |_| media_type.set(MediaType::Series) class=move || format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Series) { "bg-purple-500/20 text-purple-400 shadow-lg shadow-purple-500/10" } else { "text-gray-400 hover:text-white" })>{SeriesIcon()} "مسلسل"</button>
+        <button type="button" on:click=move |_| media_type.set(MediaType::Movie) class=move || format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}", if matches!(media_type.get(), MediaType::Movie) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })>{MovieIcon()} "فيلم"</button>
     </div></div> }
 }
 #[component]
@@ -1150,7 +1595,7 @@ fn SeriesSettings(
 fn MovieFileInput(movie_file: RwSignal<Option<web_sys::File>>) -> impl IntoView {
     view! { <div><label class="block text-sm font-medium text-gray-300 mb-1.5">ملف الفيلم</label><div class="flex flex-wrap items-center gap-4">
         <input type="file" id="movieFileInput" class="hidden" accept="video/*" on:change=move |ev| { if let Some(input) = ev.target().and_then(|t| t.dyn_into::<HtmlInputElement>().ok()) { movie_file.set(input.files().and_then(|f| f.get(0))); } }/>
-        <label for="movieFileInput" class="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-2 px-5 rounded-xl cursor-pointer transition text-sm">{upload_icon()} اختر ملف</label>
+        <label for="movieFileInput" class="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-2 px-5 rounded-xl cursor-pointer transition text-sm">{UploadIcon()} اختر ملف</label>
         <span class="text-sm text-gray-400">{move || movie_file.get().as_ref().map(|f| f.name()).unwrap_or_else(|| "لم يتم اختيار ملف".to_string())}</span>
     </div></div> }
 }
@@ -1202,9 +1647,9 @@ fn EpisodeItem(episodes: RwSignal<Vec<EpUpload>>, ep_id: u32, index: usize) -> i
                 <div class="hidden sm:block"><span class="text-xs text-gray-400">الملف</span><div class="text-xs text-gray-300 truncate mt-0.5 max-w-32">{move || ep().file.name()}</div></div>
             </div>
             <div class="flex items-center gap-1 mt-1 sm:mt-0">
-                <button on:click=move_up disabled=move || index == 0 class="text-gray-400 hover:text-white transition disabled:opacity-30 p-1" title="نقل للأعلى">{up_arrow()}</button>
-                <button on:click=move_down disabled=move || index + 1 == total() class="text-gray-400 hover:text-white transition disabled:opacity-30 p-1" title="نقل للأسفل">{down_arrow()}</button>
-                <button on:click=remove class="text-red-400 hover:text-red-300 transition p-1" title="حذف الحلقة">{delete_icon()}</button>
+                <button on:click=move_up disabled=move || index == 0 class="text-gray-400 hover:text-white transition disabled:opacity-30 p-1" title="نقل للأعلى">{UpArrow()}</button>
+                <button on:click=move_down disabled=move || index + 1 == total() class="text-gray-400 hover:text-white transition disabled:opacity-30 p-1" title="نقل للأسفل">{DownArrow()}</button>
+                <button on:click=remove class="text-red-400 hover:text-red-300 transition p-1" title="حذف الحلقة">{DeleteIcon()}</button>
             </div>
         </div>
     }
@@ -1241,11 +1686,11 @@ fn EpisodesToolbar(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) ->
     };
     view! {
         <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">{series_icon()} الحلقات</h2>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">{SeriesIcon()} الحلقات</h2>
             <div class="flex flex-wrap items-center gap-2">
                 <input type="file" id="multiEpisodeInput" class="hidden" multiple accept="video/*" on:change=file_handler/>
-                <label for="multiEpisodeInput" class="inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm">{upload_icon()} "اختيار ملفات"</label>
-                <button type="button" on:click=sort class="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-1.5 px-3 rounded-lg transition text-sm">{sort_icon()} "ترتيب"</button>
+                <label for="multiEpisodeInput" class="inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm">{UploadIcon()} "اختيار ملفات"</label>
+                <button type="button" on:click=sort class="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-1.5 px-3 rounded-lg transition text-sm">{SortIcon()} "ترتيب"</button>
             </div>
         </div>
     }
@@ -1325,7 +1770,7 @@ fn Upload() -> impl IntoView {
 
 #[component]
 fn UploadSubmitButton() -> impl IntoView {
-    view! { <button type="submit" class="w-full py-3 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-base shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02] hover:shadow-cyan-500/40 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2">{upload_icon()} رفع الوسائط</button> }
+    view! { <button type="submit" class="w-full py-3 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-base shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02] hover:shadow-cyan-500/40 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2">{UploadIcon()} رفع الوسائط</button> }
 }
 
 // ---------- SETTINGS ----------
