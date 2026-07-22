@@ -576,12 +576,13 @@ fn NavbarTop() -> impl IntoView {
 
 #[component]
 fn NavbarBrand() -> impl IntoView {
-    let navigate = use_navigate();
     view! {
-        <a href="/" class="flex items-center gap-2 text-2xl sm:text-3xl md:text-4xl font-black tracking-tighter"
-            on:click=move |ev: MouseEvent| { ev.prevent_default(); navigate("/", Default::default()); }>
+        <AppLink
+            href="/"
+            class="flex items-center gap-2 text-2xl sm:text-3xl md:text-4xl font-black tracking-tighter"
+        >
             <span class="bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">وسائطي</span>
-        </a>
+        </AppLink>
     }
 }
 
@@ -598,12 +599,13 @@ fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -
 
 #[component]
 fn NavLink(href: &'static str, label: &'static str) -> impl IntoView {
-    let navigate = use_navigate();
     view! {
-        <a href=href class="px-4 py-2 rounded-2xl text-sm font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-all duration-300 backdrop-blur-sm"
-            on:click=move |ev: MouseEvent| { ev.prevent_default(); navigate(href, Default::default()); }>
+        <AppLink
+            href=href
+            class="px-4 py-2 rounded-2xl text-sm font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-all duration-300 backdrop-blur-sm"
+        >
             {label}
-        </a>
+        </AppLink>
     }
 }
 
@@ -727,14 +729,19 @@ fn FooterGrid() -> impl IntoView {
 
 #[component]
 fn FooterBrand() -> impl IntoView {
-    let navigate = use_navigate();
     view! {
         <div class="space-y-4">
-            <a href="/" class="text-2xl font-black tracking-tighter"
-                on:click=move |ev: MouseEvent| { ev.prevent_default(); navigate("/", Default::default()); }>
+            <AppLink
+                href="/"
+                class="text-2xl font-black tracking-tighter"
+            >
                 <span class="bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">وسائطي</span>
-            </a>
-            <p class="text-gray-400 text-sm max-w-xs leading-relaxed">"خادم السينما الشخصي الخاص بك — شاهد، حمّل، واستمتع بمجموعتك في أي وقت."</p>
+            </AppLink>
+            <p
+                class="text-gray-400 text-sm max-w-xs leading-relaxed"
+            >
+                "خادم السينما الشخصي الخاص بك — شاهد، حمّل، واستمتع بمجموعتك في أي وقت."
+            </p>
         </div>
     }
 }
@@ -1729,6 +1736,26 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <App/>
             </body>
         </html>
+    }
+}
+
+#[component]
+fn AppLink(
+    href: impl Into<String>,
+    #[prop(optional)] class: &'static str,
+    children: Children,
+) -> impl IntoView {
+    let href: String = href.into();
+    let navigate = use_navigate();
+    let href_clone = href.clone();
+    let on_click = move |ev: MouseEvent| {
+        ev.prevent_default();
+        navigate(&href_clone, Default::default());
+    };
+    view! {
+        <a href=href on:click=on_click class=class>
+            {children()}
+        </a>
     }
 }
 
