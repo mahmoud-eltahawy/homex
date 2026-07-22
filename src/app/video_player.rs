@@ -230,7 +230,7 @@ pub fn VideoControls(
                 current_time=current_time
                 duration=duration
                 handle_seek=handle_seek
-                />
+            />
             <ControlButtons playing=playing muted=muted volume=volume fullscreen=fullscreen
                 toggle_play=toggle_play toggle_mute=toggle_mute toggle_fullscreen=toggle_fullscreen handle_volume=handle_volume/>
         </div>
@@ -244,25 +244,19 @@ pub fn SeekBar(
     handle_seek: impl Fn(web_sys::Event) + 'static,
 ) -> impl IntoView {
     view! {
-        <div
-            class="flex items-center gap-2"
-        >
-            <span
-                class="text-white text-xs font-mono"
-            >
+        <div class="flex items-center gap-2">
+            <span class="text-white text-xs font-mono">
                 {format_time(current_time.get())}
             </span>
             <input
                 type="range"
                 min="0"
-                max={duration.get()}
-                value={current_time.get()}
+                prop:max=duration
+                prop:value=current_time
                 on:input=handle_seek
                 class="flex-1 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400 [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-cyan-400/30"
             />
-            <span
-                class="text-white text-xs font-mono"
-            >{format_time(duration.get())}</span>
+            <span class="text-white text-xs font-mono">{format_time(duration.get())}</span>
         </div>
     }
 }
@@ -288,7 +282,7 @@ pub fn ControlButtons(
     } else {
         Either::Right(VolumeIcon())
     };
-    let volume = if muted.get() { 0.0 } else { volume.get() };
+    let vol_value = if muted.get() { 0.0 } else { volume.get() };
     let full_screen = if fullscreen.get() {
         Either::Left(FullscreenExitIcon())
     } else {
@@ -314,7 +308,7 @@ pub fn ControlButtons(
                 min="0"
                 max="1"
                 step="0.01"
-                value={volume}
+                prop:value={vol_value}
                 on:input=handle_volume
                 class="w-16 sm:w-20 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"
             />
