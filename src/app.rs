@@ -1952,22 +1952,19 @@ fn EpisodesSection(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) ->
         <div class="space-y-4">
             <EpisodesToolbar episodes=episodes next_id=next_id/>
             <div class="space-y-3 max-h-80 overflow-y-auto p-1">
+                // Use ep.id as key, not the index
                 <For
                     each={move || episodes.get().into_iter().enumerate().collect::<Vec<_>>()}
-                    key=|(i, _)| *i
+                    key=|(_, ep)| ep.id
                     let:item
                 >
                     {move || {
                         let (i, ep) = item.clone();
-                        view! {
-                            <EpisodeItem episodes=episodes ep_id=ep.id index=i/>
-                        }
+                        view! { <EpisodeItem episodes=episodes ep_id=ep.id index=i/> }
                     }}
                 </For>
             </div>
-            <p
-                class="text-xs text-gray-500"
-            >
+            <p class="text-xs text-gray-500">
                 "يتم ترقيم الحلقات تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
             </p>
         </div>
