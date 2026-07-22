@@ -10,6 +10,7 @@ use leptos_router::{
 use serde::{Deserialize, Serialize};
 use web_sys::{HtmlInputElement, HtmlSelectElement, MouseEvent};
 
+mod resource_view;
 mod series;
 mod video_player;
 
