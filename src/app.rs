@@ -16,7 +16,7 @@ mod video_player;
 use crate::app::{
     series::{
         fetch_season, mock_series, Episode, EpisodeSelector, Season, SeasonSelector, Series,
-        SeriesPage,
+        SeriesDetailPage, SeriesPage,
     },
     video_player::VideoPlayer,
 };
@@ -260,7 +260,7 @@ async fn fetch_movies() -> Result<Vec<Media>, ServerFnError> {
 async fn fetch_all_media() -> Result<Vec<Media>, ServerFnError> {
     delay(300).await;
     let mut all = mock_movies();
-    all.extend(mock_series());
+    all.extend(mock_series().into_iter().map(Media::Series));
     Ok(all)
 }
 
@@ -269,7 +269,10 @@ async fn fetch_media_detail(media_type: String, id: i64) -> Result<Media, Server
     delay(200).await;
     let list = match media_type.as_str() {
         "movie" => mock_movies(),
-        "series" => mock_series(),
+        "series" => mock_series()
+            .into_iter()
+            .map(|x| Media::Series(x))
+            .collect(),
         _ => return Err(ServerFnError::new("not found")),
     };
     list.into_iter()
@@ -1557,7 +1560,8 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/upload") view=Upload/>
                     <Route path=path!("/search") view=Search/>
                     <Route path=path!("/settings") view=Settings/>
-                    <Route path=path!("/detail/:kind/:id") view=Detail/>
+                    <Route path=path!("/detail/series/:id") view={Lazy::<SeriesDetailPage>::new()}/>
+                    <Route path=path!("/detail/movie/:id") view=Detail/>
                 </ParentRoute>
             </Routes>
         </Router>
