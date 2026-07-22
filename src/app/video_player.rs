@@ -18,9 +18,9 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
     let fullscreen = RwSignal::new(false);
     let controls_visible = RwSignal::new(true);
 
-    let _guard = use_event_listener(use_document(), fullscreenchange, move |_| {
-        let document = use_document();
-        fullscreen.set(document.fullscreen().is_some_and(|x| x));
+    let u_document = use_document();
+    let _guard = use_event_listener(u_document.clone(), fullscreenchange, move |_| {
+        fullscreen.set(u_document.fullscreen().is_some_and(|x| x));
     });
 
     let UseTimeoutFnReturn { start, stop, .. } = use_timeout_fn(
@@ -144,10 +144,8 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
             if let Some(video) = video_ref.get() {
                 if document().fullscreen_element().is_none() {
                     let _ = video.request_fullscreen();
-                    fullscreen.set(true);
                 } else {
                     let _ = document().exit_fullscreen();
-                    fullscreen.set(false);
                 }
             }
         }
