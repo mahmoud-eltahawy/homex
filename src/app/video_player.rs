@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos::{either::Either, ev::fullscreenchange};
-use leptos_use::{use_document, use_event_listener, use_timeout_fn};
+use leptos_use::{use_document, use_event_listener, use_timeout_fn, UseTimeoutFnReturn};
 use web_sys::{HtmlInputElement, MouseEvent};
 
 use super::{FullscreenExitIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, VolumeIcon};
@@ -17,20 +17,24 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
     let muted = RwSignal::new(false);
     let fullscreen = RwSignal::new(false);
     let controls_visible = RwSignal::new(true);
-    let controls_timeout = RwSignal::new(None::<i32>);
 
-    let _ = use_event_listener(video_ref, fullscreenchange, move |_| {
+    let _guard = use_event_listener(use_document(), fullscreenchange, move |_| {
         let document = use_document();
         fullscreen.set(document.fullscreen().is_some_and(|x| x));
     });
 
-    let start_hide_timer = move || {
-        use_timeout_fn(
-            move |_i: i32| {
-                controls_visible.set(false);
-            },
-            3000.,
-        );
+    let UseTimeoutFnReturn { start, stop, .. } = use_timeout_fn(
+        move |_i: i8| {
+            controls_visible.set(false);
+        },
+        3000.,
+    );
+    let start_hide_timer = {
+        let stop = stop.clone();
+        move || {
+            stop();
+            start(3);
+        }
     };
     let show_controls = {
         let start_hide_timer = start_hide_timer.clone();
@@ -41,13 +45,11 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
     };
     let toggle_controls = {
         let show_controls = show_controls.clone();
-        let controls_timeout = controls_timeout.clone();
+        let stop = stop.clone();
         move || {
             if controls_visible.get() {
                 controls_visible.set(false);
-                if let Some(id) = controls_timeout.get() {
-                    let _ = web_sys::window().unwrap().clear_timeout_with_handle(id);
-                }
+                stop();
             } else {
                 show_controls();
             }
@@ -150,11 +152,6 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
             }
         }
     };
-    on_cleanup(move || {
-        if let Some(id) = controls_timeout.get() {
-            let _ = web_sys::window().unwrap().clear_timeout_with_handle(id);
-        }
-    });
     Effect::new(move || {
         if let Some(video) = video_ref.get() {
             video.set_src(&src.get());
@@ -181,7 +178,7 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
         />
         <VideoControls
             controls_visible=controls_visible
-            show_controls=show_controls
+            show_controls=show_controls.clone()
             current_time=current_time
             duration=duration
             playing=playing
@@ -208,10 +205,16 @@ fn VideoElement(
     handle_time_update: impl Fn(web_sys::Event) + 'static,
     toggle_controls: impl Fn() + Clone + 'static,
 ) -> impl IntoView {
-    view! { <video node_ref=video_ref title=title class="w-full h-auto max-h-[60vh] md:max-h-[70vh] object-contain cursor-pointer"
-    on:loadedmetadata=handle_loaded_metadata on:timeupdate=handle_time_update
-    on:play=move |_| playing.set(true) on:pause=move |_| playing.set(false)
-    on:ended=move |_| playing.set(false) on:click=move |_| toggle_controls() playsinline /> }
+    view! {
+    <video
+        node_ref=video_ref
+        title=title
+        class="w-full h-auto max-h-[60vh] md:max-h-[70vh] object-contain cursor-pointer"
+        on:loadedmetadata=handle_loaded_metadata
+        on:timeupdate=handle_time_update
+        on:play=move |_| playing.set(true) on:pause=move |_| playing.set(false)
+        on:ended=move |_| playing.set(false) on:click=move |_| toggle_controls() playsinline
+    /> }
 }
 
 #[component]
@@ -267,7 +270,7 @@ pub fn SeekBar(
     view! {
         <div class="flex items-center gap-2">
             <span class="text-white text-xs font-mono">
-                {format_time(current_time.get())}
+                {move || format_time(current_time.get())}
             </span>
             <input
                 type="range"
@@ -277,7 +280,7 @@ pub fn SeekBar(
                 on:input=handle_seek
                 class="flex-1 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400 [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-cyan-400/30"
             />
-            <span class="text-white text-xs font-mono">{format_time(duration.get())}</span>
+            <span class="text-white text-xs font-mono">{move || format_time(duration.get())}</span>
         </div>
     }
 }
