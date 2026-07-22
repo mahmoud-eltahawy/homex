@@ -6,7 +6,7 @@ use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{
     components::{Outlet, ParentRoute, Route, Router, Routes},
     hooks::{use_navigate, use_params_map, use_query_map},
-    path, StaticSegment,
+    path,
 };
 use serde::{Deserialize, Serialize};
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement, MouseEvent};
@@ -495,13 +495,36 @@ fn FooterCopyright() -> impl IntoView {
 
 // ---------- MEDIA CARD ----------
 #[component]
-fn MediaCard(item: Media, r#type: String) -> impl IntoView {
+fn MediaCard(item: Media, kind: String) -> impl IntoView {
     let navigate = use_navigate();
-    let href = format!("/{}/{}", r#type, item.id);
-    view! { <a href=href.clone() class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2" on:click=move |ev: MouseEvent| { ev.prevent_default(); navigate(&href, Default::default()); }>
-        <MediaCardImage poster=item.poster.clone() title=item.title.clone() year=item.year duration=item.duration.clone() media_type=item.media_type/>
-        <MediaCardInfo title=item.title year=item.year size=item.size/>
-    </a> }
+    let href = format!("/detail/{}/{}", kind, item.id);
+
+    let href1 = href.clone();
+    let on_click = move |ev: MouseEvent| {
+        ev.prevent_default();
+        navigate(&href1, Default::default());
+    };
+
+    view! {
+        <a
+            href=href.clone()
+            class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2"
+            on:click=on_click
+        >
+            <MediaCardImage
+                poster=item.poster.clone()
+                title=item.title.clone()
+                year=item.year
+                duration=item.duration.clone()
+                media_type=item.media_type
+            />
+            <MediaCardInfo
+                title=item.title
+                year=item.year
+                size=item.size
+            />
+        </a>
+    }
 }
 #[component]
 fn MediaCardImage(
@@ -849,7 +872,7 @@ fn EpisodeCard(ep: Episode, selected_episode: RwSignal<Option<Episode>>) -> impl
 fn Detail() -> impl IntoView {
     let params = use_params_map();
     let media_type =
-        move || params.with(|p| p.get("type").map(|s| s.to_string()).unwrap_or_default());
+        move || params.with(|p| p.get("kind").map(|s| s.to_string()).unwrap_or_default());
     let id = move || params.with(|p| p.get("id").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0));
     let detail = Resource::new(
         move || (media_type(), id()),
@@ -915,7 +938,7 @@ fn MediaSection(
     icon: impl IntoView,
     link: String,
     items: Signal<Vec<Media>>,
-    r#type: String,
+    kind: String,
 ) -> impl IntoView {
     let navigate = use_navigate();
     view! { <section class="mb-12 md:mb-16">
@@ -925,7 +948,7 @@ fn MediaSection(
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
             <For each={move || items.get().into_iter().take(5).collect::<Vec<_>>()} key=|m| m.id let:item>
-                <MediaCard item=item.clone() r#type=r#type.clone()/>
+                <MediaCard item=item.clone() kind=kind.clone()/>
             </For>
         </div>
     </section> }
@@ -946,8 +969,8 @@ fn Home() -> impl IntoView {
                 let movies: Vec<Media> = list.iter().filter(|m| matches!(m.media_type, MediaType::Movie)).cloned().collect();
                 let series: Vec<Media> = list.iter().filter(|m| matches!(m.media_type, MediaType::Series)).cloned().collect();
                 view! {
-                    <MediaSection title="أفلام".to_string() icon=movie_icon() link="/movies".to_string() items=Signal::derive(move || movies.clone()) r#type="movie".to_string()/>
-                    <MediaSection title="مسلسلات".to_string() icon=series_icon() link="/series".to_string() items=Signal::derive(move || series.clone()) r#type="series".to_string()/>
+                    <MediaSection title="أفلام".to_string() icon=movie_icon() link="/movies".to_string() items=Signal::derive(move || movies.clone()) kind="movie".to_string()/>
+                    <MediaSection title="مسلسلات".to_string() icon=series_icon() link="/series".to_string() items=Signal::derive(move || series.clone()) kind="series".to_string()/>
                 }
             }}
         </Suspense>
@@ -967,7 +990,7 @@ fn Movies() -> impl IntoView {
         <Suspense fallback=|| view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"><For each={move || (0..8).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For></div> }>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
                 <For each={move || movies.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
-                    <MediaCard item=item.clone() r#type="movie".to_string()/>
+                    <MediaCard item=item.clone() kind="movie".to_string()/>
                 </For>
             </div>
         </Suspense>
@@ -981,7 +1004,7 @@ fn Series() -> impl IntoView {
         <Suspense fallback=|| view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"><For each={move || (0..8).collect::<Vec<_>>()} key=|i| *i let:_>{CardSkeleton}</For></div> }>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
                 <For each={move || series.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
-                    <MediaCard item=item.clone() r#type="series".to_string()/>
+                    <MediaCard item=item.clone() kind="series".to_string()/>
                 </For>
             </div>
         </Suspense>
@@ -1043,7 +1066,7 @@ fn Search() -> impl IntoView {
             {move || if results.get().is_empty() { Either::Left(view! { <div class="text-center py-16 text-gray-400 text-sm sm:text-base">لا يوجد وسائط تطابق بحثك.</div> }) }
                 else { Either::Right(view! { <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
                     <For each={move || results.get()} key=|m| m.id let:item>
-                        <MediaCard item=item.clone() r#type=match item.media_type { MediaType::Movie => "movie".into(), MediaType::Series => "series".into() }/>
+                        <MediaCard item=item.clone() kind=match item.media_type { MediaType::Movie => "movie".into(), MediaType::Series => "series".into() }/>
                     </For>
                 </div> }) }
             }
