@@ -1,7 +1,8 @@
-use leptos::either::Either;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::closure::Closure;
 use leptos::wasm_bindgen::JsCast;
+use leptos::{either::Either, ev::fullscreenchange};
+use leptos_use::{use_document, use_event_listener, use_timeout_fn};
 use web_sys::{HtmlInputElement, MouseEvent};
 
 use super::{FullscreenExitIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, VolumeIcon};
@@ -19,21 +20,18 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
     let controls_visible = RwSignal::new(true);
     let controls_timeout = RwSignal::new(None::<i32>);
 
-    let start_hide_timer = {
-        move || {
-            if let Some(id) = controls_timeout.get() {
-                let _ = web_sys::window().unwrap().clear_timeout_with_handle(id);
-            }
-            let window = web_sys::window().unwrap();
-            let cb = Closure::once_into_js(move || controls_visible.set(false));
-            let handle = window
-                .set_timeout_with_callback_and_timeout_and_arguments_0(
-                    cb.as_ref().unchecked_ref(),
-                    3000,
-                )
-                .unwrap();
-            controls_timeout.set(Some(handle));
-        }
+    let _ = use_event_listener(video_ref, fullscreenchange, move |_| {
+        let document = use_document();
+        fullscreen.set(document.fullscreen().is_some_and(|x| x));
+    });
+
+    let start_hide_timer = move || {
+        use_timeout_fn(
+            move |_i: i32| {
+                controls_visible.set(false);
+            },
+            3000.,
+        );
     };
     let show_controls = {
         let start_hide_timer = start_hide_timer.clone();
@@ -168,8 +166,20 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
         }
     });
 
-    view! { <div dir="ltr" class="relative bg-black rounded-2xl overflow-hidden shadow-2xl shadow-black/50 group">
-        <VideoElement video_ref=video_ref title=title playing=playing handle_loaded_metadata=handle_loaded_metadata handle_time_update=handle_time_update toggle_controls=toggle_controls />
+    view! {
+    <div
+        on:mousemove={let show = show_controls.clone(); move |_| show()}
+        dir="ltr"
+        class="relative bg-black rounded-2xl overflow-hidden shadow-2xl shadow-black/50 group"
+    >
+        <VideoElement
+            video_ref=video_ref
+            title=title
+            playing=playing
+            handle_loaded_metadata=handle_loaded_metadata
+            handle_time_update=handle_time_update
+            toggle_controls=toggle_controls
+        />
         <VideoControls
             controls_visible=controls_visible
             show_controls=show_controls
@@ -186,7 +196,8 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
             handle_seek=handle_seek
             handle_volume=handle_volume
         />
-    </div> }
+    </div>
+    }
 }
 
 #[component]
@@ -272,21 +283,27 @@ pub fn ControlButtons(
     toggle_fullscreen: impl Fn(MouseEvent) + 'static,
     handle_volume: impl Fn(web_sys::Event) + 'static,
 ) -> impl IntoView {
-    let play_icon = if playing.get() {
-        Either::Left(PauseIcon())
-    } else {
-        Either::Right(PlayIcon())
+    let play_icon = move || {
+        if playing.get() {
+            Either::Left(PauseIcon())
+        } else {
+            Either::Right(PlayIcon())
+        }
     };
-    let mute_icon = if muted.get() || volume.get() == 0.0 {
-        Either::Left(MuteIcon())
-    } else {
-        Either::Right(VolumeIcon())
+    let mute_icon = move || {
+        if muted.get() || volume.get() == 0.0 {
+            Either::Left(MuteIcon())
+        } else {
+            Either::Right(VolumeIcon())
+        }
     };
-    let vol_value = if muted.get() { 0.0 } else { volume.get() };
-    let full_screen = if fullscreen.get() {
-        Either::Left(FullscreenExitIcon())
-    } else {
-        Either::Right(FullscreenIcon())
+    let vol_value = move || if muted.get() { 0.0 } else { volume.get() };
+    let full_screen = move || {
+        if fullscreen.get() {
+            Either::Left(FullscreenExitIcon())
+        } else {
+            Either::Right(FullscreenIcon())
+        }
     };
     view! {
     <div class="flex items-center gap-4 text-white">
