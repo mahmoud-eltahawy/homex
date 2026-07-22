@@ -15,8 +15,11 @@ mod video_player;
 
 use crate::app::{
     series::{
-        fetch_season, mock_series, Episode, EpisodeSelector, Season, SeasonSelector, Series,
-        SeriesDetailPage, SeriesPage,
+        details::SeriesDetailPage,
+        fetch_season,
+        listing::{
+            mock_series, Episode, EpisodeSelector, Season, SeasonSelector, Series, SeriesPage,
+        },
     },
     video_player::VideoPlayer,
 };
