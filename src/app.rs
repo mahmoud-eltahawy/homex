@@ -496,9 +496,14 @@ fn SearchBox(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl
             search_open.set(false);
         }
     };
+    let class = move || {
+        format!(
+            "relative me-2 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] {}",
+            if search_open.get() { "w-64" } else { "w-10" }
+        )
+    };
     view! {
-        <div class=move || format!("relative me-2 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] {}",
-            if search_open.get() { "w-64" } else { "w-10" })>
+        <div class=class>
             <form on:submit=on_search class="flex items-center">
                 <SearchToggle search_open=search_open/>
                 <SearchInput search_term=search_term search_open=search_open/>

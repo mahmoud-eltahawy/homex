@@ -1,6 +1,7 @@
 use super::{EpUpload, MediaType};
 use crate::app::{
-    DeleteIcon, DownArrow, MediaId, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon,
+    resource_view::ResourceView, DeleteIcon, DownArrow, MediaId, MovieIcon, SeriesIcon, SortIcon,
+    UpArrow, UploadIcon,
 };
 use leptos::{either::Either, prelude::*};
 use leptos_router::{lazy_route, LazyRoute};
@@ -52,12 +53,12 @@ fn Upload(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) -> impl
     let movie_file = RwSignal::new(None::<web_sys::File>);
     let is_new_series = RwSignal::new(true);
     let existing_series_id = RwSignal::new(None::<i64>);
-    let series_list = Memo::new(move |_| series_res.get().and_then(|x| x.ok()).unwrap_or_default());
     let episodes = RwSignal::new(Vec::<EpUpload>::new());
     let next_id = RwSignal::new(1u32);
     let disabled = Signal::derive(move || {
         !is_new_series.get() && matches!(media_type.get(), MediaType::Series)
     });
+
     let handle_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         if matches!(media_type.get(), MediaType::Series) && episodes.get().is_empty() {
@@ -71,11 +72,19 @@ fn Upload(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) -> impl
         is_new_series.set(true);
         existing_series_id.set(None);
     };
+    let adapter = move |series_list: Vec<SeriesTitle>| SeriesSettingsProps {
+        is_new_series,
+        existing_series_id,
+        series_list,
+    };
     let media_input = move || match media_type.get() {
         MediaType::Series => Either::Left(view! {
-            <Suspense fallback=|| view! { <div class="text-gray-400 text-sm">"جارٍ تحميل قائمة المسلسلات..."</div> }>
-                <SeriesSettings is_new_series=is_new_series existing_series_id=existing_series_id series_list=Signal::derive(move || series_list.get())/>
-            </Suspense>
+            <ResourceView
+                resource=series_res
+                view_fn=SeriesSettings
+                adapter=adapter
+                context="جارٍ تحميل قائمة المسلسلات"
+            />
             <EpisodesSection episodes=episodes next_id=next_id/>
         }),
         MediaType::Movie => Either::Right(view! { <MovieFileInput movie_file=movie_file/> }),
@@ -193,7 +202,7 @@ fn DescriptionInput(description: RwSignal<String>) -> impl IntoView {
 fn SeriesSettings(
     is_new_series: RwSignal<bool>,
     existing_series_id: RwSignal<Option<i64>>,
-    series_list: Signal<Vec<SeriesTitle>>,
+    series_list: Vec<SeriesTitle>,
 ) -> impl IntoView {
     view! {
         <div class="space-y-4">
@@ -228,9 +237,14 @@ fn SeriesSettings(
                             class="w-full bg-white/10 backdrop-blur-md text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
                         >
                             <option value="" class="bg-gray-800">"-- اختر --"</option>
-                            <For each={move || series_list.get()} key=|m| m.id let:series>
-                                <option value={series.id.0.to_string()} class="bg-gray-800">{series.title}</option>
-                            </For>
+                            {
+                                series_list.iter().map(|series| view!{
+                                    <option
+                                        value={series.id.0.to_string()}
+                                        class="bg-gray-800"
+                                    >{series.title.clone()}</option>
+                                }).collect_view()
+                            }
                         </select>
                     </div>
                 })
