@@ -52,7 +52,6 @@ pub struct Series {
     pub title: String,
     pub poster: String,
     pub description: Option<String>,
-    pub start_year: Option<u32>,
     pub season_count: u32,
     pub season_summaries: Vec<SeasonSummary>,
 }
@@ -76,7 +75,6 @@ pub fn mock_series() -> Vec<Series> {
             title: "Breaking Bad".into(),
             poster: "https://picsum.photos/seed/breakingbad/300/450".into(),
             description: Some("مدرس كيمياء يتحول إلى تاجر مخدرات.".into()),
-            start_year: Some(2008),
             season_count: 5,
             season_summaries: vec![
                 SeasonSummary {
@@ -94,7 +92,6 @@ pub fn mock_series() -> Vec<Series> {
             title: "Stranger Things".into(),
             poster: "https://picsum.photos/seed/strangerthings/300/450".into(),
             description: Some("مجموعة من الأطفال يكشفون أسرارًا خارقة في بلدتهم.".into()),
-            start_year: Some(2016),
             season_count: 4,
             season_summaries: vec![SeasonSummary {
                 season_number: 1,
@@ -106,7 +103,6 @@ pub fn mock_series() -> Vec<Series> {
             title: "The Crown".into(),
             poster: "https://picsum.photos/seed/thecrown/300/450".into(),
             description: Some("عهد الملكة إليزابيث الثانية.".into()),
-            start_year: Some(2016),
             season_count: 4,
             season_summaries: vec![SeasonSummary {
                 season_number: 1,
@@ -118,7 +114,6 @@ pub fn mock_series() -> Vec<Series> {
             title: "Game of Thrones".into(),
             poster: "https://picsum.photos/seed/got/300/450".into(),
             description: Some("عائلات نبيلة تتصارع على السيطرة على ويستروس.".into()),
-            start_year: Some(2011),
             season_count: 8,
             season_summaries: vec![SeasonSummary {
                 season_number: 1,
@@ -128,7 +123,7 @@ pub fn mock_series() -> Vec<Series> {
     ]
 }
 
-pub(crate) fn mock_season(series_id: i64, season_number: u32) -> Option<Season> {
+pub fn mock_season(series_id: i64, season_number: u32) -> Option<Season> {
     let episodes = match (series_id, season_number) {
         (101, 1) => vec![ep(1011, 1, 1), ep(1012, 1, 2), ep(1013, 1, 3)],
         (101, 2) => vec![ep(1014, 2, 1), ep(1015, 2, 2)],

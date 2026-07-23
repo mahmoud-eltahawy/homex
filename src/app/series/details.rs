@@ -74,7 +74,6 @@ fn SeriesView(
 
     let poster = series.poster.clone();
     let title = series.title.clone();
-    let year = series.start_year;
     let description = series
         .description
         .clone()
@@ -109,7 +108,6 @@ fn SeriesView(
                 <Info
                     poster
                     title
-                    year
                     season_count=series.season_count
                     description
                 />
@@ -142,35 +140,47 @@ fn Poster(src: String) -> impl IntoView {
 }
 
 #[component]
-fn Info(
-    poster: String,
-    title: String,
-    year: Option<u32>,
-    season_count: u32,
-    description: String,
-) -> impl IntoView {
+fn Info(poster: String, title: String, season_count: u32, description: String) -> impl IntoView {
     view! {
-        <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
-            <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
-                <img
-                    src=poster
-                    class="w-full rounded-2xl shadow-2xl border border-white/10"
-                    alt=title.clone()
-                />
-            </div>
-            <div class="flex-1 w-full">
-                <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
-                    <SeriesIcon/> "مسلسل"
-                </div>
-                <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">{title.clone()}</h1>
-                <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
-                    {year.map(|y| view! { <span>{y}</span> })}
-                    <span class="flex items-center gap-1"><ClockIcon/> {format!("{} مواسم", season_count)}</span>
-                    <span>{format!("{} مواسم", season_count)}</span>
-                </div>
-                <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">{description}</p>
-            </div>
+    <div
+        class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start"
+    >
+        <div
+            class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0"
+        >
+            <img
+                src=poster
+                class="w-full rounded-2xl shadow-2xl border border-white/10"
+                alt=title.clone()
+            />
         </div>
+        <div
+            class="flex-1 w-full"
+        >
+            <div
+                class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5"
+                >
+                    <SeriesIcon/>
+                    "مسلسل"
+            </div>
+            <h1
+                class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2"
+            >
+                {title.clone()}
+            </h1>
+            <div
+                class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base"
+            >
+                <span
+                    class="flex items-center gap-1"
+                >
+                    <ClockIcon/>
+                    {format!("{} مواسم", season_count)}
+                </span>
+            </div>
+            <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">{description}</p>
+        </div>
+    </div>
     }
 }
 

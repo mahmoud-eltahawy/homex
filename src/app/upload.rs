@@ -1,30 +1,58 @@
-use super::{fetch_all_media, EpUpload, MediaType};
+use super::{EpUpload, MediaType};
 use crate::app::{
-    DeleteIcon, DownArrow, Media, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon,
+    DeleteIcon, DownArrow, MediaId, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon,
 };
 use leptos::{either::Either, prelude::*};
+use leptos_router::{lazy_route, LazyRoute};
+use serde::{Deserialize, Serialize};
 use web_sys::{wasm_bindgen::JsCast, HtmlInputElement, HtmlSelectElement};
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SeriesTitle {
+    pub id: MediaId,
+    pub title: String,
+}
+
+#[server]
+async fn fetch_series_titles() -> Result<Vec<SeriesTitle>, ServerFnError> {
+    use crate::app::{delay, series::listing::mock_series, Series};
+    delay(200).await;
+    let list = mock_series();
+    let res = list
+        .into_iter()
+        .map(|Series { id, title, .. }| SeriesTitle { id, title })
+        .collect();
+    Ok(res)
+}
+
+pub struct UploadPage {
+    series: Resource<Result<Vec<SeriesTitle>, ServerFnError>>,
+}
+
+#[lazy_route]
+impl LazyRoute for UploadPage {
+    fn data() -> Self {
+        let series = Resource::new(|| (), |_| async move { fetch_series_titles().await });
+        Self { series }
+    }
+
+    fn view(this: Self) -> AnyView {
+        Upload(UploadProps {
+            series_res: this.series,
+        })
+        .into_any()
+    }
+}
+
 #[component]
-pub fn Upload() -> impl IntoView {
+fn Upload(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) -> impl IntoView {
     let title = RwSignal::new(String::new());
     let media_type = RwSignal::new(MediaType::Series);
     let description = RwSignal::new(String::new());
     let movie_file = RwSignal::new(None::<web_sys::File>);
     let is_new_series = RwSignal::new(true);
     let existing_series_id = RwSignal::new(None::<i64>);
-    let all_media = Resource::new(|| (), |_| async move { fetch_all_media().await });
-    let series_list = Memo::new(move |_| {
-        all_media
-            .get()
-            .and_then(|x| x.ok())
-            .map(|m| {
-                m.into_iter()
-                    .filter(|x| matches!(x.kind(), MediaType::Series))
-                    .collect()
-            })
-            .unwrap_or_default()
-    });
+    let series_list = Memo::new(move |_| series_res.get().and_then(|x| x.ok()).unwrap_or_default());
     let episodes = RwSignal::new(Vec::<EpUpload>::new());
     let next_id = RwSignal::new(1u32);
     let disabled = Signal::derive(move || {
@@ -53,13 +81,27 @@ pub fn Upload() -> impl IntoView {
         MediaType::Movie => Either::Right(view! { <MovieFileInput movie_file=movie_file/> }),
     };
     view! {
-        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div
+            class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8"
+        >
             <UploadHeader/>
-            <div class="backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl">
-                <form on:submit=handle_submit class="space-y-6 md:space-y-8">
-                    <MediaKindSelector media_type=media_type/>
-                    <div class="space-y-4">
-                        <TitleInput title=title disabled=disabled/>
+            <div
+                class="backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl"
+            >
+                <form
+                    on:submit=handle_submit
+                    class="space-y-6 md:space-y-8"
+                >
+                    <MediaKindSelector
+                         media_type=media_type
+                     />
+                    <div
+                        class="space-y-4"
+                    >
+                        <TitleInput
+                            title=title
+                            disabled=disabled
+                        />
                         <DescriptionInput description=description/>
                     </div>
                     {media_input}
@@ -81,18 +123,30 @@ fn MediaKindSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
         if matches!(media_type.get(), MediaType::Movie) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })
     };
     view! {
-        <div class="flex justify-center">
-            <div class="inline-flex bg-white/5 rounded-2xl p-1" role="group">
-                <button type="button" on:click=move |_| media_type.set(MediaType::Series) class=class1>
-                    <SeriesIcon/>
-                    "مسلسل"
-                </button>
-                <button type="button" on:click=move |_| media_type.set(MediaType::Movie) class=class2>
-                    <MovieIcon/>
-                    "فيلم"
-                </button>
-            </div>
+    <div
+        class="flex justify-center"
+    >
+        <div
+            class="inline-flex bg-white/5 rounded-2xl p-1" role="group"
+        >
+            <button
+                type="button"
+                on:click=move |_| media_type.set(MediaType::Series)
+                class=class1
+            >
+                <SeriesIcon/>
+                "مسلسل"
+            </button>
+            <button
+                type="button"
+                on:click=move |_| media_type.set(MediaType::Movie)
+                class=class2
+            >
+                <MovieIcon/>
+                "فيلم"
+            </button>
         </div>
+    </div>
     }
 }
 
@@ -104,9 +158,20 @@ fn TitleInput(title: RwSignal<String>, disabled: Signal<bool>) -> impl IntoView 
     };
     view! {
         <div>
-            <label class="block text-sm font-medium text-gray-300 mb-1.5">"العنوان *"</label>
-            <input type="text" prop:value=title on:input=move |ev| title.set(event_target_value(&ev))
-                required placeholder="مثال: Breaking Bad" class=class disabled=disabled.get()/>
+            <label
+                class="block text-sm font-medium text-gray-300 mb-1.5"
+            >
+                "العنوان *"
+            </label>
+            <input
+                type="text"
+                prop:value=title
+                on:input=move |ev| title.set(event_target_value(&ev))
+                required
+                placeholder="مثال: Breaking Bad"
+                class=class
+                disabled=disabled.get()
+            />
         </div>
     }
 }
@@ -128,7 +193,7 @@ fn DescriptionInput(description: RwSignal<String>) -> impl IntoView {
 fn SeriesSettings(
     is_new_series: RwSignal<bool>,
     existing_series_id: RwSignal<Option<i64>>,
-    series_list: Signal<Vec<Media>>,
+    series_list: Signal<Vec<SeriesTitle>>,
 ) -> impl IntoView {
     view! {
         <div class="space-y-4">
@@ -163,8 +228,8 @@ fn SeriesSettings(
                             class="w-full bg-white/10 backdrop-blur-md text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
                         >
                             <option value="" class="bg-gray-800">"-- اختر --"</option>
-                            <For each={move || series_list.get()} key=|m| m.id() let:series>
-                                <option value={series.id().to_string()} class="bg-gray-800">{series.title().to_string()}</option>
+                            <For each={move || series_list.get()} key=|m| m.id let:series>
+                                <option value={series.id.0.to_string()} class="bg-gray-800">{series.title}</option>
                             </For>
                         </select>
                     </div>
@@ -434,12 +499,29 @@ fn EpisodesSection(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) ->
 #[component]
 fn UploadHeader() -> impl IntoView {
     view! {
-        <div class="mb-8 md:mb-10 text-center">
-            <div class="inline-flex items-center justify-center p-4 bg-cyan-400/10 rounded-3xl mb-4">
-                <span class="text-cyan-400"><UploadIcon/></span>
+        <div
+            class="mb-8 md:mb-10 text-center"
+        >
+            <div
+                class="inline-flex items-center justify-center p-4 bg-cyan-400/10 rounded-3xl mb-4"
+            >
+                <span
+                    class="text-cyan-400"
+                >
+                    <UploadIcon/>
+                </span>
             </div>
-            <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">"رفع وسائط جديدة"</h1>
-            <p class="text-gray-400 text-sm sm:text-base mt-2">"أضف فيلمًا أو مسلسلًا إلى مكتبتك المنزلية"</p>
+            <h1
+                class="text-3xl sm:text-4xl md:text-5xl font-black text-white"
+            >
+                "رفع وسائط جديدة"
+            </h1>
+            <p
+                class=
+                    "text-gray-400 text-sm sm:text-base mt-2"
+            >
+                    "أضف فيلمًا أو مسلسلًا إلى مكتبتك المنزلية"
+            </p>
         </div>
     }
 }

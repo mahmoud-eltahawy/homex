@@ -6,7 +6,7 @@ use crate::app::{
             mock_series, Episode, EpisodeSelector, Season, SeasonSelector, Series, SeriesPage,
         },
     },
-    upload::Upload,
+    upload::UploadPage,
     video_player::VideoPlayer,
 };
 use leptos::either::Either;
@@ -77,7 +77,6 @@ pub struct Movie {
     pub title: String,
     pub poster: String,
     pub description: Option<String>,
-    pub year: Option<u32>,
     pub file: MediaFile,
     pub duration: DurationSeconds,
 }
@@ -134,12 +133,6 @@ impl Media {
         match self {
             Media::Movie(m) => &m.poster,
             Media::Series(s) => &s.poster,
-        }
-    }
-    pub fn year(&self) -> Option<u32> {
-        match self {
-            Media::Movie(m) => m.year,
-            Media::Series(s) => s.start_year,
         }
     }
     pub fn description(&self) -> Option<&str> {
@@ -204,7 +197,6 @@ fn mock_movies() -> Vec<Media> {
             title: "Inception".into(),
             poster: "https://picsum.photos/seed/inception/300/450".into(),
             description: Some("لص يسرق أسرار الشركات من خلال تقنية مشاركة الأحلام.".into()),
-            year: Some(2010),
             file: fake_media_file(),
             duration: fake_duration(8880), // 2h28m
         }),
@@ -213,7 +205,6 @@ fn mock_movies() -> Vec<Media> {
             title: "The Matrix".into(),
             poster: "https://picsum.photos/seed/matrix/300/450".into(),
             description: Some("هاكر كمبيوتر يكتشف حقيقة الواقع.".into()),
-            year: Some(1999),
             file: fake_media_file(),
             duration: fake_duration(8160),
         }),
@@ -222,7 +213,6 @@ fn mock_movies() -> Vec<Media> {
             title: "Interstellar".into(),
             poster: "https://picsum.photos/seed/interstellar/300/450".into(),
             description: Some("فريق من المستكشفين يسافرون عبر ثقب دودي في الفضاء.".into()),
-            year: Some(2014),
             file: fake_media_file(),
             duration: fake_duration(10140),
         }),
@@ -231,7 +221,6 @@ fn mock_movies() -> Vec<Media> {
             title: "The Dark Knight".into(),
             poster: "https://picsum.photos/seed/darkknight/300/450".into(),
             description: Some("عندما يهدد الجوكر مدينة غوثام بالدمار.".into()),
-            year: Some(2008),
             file: fake_media_file(),
             duration: fake_duration(9120),
         }),
@@ -240,7 +229,6 @@ fn mock_movies() -> Vec<Media> {
             title: "Pulp Fiction".into(),
             poster: "https://picsum.photos/seed/pulpfiction/300/450".into(),
             description: Some("تتشابك حياة اثنين من القتلة وملاكم وزوجين من اللصوص.".into()),
-            year: Some(1994),
             file: fake_media_file(),
             duration: fake_duration(9240),
         }),
@@ -694,7 +682,6 @@ fn MediaCard(item: Media) -> impl IntoView {
 fn MediaCardImage(item: Media) -> impl IntoView {
     let poster = item.poster().to_string();
     let title = item.title().to_string();
-    let year = item.year();
     let duration_display = item.duration_display();
     view! {
         <div class="aspect-[2/3] relative overflow-hidden">
@@ -705,7 +692,6 @@ fn MediaCardImage(item: Media) -> impl IntoView {
                 <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
                     <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">{title}</h3>
                     <div class="flex items-center gap-2 mt-1 text-gray-300 text-sm">
-                        {year.map(|y| view! { <span>{y}</span> })}
                         <span class="flex items-center"><ClockIcon/>{duration_display}</span>
                     </div>
                 </div>
@@ -736,14 +722,29 @@ fn MediaTypeBadge(kind: MediaType) -> impl IntoView {
 #[component]
 fn MediaCardInfo(item: Media) -> impl IntoView {
     let title = item.title().to_string();
-    let year = item.year();
     let size = item.size_display();
     view! {
-        <div class="p-4 flex flex-col gap-1">
-            <h3 class="text-white font-semibold truncate text-sm">{title}</h3>
-            <div class="flex items-center justify-between text-gray-500 text-xs">
-                <span>{year.map(|y| format!("{} · ", y))}{size}</span>
-                <span class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">"← التفاصيل"</span>
+        <div
+            class="p-4 flex flex-col gap-1"
+        >
+            <h3
+                class="text-white font-semibold truncate text-sm"
+            >
+                {title}
+            </h3>
+            <h4
+                class="text-white font-semibold truncate text-sm"
+            >
+                {size}
+            </h4>
+            <div
+                class="flex items-center justify-between text-gray-500 text-xs"
+            >
+                <span
+                    class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                    "← التفاصيل"
+                </span>
             </div>
         </div>
     }
@@ -781,7 +782,6 @@ fn DetailMetaBadge(media_type: MediaType) -> impl IntoView {
 #[component]
 fn DetailInfo(data: Media) -> impl IntoView {
     let title = data.title().to_string();
-    let year = data.year().map(|y| view! { <span>{y}</span> });
     let duration = data.duration_display();
     let size = data.size_display();
     let description = data.description().unwrap_or("لا يوجد وصف متاح.").to_string();
@@ -797,7 +797,6 @@ fn DetailInfo(data: Media) -> impl IntoView {
     view! {
         <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">{title}</h1>
         <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
-            {year}
             <span class="flex items-center gap-1"><ClockIcon/>{duration}</span>
             <span>{size}</span>
         </div>
@@ -1212,7 +1211,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/") view=Home/>
                     <Route path=path!("/movies") view=Movies/>
                     <Route path=path!("/series") view={Lazy::<SeriesPage>::new()}/>
-                    <Route path=path!("/upload") view=Upload/>
+                    <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>
                     <Route path=path!("/search") view=Search/>
                     <Route path=path!("/settings") view=Settings/>
                     <Route path=path!("/detail/series/:id") view={Lazy::<SeriesDetailPage>::new()}/>
