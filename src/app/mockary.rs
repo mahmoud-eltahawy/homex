@@ -1,12 +1,6 @@
-use super::DurationSeconds;
-use super::FileSize;
-use super::MediaFile;
-use super::Movie;
-use crate::app::series::listing::Episode;
-use crate::app::series::listing::Season;
-use crate::app::series::listing::SeasonSummary;
-use crate::app::series::listing::Series;
-use crate::app::MediaId;
+use crate::app::model::{
+    DurationSeconds, Episode, FileSize, MediaFile, MediaId, Movie, Season, SeasonSummary, Series,
+};
 pub const TEST_VIDEO: &str = "https://www.w3schools.com/html/mov_bbb.mp4";
 
 pub fn mock_series() -> Vec<Series> {

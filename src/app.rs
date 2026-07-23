@@ -2,10 +2,12 @@ use crate::app::{
     home::HomePage,
     icons::{ClockIcon, DownloadIcon, MovieIcon, SeriesIcon},
     layout::Layout,
+    model::{Episode, Media, MediaType, Season},
+    search::Search,
     series::{
         details::SeriesDetailPage,
         fetch_season,
-        listing::{Episode, EpisodeSelector, Season, SeasonSelector, Series, SeriesPage},
+        listing::{EpisodeSelector, SeasonSelector, SeriesPage},
     },
     settings::SettingsPage,
     upload::UploadPage,
@@ -16,16 +18,17 @@ use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{
     components::{ParentRoute, Route, Router, Routes},
-    hooks::{use_navigate, use_params_map, use_query_map},
+    hooks::{use_navigate, use_params_map},
     path, Lazy,
 };
-use serde::{Deserialize, Serialize};
 use web_sys::MouseEvent;
 
 mod home;
 mod icons;
 mod layout;
+mod model;
 mod resource_view;
+mod search;
 mod series;
 mod settings;
 mod upload;
@@ -34,181 +37,39 @@ mod video_player;
 #[cfg(feature = "ssr")]
 mod mockary;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct MediaId(pub i64);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FileSize(pub u64);
-
-impl FileSize {
-    pub fn human_readable(&self) -> String {
-        let bytes = self.0 as f64;
-        if bytes >= 1_000_000_000.0 {
-            format!("{:.1} جيجابايت", bytes / 1_000_000_000.0)
-        } else if bytes >= 1_000_000.0 {
-            format!("{:.1} ميجابايت", bytes / 1_000_000.0)
-        } else if bytes >= 1_000.0 {
-            format!("{:.1} كيلوبايت", bytes / 1_000.0)
-        } else {
-            format!("{} بايت", bytes)
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DurationSeconds(pub u64);
-
-impl DurationSeconds {
-    pub fn human_readable(&self) -> String {
-        let secs = self.0;
-        let hours = secs / 3600;
-        let minutes = (secs % 3600) / 60;
-        let seconds = secs % 60;
-        if hours > 0 {
-            format!("{} ساعة و{} دقيقة", hours, minutes)
-        } else if minutes > 0 {
-            format!("{} دقيقة", minutes)
-        } else {
-            format!("{} ثانية", seconds)
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MediaFile {
-    pub path: String,
-    pub size: FileSize,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Movie {
-    pub id: MediaId,
-    pub title: String,
-    pub poster: String,
-    pub description: Option<String>,
-    pub file: MediaFile,
-    pub duration: DurationSeconds,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Media {
-    Movie(Movie),
-    Series(Series),
-}
-
-// ── Helper methods ──────────────────────────────────────────────────────────
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum MediaType {
-    Movie,
-    Series,
-}
-
-impl std::fmt::Display for MediaType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MediaType::Movie => write!(f, "movie"),
-            MediaType::Series => write!(f, "series"),
-        }
-    }
-}
-
-impl TryFrom<&str> for MediaType {
-    type Error = &'static str;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "movie" => Ok(MediaType::Movie),
-            "series" => Ok(MediaType::Series),
-            _ => Err("Media type must be 'movie' or 'series'"),
-        }
-    }
-}
-
-impl Media {
-    fn kind(&self) -> MediaType {
-        match self {
-            Media::Movie(_) => MediaType::Movie,
-            Media::Series(_) => MediaType::Series,
-        }
-    }
-    pub fn title(&self) -> &str {
-        match self {
-            Media::Movie(m) => &m.title,
-            Media::Series(s) => &s.title,
-        }
-    }
-    pub fn poster(&self) -> &str {
-        match self {
-            Media::Movie(m) => &m.poster,
-            Media::Series(s) => &s.poster,
-        }
-    }
-    pub fn description(&self) -> Option<&str> {
-        match self {
-            Media::Movie(m) => m.description.as_deref(),
-            Media::Series(s) => s.description.as_deref(),
-        }
-    }
-    pub fn duration_display(&self) -> String {
-        match self {
-            Media::Movie(m) => m.duration.human_readable(),
-            Media::Series(s) => format!("{} مواسم", s.season_count),
-        }
-    }
-    pub fn size_display(&self) -> String {
-        match self {
-            Media::Movie(m) => m.file.size.human_readable(),
-            Media::Series(s) => format!("{} مواسم", s.season_count),
-        }
-    }
-    pub fn id(&self) -> i64 {
-        match self {
-            Media::Movie(m) => m.id.0,
-            Media::Series(s) => s.id.0,
-        }
-    }
-    pub fn file_path(&self) -> Option<&str> {
-        match self {
-            Media::Movie(m) => Some(&m.file.path),
-            Media::Series(_) => None,
-        }
-    }
-}
-
 #[cfg(feature = "ssr")]
 async fn delay(ms: i32) {
     tokio::time::sleep(std::time::Duration::from_millis(ms as u64)).await;
 }
 
 #[server]
-async fn fetch_movies() -> Result<Vec<Movie>, ServerFnError> {
+async fn fetch_movies() -> Result<Vec<model::Movie>, ServerFnError> {
     delay(300).await;
     Ok(mockary::mock_movies())
 }
 
 #[server]
-async fn fetch_all_media() -> Result<Vec<Media>, ServerFnError> {
+async fn fetch_all_media() -> Result<Vec<model::Media>, ServerFnError> {
     delay(300).await;
     let mut all = mockary::mock_movies()
         .into_iter()
-        .map(Media::Movie)
+        .map(model::Media::Movie)
         .collect::<Vec<_>>();
-    all.extend(mockary::mock_series().into_iter().map(Media::Series));
+    all.extend(mockary::mock_series().into_iter().map(model::Media::Series));
     Ok(all)
 }
 
 #[server]
-async fn fetch_media_detail(media_type: String, id: i64) -> Result<Media, ServerFnError> {
+async fn fetch_media_detail(media_type: String, id: i64) -> Result<model::Media, ServerFnError> {
     delay(200).await;
     let list: Vec<_> = match media_type.as_str() {
         "movie" => mockary::mock_movies()
             .into_iter()
-            .map(|x| Media::Movie(x))
+            .map(|x| model::Media::Movie(x))
             .collect(),
         "series" => mockary::mock_series()
             .into_iter()
-            .map(|x| Media::Series(x))
+            .map(|x| model::Media::Series(x))
             .collect(),
         _ => return Err(ServerFnError::new("not found")),
     };
@@ -216,8 +77,6 @@ async fn fetch_media_detail(media_type: String, id: i64) -> Result<Media, Server
         .find(|m| m.id() == id)
         .ok_or(ServerFnError::new("not found"))
 }
-
-// ── ICONS ──────────────────────────────────────────────────────────────────
 
 #[component]
 fn MediaCard(item: Media) -> impl IntoView {
@@ -265,12 +124,12 @@ fn MediaCardImage(item: Media) -> impl IntoView {
 #[component]
 fn MediaTypeBadge(kind: MediaType) -> impl IntoView {
     let icon = match kind {
-        MediaType::Movie => Either::Left(MovieIcon()),
-        MediaType::Series => Either::Right(SeriesIcon()),
+        model::MediaType::Movie => Either::Left(MovieIcon()),
+        model::MediaType::Series => Either::Right(SeriesIcon()),
     };
     let name = match kind {
-        MediaType::Movie => "فيلم",
-        MediaType::Series => "مسلسل",
+        model::MediaType::Movie => "فيلم",
+        model::MediaType::Series => "مسلسل",
     };
     view! {
         <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
@@ -324,12 +183,12 @@ fn DetailPoster(poster: String, title: String) -> impl IntoView {
 #[component]
 fn DetailMetaBadge(media_type: MediaType) -> impl IntoView {
     let media_icon = match media_type {
-        MediaType::Movie => Either::Left(MovieIcon()),
-        MediaType::Series => Either::Right(SeriesIcon()),
+        model::MediaType::Movie => Either::Left(MovieIcon()),
+        model::MediaType::Series => Either::Right(SeriesIcon()),
     };
     let name = match media_type {
-        MediaType::Movie => "فيلم",
-        MediaType::Series => "مسلسل",
+        model::MediaType::Movie => "فيلم",
+        model::MediaType::Series => "مسلسل",
     };
     view! {
         <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
@@ -346,7 +205,7 @@ fn DetailInfo(data: Media) -> impl IntoView {
     let size = data.size_display();
     let description = data.description().unwrap_or("لا يوجد وصف متاح.").to_string();
     let download = match &data {
-        Media::Movie(m) => Some(view! {
+        model::Media::Movie(m) => Some(view! {
             <a href=m.file.path.clone()
                 class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm">
                 <DownloadIcon/> "تحميل"
@@ -399,8 +258,8 @@ fn Detail() -> impl IntoView {
     let video_src = Memo::new(move |_| {
         if let Some(Ok(data)) = detail.get() {
             match data {
-                Media::Movie(m) => m.file.path.clone(),
-                Media::Series(_) => selected_episode
+                model::Media::Movie(m) => m.file.path.clone(),
+                model::Media::Series(_) => selected_episode
                     .get()
                     .map(|ep| ep.file.path)
                     .unwrap_or_default(),
@@ -447,7 +306,7 @@ fn DetailBody(
     episodes_resource: Resource<Result<Season, ServerFnError>>,
 ) -> impl IntoView {
     let is_series = matches!(data, Media::Series(_));
-    let series_summaries = if let Media::Series(ref s) = data {
+    let series_summaries = if let model::Media::Series(ref s) = data {
         s.season_summaries.clone()
     } else {
         vec![]
@@ -489,8 +348,6 @@ fn DetailBody(
         }}
     }
 }
-
-// ── HOME PAGE ──────────────────────────────────────────────────────────
 
 // ── MOVIES / SERIES PAGES ──────────────────────────────────────────────
 
@@ -544,97 +401,6 @@ fn Movies() -> impl IntoView {
                         <MediaCard item=Media::Movie(item.clone())/>
                     </For>
                 </div>
-            </Suspense>
-        </div>
-    }
-}
-
-// ── SEARCH PAGE ────────────────────────────────────────────────────────
-
-#[component]
-fn SearchHeaderResults() -> impl IntoView {
-    let query_map = use_query_map();
-    let q = query_map.with(|m| m.get("q").map(|s| s.to_string()).unwrap_or_default());
-    view! {
-        <p class="text-gray-400 text-sm sm:text-base">
-            "نتائج البحث عن" <span class="text-white font-semibold">{format!("\"{}\"", q)}</span>
-        </p>
-    }
-}
-
-#[component]
-fn SearchHeader() -> impl IntoView {
-    let query_map = use_query_map();
-    let query = move || {
-        query_map.with(|m| {
-            m.get("q")
-                .map(|s| s.to_string())
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase()
-        })
-    };
-    view! {
-        <div class="mb-6 md:mb-8">
-            <h1 class="text-3xl sm:text-4xl font-black text-white mb-1">"نتائج البحث"</h1>
-            {move || if query().is_empty() {
-                Either::Left(view! { <p class="text-gray-400 text-sm sm:text-base">"أدخل كلمة بحث للعثور على الوسائط."</p> })
-            } else {
-                Either::Right(SearchHeaderResults())
-            }}
-        </div>
-    }
-}
-
-#[component]
-fn NoSearchResults() -> impl IntoView {
-    view! { <div class="text-center py-16 text-gray-400 text-sm sm:text-base">"لا يوجد وسائط تطابق بحثك."</div> }
-}
-
-#[component]
-fn Search() -> impl IntoView {
-    let query_map = use_query_map();
-    let query = move || {
-        query_map.with(|m| {
-            m.get("q")
-                .map(|s| s.to_string())
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase()
-        })
-    };
-    let all_media = Resource::new(|| (), |_| async move { fetch_all_media().await });
-    let results = Memo::new(move |_| {
-        let q = query();
-        if q.is_empty() {
-            return vec![];
-        }
-        all_media
-            .get()
-            .and_then(|x| x.ok())
-            .map(|media| {
-                media
-                    .into_iter()
-                    .filter(|item| item.title().to_lowercase().contains(&q))
-                    .collect()
-            })
-            .unwrap_or_default()
-    });
-    view! {
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <SearchHeader/>
-            <Suspense fallback=CardsLoading>
-                {move || if results.get().is_empty() {
-                    Either::Left(NoSearchResults())
-                } else {
-                    Either::Right(view! {
-                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                            <For each={move || results.get()} key=|m| m.id() let:item>
-                                <MediaCard item=item.clone()/>
-                            </For>
-                        </div>
-                    })
-                }}
             </Suspense>
         </div>
     }

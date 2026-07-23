@@ -1,8 +1,8 @@
-use super::MediaType;
+use super::model::MediaType;
 use crate::app::{
     icons::{DeleteIcon, DownArrow, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon},
+    model::MediaId,
     resource_view::ResourceView,
-    MediaId,
 };
 use leptos::{either::Either, prelude::*};
 use leptos_router::{lazy_route, LazyRoute};
@@ -24,7 +24,8 @@ pub struct SeriesTitle {
 
 #[server]
 async fn fetch_series_titles() -> Result<Vec<SeriesTitle>, ServerFnError> {
-    use crate::app::{delay, mockary::mock_series, Series};
+    use crate::app::model::Series;
+    use crate::app::{delay, mockary::mock_series};
     delay(200).await;
     let list = mock_series();
     let res = list

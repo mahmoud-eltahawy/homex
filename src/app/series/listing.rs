@@ -1,11 +1,12 @@
 use crate::app::{
-    icons::SeriesIcon, series::fetch_series, CardsLoading, DurationSeconds, Media, MediaCard,
-    MediaFile, MediaId, MediaPageHeader,
+    icons::SeriesIcon,
+    model::{Episode, Media, SeasonSummary, Series},
+    series::fetch_series,
+    CardsLoading, MediaCard, MediaPageHeader,
 };
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos_router::{lazy_route, LazyRoute};
-use serde::{Deserialize, Serialize};
 use web_sys::HtmlSelectElement;
 
 pub struct SeriesPage {
@@ -36,37 +37,6 @@ impl LazyRoute for SeriesPage {
         }
         .into_any()
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Episode {
-    pub id: i64,
-    pub season: u32,
-    pub episode: u32,
-    pub file: MediaFile,
-    pub duration: DurationSeconds,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Series {
-    pub id: MediaId,
-    pub title: String,
-    pub poster: String,
-    pub description: Option<String>,
-    pub season_count: u32,
-    pub season_summaries: Vec<SeasonSummary>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SeasonSummary {
-    pub season_number: u32,
-    pub episode_count: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Season {
-    pub season_number: u32,
-    pub episodes: Vec<Episode>,
 }
 
 #[component]

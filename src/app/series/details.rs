@@ -1,11 +1,9 @@
-use super::{
-    fetch_season, fetch_series_detail,
-    listing::{Episode, Season, Series},
-};
+use super::{fetch_season, fetch_series_detail};
 use crate::app::{
     icons::{ClockIcon, SeriesIcon},
+    model::{Episode, Season, SeasonSummary, Series},
     resource_view::ResourceView,
-    series::listing::{EpisodeSelector, EpisodeSelectorProps, SeasonSelector, SeasonSummary},
+    series::listing::{EpisodeSelector, EpisodeSelectorProps, SeasonSelector},
     video_player::VideoPlayer,
 };
 use leptos::prelude::*;
