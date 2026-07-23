@@ -96,7 +96,7 @@ impl LazyRoute for HomePage {
                     view_fn=MediaSection
                     adapter=series_adapter
                     fallback=CardsLoading
-                    context="تحميل الافلام"
+                    context="تحميل مسلسلات"
                 />
             </div>
         }
