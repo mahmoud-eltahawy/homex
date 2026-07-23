@@ -1,5 +1,5 @@
 use crate::app::{
-    home::Home,
+    home::HomePage,
     series::{
         details::SeriesDetailPage,
         fetch_season,
@@ -1148,7 +1148,7 @@ pub fn App() -> impl IntoView {
         <Router>
             <Routes fallback=|| "Page not found.".into_view()>
                 <ParentRoute path=path!("") view=Layout>
-                    <Route path=path!("/") view=Home/>
+                    <Route path=path!("/") view={Lazy::<HomePage>::new()}/>
                     <Route path=path!("/movies") view=Movies/>
                     <Route path=path!("/series") view={Lazy::<SeriesPage>::new()}/>
                     <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>

@@ -1,7 +1,7 @@
 use super::{fetch_all_media, Media, MediaType};
 use crate::app::{resource_view::ResourceView, CardsLoading, MediaCard, MovieIcon, SeriesIcon};
 use leptos::prelude::*;
-use leptos_router::hooks::use_navigate;
+use leptos_router::{hooks::use_navigate, lazy_route, LazyRoute};
 use web_sys::MouseEvent;
 
 #[component]
@@ -50,21 +50,32 @@ pub fn MediaSection(
     }
 }
 
-#[component]
-pub fn Home() -> impl IntoView {
-    let media = Resource::new(|| (), |_| async move { fetch_all_media().await });
-    let adapter = move |media: Vec<Media>| MediaViewProps { media };
-    view! {
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <HomeHero/>
-            <ResourceView
-                resource=media
-                view_fn=MediaView
-                adapter=adapter
-                fallback=CardsLoading
-                context="تحميل الميديا"
-            />
-        </div>
+pub struct HomePage {
+    media: Resource<Result<Vec<Media>, ServerFnError>>,
+}
+
+#[lazy_route]
+impl LazyRoute for HomePage {
+    fn data() -> Self {
+        let media = Resource::new(|| (), |_| async move { fetch_all_media().await });
+        Self { media }
+    }
+
+    fn view(this: Self) -> AnyView {
+        let adapter = move |media: Vec<Media>| MediaViewProps { media };
+        view! {
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <HomeHero/>
+                <ResourceView
+                    resource=this.media
+                    view_fn=MediaView
+                    adapter=adapter
+                    fallback=CardsLoading
+                    context="تحميل الميديا"
+                />
+            </div>
+        }
+        .into_any()
     }
 }
 
