@@ -1,12 +1,13 @@
 use crate::app::{
-    fake_duration, fake_media_file, series::fetch_series, CardsLoading, DurationSeconds, Media,
-    MediaCard, MediaFile, MediaId, MediaPageHeader, SeriesIcon,
+    icons::SeriesIcon, series::fetch_series, CardsLoading, DurationSeconds, Media, MediaCard,
+    MediaFile, MediaId, MediaPageHeader,
 };
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{Deserialize, Serialize};
 use web_sys::HtmlSelectElement;
+
 pub struct SeriesPage {
     pub(crate) data: Resource<Result<Vec<Series>, ServerFnError>>,
 }
@@ -66,86 +67,6 @@ pub struct SeasonSummary {
 pub struct Season {
     pub season_number: u32,
     pub episodes: Vec<Episode>,
-}
-
-pub fn mock_series() -> Vec<Series> {
-    vec![
-        Series {
-            id: MediaId(101),
-            title: "Breaking Bad".into(),
-            poster: "https://picsum.photos/seed/breakingbad/300/450".into(),
-            description: Some("مدرس كيمياء يتحول إلى تاجر مخدرات.".into()),
-            season_count: 5,
-            season_summaries: vec![
-                SeasonSummary {
-                    season_number: 1,
-                    episode_count: 3,
-                },
-                SeasonSummary {
-                    season_number: 2,
-                    episode_count: 2,
-                },
-            ],
-        },
-        Series {
-            id: MediaId(102),
-            title: "Stranger Things".into(),
-            poster: "https://picsum.photos/seed/strangerthings/300/450".into(),
-            description: Some("مجموعة من الأطفال يكشفون أسرارًا خارقة في بلدتهم.".into()),
-            season_count: 4,
-            season_summaries: vec![SeasonSummary {
-                season_number: 1,
-                episode_count: 2,
-            }],
-        },
-        Series {
-            id: MediaId(103),
-            title: "The Crown".into(),
-            poster: "https://picsum.photos/seed/thecrown/300/450".into(),
-            description: Some("عهد الملكة إليزابيث الثانية.".into()),
-            season_count: 4,
-            season_summaries: vec![SeasonSummary {
-                season_number: 1,
-                episode_count: 1,
-            }],
-        },
-        Series {
-            id: MediaId(104),
-            title: "Game of Thrones".into(),
-            poster: "https://picsum.photos/seed/got/300/450".into(),
-            description: Some("عائلات نبيلة تتصارع على السيطرة على ويستروس.".into()),
-            season_count: 8,
-            season_summaries: vec![SeasonSummary {
-                season_number: 1,
-                episode_count: 2,
-            }],
-        },
-    ]
-}
-
-pub fn mock_season(series_id: i64, season_number: u32) -> Option<Season> {
-    let episodes = match (series_id, season_number) {
-        (101, 1) => vec![ep(1011, 1, 1), ep(1012, 1, 2), ep(1013, 1, 3)],
-        (101, 2) => vec![ep(1014, 2, 1), ep(1015, 2, 2)],
-        (102, 1) => vec![ep(1021, 1, 1), ep(1022, 1, 2)],
-        (103, 1) => vec![ep(1031, 1, 1)],
-        (104, 1) => vec![ep(1041, 1, 1), ep(1042, 1, 2)],
-        _ => return None,
-    };
-    Some(Season {
-        season_number,
-        episodes,
-    })
-}
-
-pub fn ep(id: i64, season: u32, episode: u32) -> Episode {
-    Episode {
-        id,
-        season,
-        episode,
-        file: fake_media_file(),
-        duration: fake_duration(3600), // 1 hour per episode
-    }
 }
 
 #[component]

@@ -1,10 +1,11 @@
+use crate::app::icons::{
+    FullscreenExitIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, VolumeIcon,
+};
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos::{either::Either, ev::fullscreenchange};
 use leptos_use::{use_document, use_event_listener, use_timeout_fn, UseTimeoutFnReturn};
 use web_sys::{HtmlInputElement, MouseEvent};
-
-use super::{FullscreenExitIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, VolumeIcon};
 
 #[component]
 pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>) -> impl IntoView {

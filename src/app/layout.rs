@@ -1,6 +1,5 @@
+use crate::app::icons::SearchIcon;
 use crate::app::AppLink;
-use crate::app::SearchIcon;
-
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 use leptos_router::hooks::use_navigate;

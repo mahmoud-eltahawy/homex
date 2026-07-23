@@ -1,9 +1,10 @@
-use super::{fetch_all_media, Media, MediaType};
+use super::{Media, MediaType};
 use crate::app::{
     fetch_movies,
+    icons::{MovieIcon, SeriesIcon},
     resource_view::ResourceView,
     series::{fetch_series, listing::Series},
-    CardsLoading, MediaCard, Movie, MovieIcon, SeriesIcon,
+    CardsLoading, MediaCard, Movie,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_navigate, lazy_route, LazyRoute};

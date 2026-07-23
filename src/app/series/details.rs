@@ -3,10 +3,10 @@ use super::{
     listing::{Episode, Season, Series},
 };
 use crate::app::{
+    icons::{ClockIcon, SeriesIcon},
     resource_view::ResourceView,
     series::listing::{EpisodeSelector, EpisodeSelectorProps, SeasonSelector, SeasonSummary},
     video_player::VideoPlayer,
-    ClockIcon, SeriesIcon,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};

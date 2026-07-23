@@ -1,12 +1,20 @@
-use super::{EpUpload, MediaType};
+use super::MediaType;
 use crate::app::{
-    resource_view::ResourceView, DeleteIcon, DownArrow, MediaId, MovieIcon, SeriesIcon, SortIcon,
-    UpArrow, UploadIcon,
+    icons::{DeleteIcon, DownArrow, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon},
+    resource_view::ResourceView,
+    MediaId,
 };
 use leptos::{either::Either, prelude::*};
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{Deserialize, Serialize};
 use web_sys::{wasm_bindgen::JsCast, HtmlInputElement, HtmlSelectElement};
+
+#[derive(Clone, Debug)]
+pub struct EpUpload {
+    pub id: u32,
+    pub file: web_sys::File,
+    pub title: String,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SeriesTitle {
@@ -16,7 +24,7 @@ pub struct SeriesTitle {
 
 #[server]
 async fn fetch_series_titles() -> Result<Vec<SeriesTitle>, ServerFnError> {
-    use crate::app::{delay, series::listing::mock_series, Series};
+    use crate::app::{delay, mockary::mock_series, Series};
     delay(200).await;
     let list = mock_series();
     let res = list
