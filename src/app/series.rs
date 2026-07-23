@@ -24,7 +24,7 @@ pub async fn fetch_season(
 }
 
 #[server]
-async fn fetch_series() -> Result<Vec<listing::Series>, ServerFnError> {
+pub async fn fetch_series() -> Result<Vec<listing::Series>, ServerFnError> {
     delay(300).await;
     Ok(listing::mock_series())
 }

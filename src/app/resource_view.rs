@@ -15,7 +15,7 @@ where
     ResourceValue: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
     ViewValue: IntoView + Send + 'static,
     ResourceViewFn: Send + Sync + 'static + Fn(Props) -> ViewValue,
-    Props: Send + Sync + 'static,
+    Props: Send + 'static,
     Adapter: Fn(ResourceValue) -> Props + Send + 'static,
 {
     let fallback = {

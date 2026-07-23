@@ -8,6 +8,7 @@ use crate::app::{
             mock_series, Episode, EpisodeSelector, Season, SeasonSelector, Series, SeriesPage,
         },
     },
+    settings::SettingsPage,
     upload::UploadPage,
     video_player::VideoPlayer,
 };
@@ -26,6 +27,7 @@ mod home;
 mod layout;
 mod resource_view;
 mod series;
+mod settings;
 mod upload;
 mod video_player;
 
@@ -194,48 +196,48 @@ fn fake_duration(seconds: u64) -> DurationSeconds {
     DurationSeconds(seconds)
 }
 
-fn mock_movies() -> Vec<Media> {
+fn mock_movies() -> Vec<Movie> {
     vec![
-        Media::Movie(Movie {
+        Movie {
             id: MediaId(1),
             title: "Inception".into(),
             poster: "https://picsum.photos/seed/inception/300/450".into(),
             description: Some("لص يسرق أسرار الشركات من خلال تقنية مشاركة الأحلام.".into()),
             file: fake_media_file(),
             duration: fake_duration(8880), // 2h28m
-        }),
-        Media::Movie(Movie {
+        },
+        Movie {
             id: MediaId(2),
             title: "The Matrix".into(),
             poster: "https://picsum.photos/seed/matrix/300/450".into(),
             description: Some("هاكر كمبيوتر يكتشف حقيقة الواقع.".into()),
             file: fake_media_file(),
             duration: fake_duration(8160),
-        }),
-        Media::Movie(Movie {
+        },
+        Movie {
             id: MediaId(3),
             title: "Interstellar".into(),
             poster: "https://picsum.photos/seed/interstellar/300/450".into(),
             description: Some("فريق من المستكشفين يسافرون عبر ثقب دودي في الفضاء.".into()),
             file: fake_media_file(),
             duration: fake_duration(10140),
-        }),
-        Media::Movie(Movie {
+        },
+        Movie {
             id: MediaId(4),
             title: "The Dark Knight".into(),
             poster: "https://picsum.photos/seed/darkknight/300/450".into(),
             description: Some("عندما يهدد الجوكر مدينة غوثام بالدمار.".into()),
             file: fake_media_file(),
             duration: fake_duration(9120),
-        }),
-        Media::Movie(Movie {
+        },
+        Movie {
             id: MediaId(5),
             title: "Pulp Fiction".into(),
             poster: "https://picsum.photos/seed/pulpfiction/300/450".into(),
             description: Some("تتشابك حياة اثنين من القتلة وملاكم وزوجين من اللصوص.".into()),
             file: fake_media_file(),
             duration: fake_duration(9240),
-        }),
+        },
     ]
 }
 
@@ -245,7 +247,7 @@ async fn delay(ms: i32) {
 }
 
 #[server]
-async fn fetch_movies() -> Result<Vec<Media>, ServerFnError> {
+async fn fetch_movies() -> Result<Vec<Movie>, ServerFnError> {
     delay(300).await;
     Ok(mock_movies())
 }
@@ -253,7 +255,10 @@ async fn fetch_movies() -> Result<Vec<Media>, ServerFnError> {
 #[server]
 async fn fetch_all_media() -> Result<Vec<Media>, ServerFnError> {
     delay(300).await;
-    let mut all = mock_movies();
+    let mut all = mock_movies()
+        .into_iter()
+        .map(Media::Movie)
+        .collect::<Vec<_>>();
     all.extend(mock_series().into_iter().map(Media::Series));
     Ok(all)
 }
@@ -261,8 +266,8 @@ async fn fetch_all_media() -> Result<Vec<Media>, ServerFnError> {
 #[server]
 async fn fetch_media_detail(media_type: String, id: i64) -> Result<Media, ServerFnError> {
     delay(200).await;
-    let list = match media_type.as_str() {
-        "movie" => mock_movies(),
+    let list: Vec<_> = match media_type.as_str() {
+        "movie" => mock_movies().into_iter().map(|x| Media::Movie(x)).collect(),
         "series" => mock_series()
             .into_iter()
             .map(|x| Media::Series(x))
@@ -687,9 +692,11 @@ fn CardSkeleton() -> impl IntoView {
 
 #[component]
 fn CardsLoading() -> impl IntoView {
-    let cards = (0..8).map(|_| CardSkeleton()).collect_view();
+    let cards = (0..5).map(|_| CardSkeleton()).collect_view();
     view! {
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
+        <div
+            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6 my-15"
+        >
             {cards}
         </div>
     }
@@ -703,8 +710,8 @@ fn Movies() -> impl IntoView {
             <MediaPageHeader title="أفلام".to_string() icon=MovieIcon()/>
             <Suspense fallback=CardsLoading>
                 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                    <For each={move || movies.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id() let:item>
-                        <MediaCard item=item.clone()/>
+                    <For each={move || movies.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
+                        <MediaCard item=Media::Movie(item.clone())/>
                     </For>
                 </div>
             </Suspense>
@@ -803,20 +810,6 @@ fn Search() -> impl IntoView {
     }
 }
 
-// ── SETTINGS ───────────────────────────────────────────────────────────
-
-#[component]
-fn Settings() -> impl IntoView {
-    view! {
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-            <div class="text-center text-white">
-                <h1 class="text-4xl font-black mb-4">الإعدادات</h1>
-                <p class="text-gray-400">سيتم إضافة صفحة الإعدادات قريباً.</p>
-            </div>
-        </div>
-    }
-}
-
 // ── SHELL & APP ────────────────────────────────────────────────────────
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -871,7 +864,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/series") view={Lazy::<SeriesPage>::new()}/>
                     <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>
                     <Route path=path!("/search") view=Search/>
-                    <Route path=path!("/settings") view=Settings/>
+                    <Route path=path!("/settings") view={Lazy::<SettingsPage>::new()}/>
                     <Route path=path!("/detail/series/:id") view={Lazy::<SeriesDetailPage>::new()}/>
                     <Route path=path!("/detail/movie/:id") view=Detail/>
                 </ParentRoute>

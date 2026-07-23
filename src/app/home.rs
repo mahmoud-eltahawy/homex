@@ -1,5 +1,10 @@
 use super::{fetch_all_media, Media, MediaType};
-use crate::app::{resource_view::ResourceView, CardsLoading, MediaCard, MovieIcon, SeriesIcon};
+use crate::app::{
+    fetch_movies,
+    resource_view::ResourceView,
+    series::{fetch_series, listing::Series},
+    CardsLoading, MediaCard, Movie, MovieIcon, SeriesIcon,
+};
 use leptos::prelude::*;
 use leptos_router::{hooks::use_navigate, lazy_route, LazyRoute};
 use web_sys::MouseEvent;
@@ -51,41 +56,50 @@ pub fn MediaSection(
 }
 
 pub struct HomePage {
-    media: Resource<Result<Vec<Media>, ServerFnError>>,
+    series: Resource<Result<Vec<Series>, ServerFnError>>,
+    movies: Resource<Result<Vec<Movie>, ServerFnError>>,
 }
 
 #[lazy_route]
 impl LazyRoute for HomePage {
     fn data() -> Self {
-        let media = Resource::new(|| (), |_| async move { fetch_all_media().await });
-        Self { media }
+        let series = Resource::new(|| (), |_| async move { fetch_series().await });
+        let movies = Resource::new(|| (), |_| async move { fetch_movies().await });
+        Self { series, movies }
     }
 
     fn view(this: Self) -> AnyView {
-        let adapter = move |media: Vec<Media>| MediaViewProps { media };
+        let movie_adapter = move |movies: Vec<Movie>| MediaSectionProps {
+            title: "أفلام".to_string(),
+            icon: MovieIcon(),
+            items: movies.into_iter().map(Media::Movie).collect(),
+            kind: MediaType::Movie,
+        };
+        let series_adapter = move |series: Vec<Series>| MediaSectionProps {
+            title: "مسلسلات".to_string(),
+            icon: SeriesIcon(),
+            items: series.into_iter().map(Media::Series).collect(),
+            kind: MediaType::Series,
+        };
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <HomeHero/>
                 <ResourceView
-                    resource=this.media
-                    view_fn=MediaView
-                    adapter=adapter
+                    resource=this.movies
+                    view_fn=MediaSection
+                    adapter=movie_adapter
                     fallback=CardsLoading
-                    context="تحميل الميديا"
+                    context="تحميل الافلام"
+                />
+                <ResourceView
+                    resource=this.series
+                    view_fn=MediaSection
+                    adapter=series_adapter
+                    fallback=CardsLoading
+                    context="تحميل الافلام"
                 />
             </div>
         }
         .into_any()
-    }
-}
-
-#[component]
-fn MediaView(media: Vec<Media>) -> impl IntoView {
-    let (movies, series): (Vec<_>, Vec<_>) = media
-        .into_iter()
-        .partition(|m| matches!(m.kind(), MediaType::Movie));
-    view! {
-        <MediaSection title="أفلام".to_string() icon=MovieIcon() items=movies kind=MediaType::Movie />
-        <MediaSection title="مسلسلات".to_string() icon=SeriesIcon() items=series kind=MediaType::Series />
     }
 }
