@@ -63,6 +63,17 @@ pub enum Media {
     Series(Series),
 }
 
+impl Into<Media> for Series {
+    fn into(self) -> Media {
+        Media::Series(self)
+    }
+}
+impl Into<Media> for Movie {
+    fn into(self) -> Media {
+        Media::Movie(self)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MediaType {
     Movie,

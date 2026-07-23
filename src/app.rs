@@ -3,6 +3,7 @@ use crate::app::{
     icons::{ClockIcon, DownloadIcon, MovieIcon, SeriesIcon},
     layout::Layout,
     model::{Episode, Media, MediaType, Season},
+    movies::MoviesPage,
     search::Search,
     series::{
         details::SeriesDetailPage,
@@ -27,6 +28,7 @@ mod home;
 mod icons;
 mod layout;
 mod model;
+mod movies;
 mod resource_view;
 mod search;
 mod series;
@@ -76,6 +78,19 @@ async fn fetch_media_detail(media_type: String, id: i64) -> Result<model::Media,
     list.into_iter()
         .find(|m| m.id() == id)
         .ok_or(ServerFnError::new("not found"))
+}
+
+#[component]
+fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
+    view! {
+        <div class="flex items-center gap-4 mb-6 md:mb-8">
+            <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
+            <div>
+                <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
+                <p class="text-gray-400 text-sm md:text-base mt-0.5">"تصفح مجموعة "{title}"ك"</p>
+            </div>
+        </div>
+    }
 }
 
 #[component]
@@ -349,34 +364,6 @@ fn DetailBody(
     }
 }
 
-// ── MOVIES / SERIES PAGES ──────────────────────────────────────────────
-
-#[component]
-fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
-    view! {
-        <div class="flex items-center gap-4 mb-6 md:mb-8">
-            <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
-            <div>
-                <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
-                <p class="text-gray-400 text-sm md:text-base mt-0.5">"تصفح مجموعة "{title}"ك"</p>
-            </div>
-        </div>
-    }
-}
-
-#[component]
-fn CardSkeleton() -> impl IntoView {
-    view! {
-        <div class="animate-pulse rounded-2xl bg-[#1a1a24]/60 border border-white/5 overflow-hidden shadow-xl">
-            <div class="aspect-[2/3] bg-gradient-to-b from-[#2a2a3a] to-[#1a1a24]"></div>
-            <div class="p-4 space-y-2">
-                <div class="h-3 bg-[#2a2a3a] rounded w-3/4"></div>
-                <div class="h-2 bg-[#2a2a3a] rounded w-1/2"></div>
-            </div>
-        </div>
-    }
-}
-
 #[component]
 fn CardsLoading() -> impl IntoView {
     let cards = (0..5).map(|_| CardSkeleton()).collect_view();
@@ -390,18 +377,14 @@ fn CardsLoading() -> impl IntoView {
 }
 
 #[component]
-fn Movies() -> impl IntoView {
-    let movies = Resource::new(|| (), |_| async move { fetch_movies().await });
+fn CardSkeleton() -> impl IntoView {
     view! {
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <MediaPageHeader title="أفلام".to_string() icon=MovieIcon()/>
-            <Suspense fallback=CardsLoading>
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                    <For each={move || movies.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
-                        <MediaCard item=Media::Movie(item.clone())/>
-                    </For>
-                </div>
-            </Suspense>
+        <div class="animate-pulse rounded-2xl bg-[#1a1a24]/60 border border-white/5 overflow-hidden shadow-xl">
+            <div class="aspect-[2/3] bg-gradient-to-b from-[#2a2a3a] to-[#1a1a24]"></div>
+            <div class="p-4 space-y-2">
+                <div class="h-3 bg-[#2a2a3a] rounded w-3/4"></div>
+                <div class="h-2 bg-[#2a2a3a] rounded w-1/2"></div>
+            </div>
         </div>
     }
 }
@@ -456,7 +439,7 @@ pub fn App() -> impl IntoView {
             <Routes fallback=|| "Page not found.".into_view()>
                 <ParentRoute path=path!("") view=Layout>
                     <Route path=path!("/") view={Lazy::<HomePage>::new()}/>
-                    <Route path=path!("/movies") view=Movies/>
+                    <Route path=path!("/movies") view={Lazy::<MoviesPage>::new()}/>
                     <Route path=path!("/series") view={Lazy::<SeriesPage>::new()}/>
                     <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>
                     <Route path=path!("/search") view=Search/>

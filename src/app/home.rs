@@ -28,10 +28,10 @@ pub fn HomeHero() -> impl IntoView {
 }
 
 #[component]
-pub fn MediaSection(
+fn MediaSection(
     title: String,
     icon: impl IntoView,
-    items: Vec<Media>,
+    items: Vec<impl Into<Media>>,
     kind: MediaType,
 ) -> impl IntoView {
     let navigate = use_navigate();
@@ -51,7 +51,7 @@ pub fn MediaSection(
                 </a>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                {items.into_iter().take(5).map(|item| view! { <MediaCard item=item/> }).collect_view()}
+                {items.into_iter().take(5).map(|item| view! { <MediaCard item=item.into()/> }).collect_view()}
             </div>
         </section>
     }
@@ -74,13 +74,13 @@ impl LazyRoute for HomePage {
         let movie_adapter = move |movies: Vec<Movie>| MediaSectionProps {
             title: "أفلام".to_string(),
             icon: MovieIcon(),
-            items: movies.into_iter().map(Media::Movie).collect(),
+            items: movies,
             kind: MediaType::Movie,
         };
         let series_adapter = move |series: Vec<Series>| MediaSectionProps {
             title: "مسلسلات".to_string(),
             icon: SeriesIcon(),
-            items: series.into_iter().map(Media::Series).collect(),
+            items: series,
             kind: MediaType::Series,
         };
         view! {
