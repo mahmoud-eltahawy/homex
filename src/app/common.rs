@@ -2,7 +2,7 @@ use crate::app::{
     icons::{ClockIcon, MovieIcon, SeriesIcon},
     model::{Media, Movie, Series},
 };
-use leptos::prelude::*;
+use leptos::{either::Either, prelude::*};
 
 // ── Shared shell ──────────────────────────────────────────────
 #[component]
@@ -140,8 +140,8 @@ fn SeriesCardInfo(item: Series) -> impl IntoView {
 #[component]
 pub fn MediaCard(item: Media) -> impl IntoView {
     match item {
-        Media::Movie(item) => view! { <MovieCard item=item/> }.into_any(),
-        Media::Series(item) => view! { <SeriesCard item=item/> }.into_any(),
+        Media::Movie(item) => Either::Left(view! { <MovieCard item=item/> }),
+        Media::Series(item) => Either::Right(view! { <SeriesCard item=item/> }),
     }
 }
 
