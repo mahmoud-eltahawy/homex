@@ -1,5 +1,5 @@
 use super::fetch_all_media;
-use crate::app::{CardsLoading, MediaCard};
+use crate::app::common::{CardsLoading, MediaCard};
 use leptos::{either::Either, prelude::*};
 use leptos_router::hooks::use_query_map;
 

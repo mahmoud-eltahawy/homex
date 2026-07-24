@@ -1,8 +1,28 @@
 use crate::app::icons::SearchIcon;
-use crate::app::AppLink;
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 use leptos_router::hooks::use_navigate;
+use web_sys::MouseEvent;
+
+#[component]
+pub fn AppLink(
+    href: impl Into<String>,
+    #[prop(optional)] class: &'static str,
+    children: Children,
+) -> impl IntoView {
+    let href: String = href.into();
+    let navigate = use_navigate();
+    let href_clone = href.clone();
+    let on_click = move |ev: MouseEvent| {
+        ev.prevent_default();
+        navigate(&href_clone, Default::default());
+    };
+    view! {
+        <a href=href on:click=on_click class=class>
+            {children()}
+        </a>
+    }
+}
 
 #[component]
 pub fn Layout() -> impl IntoView {

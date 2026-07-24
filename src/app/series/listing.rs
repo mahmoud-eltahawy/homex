@@ -1,8 +1,8 @@
 use crate::app::{
+    common::{CardsLoading, MediaCard, MediaPageHeader},
     icons::SeriesIcon,
     model::{Episode, Media, SeasonSummary, Series},
     series::fetch_series,
-    CardsLoading, MediaCard, MediaPageHeader,
 };
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
