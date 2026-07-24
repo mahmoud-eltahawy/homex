@@ -1,28 +1,6 @@
 use crate::app::icons::SearchIcon;
 use leptos::prelude::*;
-use leptos_router::components::Outlet;
-use leptos_router::hooks::use_navigate;
-use web_sys::MouseEvent;
-
-#[component]
-pub fn AppLink(
-    href: impl Into<String>,
-    #[prop(optional)] class: &'static str,
-    children: Children,
-) -> impl IntoView {
-    let href: String = href.into();
-    let navigate = use_navigate();
-    let href_clone = href.clone();
-    let on_click = move |ev: MouseEvent| {
-        ev.prevent_default();
-        navigate(&href_clone, Default::default());
-    };
-    view! {
-        <a href=href on:click=on_click class=class>
-            {children()}
-        </a>
-    }
-}
+use leptos_router::{components::Outlet, hooks::use_navigate};
 
 #[component]
 pub fn Layout() -> impl IntoView {
@@ -70,12 +48,12 @@ fn NavbarTop() -> impl IntoView {
 #[component]
 fn NavbarBrand() -> impl IntoView {
     view! {
-        <AppLink
-            href="/"
+        <a
+            href="/".to_string()
             class="flex items-center gap-2 text-2xl sm:text-3xl md:text-4xl font-black tracking-tighter"
         >
             <span class="bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">وسائطي</span>
-        </AppLink>
+        </a>
     }
 }
 
@@ -93,12 +71,12 @@ fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -
 #[component]
 fn NavLink(href: &'static str, label: &'static str) -> impl IntoView {
     view! {
-        <AppLink
-            href=href
+        <a
+            href=href.to_string()
             class="px-4 py-2 rounded-2xl text-sm font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-all duration-300 backdrop-blur-sm"
         >
             {label}
-        </AppLink>
+        </a>
     }
 }
 
@@ -124,7 +102,12 @@ fn SearchBox(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl
     };
     view! {
         <div class=class>
-            <form on:submit=on_search class="flex items-center">
+            <form
+                action="/search"
+                method="get"
+                on:submit=on_search
+                class="flex items-center"
+            >
                 <SearchToggle search_open=search_open/>
                 <SearchInput search_term=search_term search_open=search_open/>
             </form>
@@ -151,6 +134,7 @@ fn SearchInput(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> im
     };
     view! {
         <input type="text"
+            name="q"
             prop:value=search_term
             on:input=move |ev| search_term.set(event_target_value(&ev))
             on:focus=move |_| search_open.set(true)
@@ -174,13 +158,18 @@ fn MobileSearch(search_term: RwSignal<String>) -> impl IntoView {
             );
         }
     };
-    let on_input = move |ev| search_term.set(event_target_value(&ev));
     view! {
         <div class="md:hidden flex items-center gap-2">
-            <form on:submit=on_search class="relative flex items-center">
+            <form
+                action="/search"
+                method="get"
+                on:submit=on_search
+                class="relative flex items-center"
+            >
                 <input type="text"
+                    name="q"
                     prop:value=search_term
-                    on:input=on_input
+                    on:input=move |ev| search_term.set(event_target_value(&ev))
                     placeholder="ابحث..."
                     class="w-28 sm:w-36 bg-white/10 backdrop-blur-xl text-white placeholder-gray-400 rounded-full py-1.5 pe-3 ps-3 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400/50"
                 />
@@ -229,12 +218,12 @@ fn FooterGrid() -> impl IntoView {
 fn FooterBrand() -> impl IntoView {
     view! {
         <div class="space-y-4">
-            <AppLink
-                href="/"
+            <a
+                href="/".to_string()
                 class="text-2xl font-black tracking-tighter"
             >
                 <span class="bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">وسائطي</span>
-            </AppLink>
+            </a>
             <p
                 class="text-gray-400 text-sm max-w-xs leading-relaxed"
             >
@@ -281,7 +270,6 @@ fn FooterCopyright() -> impl IntoView {
     }
 }
 
-// ── PERCENT ENCODING ──────────────────────────────────────────────────────
 fn encode_uri_component(s: &str) -> String {
     s.chars().fold(String::new(), |mut acc, c| {
         match c {
