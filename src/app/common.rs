@@ -1,12 +1,20 @@
 use crate::app::{
     icons::{ClockIcon, MovieIcon, SeriesIcon},
-    model::{self, Media, MediaType},
+    model::{Media, Movie, Series},
 };
-use leptos::either::Either;
 use leptos::prelude::*;
-use leptos_router::hooks::use_navigate;
-use web_sys::MouseEvent;
 
+// ── Shared shell ──────────────────────────────────────────────
+#[component]
+fn MediaLink(href: String, children: Children) -> impl IntoView {
+    view! {
+        <a href=href class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2">
+            {children()}
+        </a>
+    }
+}
+
+// ── Page header (unchanged) ───────────────────────────────────
 #[component]
 pub fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
     view! {
@@ -20,31 +28,23 @@ pub fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
     }
 }
 
+// ── Movie card ─────────────────────────────────────────────────
 #[component]
-pub fn MediaCard(item: Media) -> impl IntoView {
-    let navigate = use_navigate();
-    let kind = item.kind();
-    let href = format!("/detail/{}/{}", kind, item.id());
-    let href1 = href.clone();
-    let on_click = move |ev: MouseEvent| {
-        ev.prevent_default();
-        navigate(&href1, Default::default());
-    };
+pub fn MovieCard(item: Movie) -> impl IntoView {
+    let href = format!("/detail/movie/{}", item.id.0);
     view! {
-        <a href=href.clone()
-            class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2"
-            on:click=on_click>
-            <MediaCardImage item=item.clone()/>
-            <MediaCardInfo item=item.clone()/>
-        </a>
+        <MediaLink href=href>
+            <MovieCardImage item=item.clone()/>
+            <MovieCardInfo item=item/>
+        </MediaLink>
     }
 }
 
 #[component]
-pub fn MediaCardImage(item: Media) -> impl IntoView {
-    let poster = item.poster().to_string();
-    let title = item.title().to_string();
-    let duration_display = item.duration_display();
+fn MovieCardImage(item: Movie) -> impl IntoView {
+    let poster = item.poster.to_string();
+    let title = item.title.to_string();
+    let duration_display = item.duration.human_readable();
     view! {
         <div class="aspect-[2/3] relative overflow-hidden">
             <img src=poster alt=title.clone()
@@ -58,53 +58,25 @@ pub fn MediaCardImage(item: Media) -> impl IntoView {
                     </div>
                 </div>
             </div>
-            <MediaTypeBadge kind=item.kind()/>
+            // Badge is specific to movies here
+            <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
+                <MovieIcon/>
+                "فيلم"
+            </div>
         </div>
     }
 }
 
 #[component]
-pub fn MediaTypeBadge(kind: MediaType) -> impl IntoView {
-    let icon = match kind {
-        model::MediaType::Movie => Either::Left(MovieIcon()),
-        model::MediaType::Series => Either::Right(SeriesIcon()),
-    };
-    let name = match kind {
-        model::MediaType::Movie => "فيلم",
-        model::MediaType::Series => "مسلسل",
-    };
+fn MovieCardInfo(item: Movie) -> impl IntoView {
+    let title = item.title.to_string();
+    let size = item.file.size.human_readable();
     view! {
-        <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
-            {icon}
-            {name}
-        </div>
-    }
-}
-
-#[component]
-pub fn MediaCardInfo(item: Media) -> impl IntoView {
-    let title = item.title().to_string();
-    let size = item.size_display();
-    view! {
-        <div
-            class="p-4 flex flex-col gap-1"
-        >
-            <h3
-                class="text-white font-semibold truncate text-sm"
-            >
-                {title}
-            </h3>
-            <h4
-                class="text-white font-semibold truncate text-sm"
-            >
-                {size}
-            </h4>
-            <div
-                class="flex items-center justify-between text-gray-500 text-xs"
-            >
-                <span
-                    class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity"
-                >
+        <div class="p-4 flex flex-col gap-1">
+            <h3 class="text-white font-semibold truncate text-sm">{title}</h3>
+            <h4 class="text-white font-semibold truncate text-sm">{size}</h4>
+            <div class="flex items-center justify-between text-gray-500 text-xs">
+                <span class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
                     "← التفاصيل"
                 </span>
             </div>
@@ -112,13 +84,73 @@ pub fn MediaCardInfo(item: Media) -> impl IntoView {
     }
 }
 
+// ── Series card ────────────────────────────────────────────────
+#[component]
+pub fn SeriesCard(item: Series) -> impl IntoView {
+    let href = format!("/detail/series/{}", item.id.0);
+    view! {
+        <MediaLink href=href>
+            <SeriesCardImage item=item.clone()/>
+            <SeriesCardInfo item=item/>
+        </MediaLink>
+    }
+}
+
+#[component]
+fn SeriesCardImage(item: Series) -> impl IntoView {
+    let poster = item.poster.to_string();
+    let title = item.title.to_string();
+    // Series may have a different field, e.g. episode_count.
+    // Here we simply omit duration to show how the branching pays off.
+    view! {
+        <div class="aspect-[2/3] relative overflow-hidden">
+            <img src=poster alt=title.clone()
+                class="w-full h-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110"
+                loading="lazy" on:error=|_| {} />
+            <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4">
+                <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
+                    <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">{title}</h3>
+                    // No duration here – we can later add season/episode info if needed
+                </div>
+            </div>
+            <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
+                <SeriesIcon/>
+                "مسلسل"
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn SeriesCardInfo(item: Series) -> impl IntoView {
+    let title = item.title.to_string();
+    view! {
+        <div class="p-4 flex flex-col gap-1">
+            <h3 class="text-white font-semibold truncate text-sm">{title}</h3>
+            <div class="flex items-center justify-between text-gray-500 text-xs">
+                <span class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                    "← التفاصيل"
+                </span>
+            </div>
+        </div>
+    }
+}
+
+// ── Top‑level facing component ─────────────────────────────────
+#[component]
+pub fn MediaCard(item: Media) -> impl IntoView {
+    match item {
+        Media::Movie(item) => view! { <MovieCard item=item/> }.into_any(),
+        Media::Series(item) => view! { <SeriesCard item=item/> }.into_any(),
+    }
+}
+
+// ── Skeleton loading (unchanged) ───────────────────────────────
 #[component]
 pub fn CardsLoading() -> impl IntoView {
     let cards = (0..5).map(|_| CardSkeleton()).collect_view();
     view! {
-        <div
-            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6 my-15"
-        >
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6 my-15">
             {cards}
         </div>
     }

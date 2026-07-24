@@ -101,7 +101,7 @@ impl TryFrom<&str> for MediaType {
 }
 
 impl Media {
-    pub(crate) fn kind(&self) -> MediaType {
+    pub fn kind(&self) -> MediaType {
         match self {
             Media::Movie(_) => MediaType::Movie,
             Media::Series(_) => MediaType::Series,
