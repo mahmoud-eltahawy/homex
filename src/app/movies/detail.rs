@@ -29,7 +29,7 @@ impl LazyRoute for MovieDetailPage {
         let id =
             move || params.with(|p| p.get("id").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0));
 
-        let movie = Resource::new(move || id(), fetch_movie_detail);
+        let movie = Resource::new(id, fetch_movie_detail);
         Self { movie }
     }
 

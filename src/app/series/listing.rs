@@ -1,7 +1,8 @@
 use crate::app::{
-    common::{CardsLoading, MediaCard, MediaPageHeader},
+    common::{CardsLoading, MediaPageHeader, SeriesCard, SeriesCardProps},
     icons::SeriesIcon,
-    model::{Episode, Media, SeasonSummary, Series},
+    model::{Episode, SeasonSummary, Series},
+    resource_view::ResourceView,
     series::fetch_series,
 };
 use leptos::prelude::*;
@@ -22,20 +23,33 @@ impl LazyRoute for SeriesPage {
     }
 
     fn view(this: Self) -> AnyView {
-        let series = this.data;
+        let adapter = |series| SeriesListProps { series };
         view! {
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <MediaPageHeader title="مسلسلات".to_string() icon=SeriesIcon()/>
-            <Suspense fallback=CardsLoading>
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                    <For each={move || series.get().and_then(|x| x.ok()).unwrap_or_default()} key=|m| m.id let:item>
-                        <MediaCard item=Media::Series(item.clone())/>
-                    </For>
-                </div>
-            </Suspense>
+            <ResourceView
+                resource=this.data
+                view_fn=SeriesList
+                fallback=CardsLoading
+                adapter=adapter
+                context="تحميل مسلسلات"
+            />
         </div>
         }
         .into_any()
+    }
+}
+
+#[component]
+fn SeriesList(series: Vec<Series>) -> impl IntoView {
+    view! {
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
+            {
+                series.into_iter().map(|item| {
+                    SeriesCard(SeriesCardProps { item })
+                }).collect_view()
+            }
+        </div>
     }
 }
 

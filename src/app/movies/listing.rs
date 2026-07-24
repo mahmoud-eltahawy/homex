@@ -1,4 +1,4 @@
-use crate::app::common::{MediaPageHeader, MovieCard, MovieCardProps};
+use crate::app::common::{CardsLoading, MediaPageHeader, MovieCard, MovieCardProps};
 use crate::app::model::{self, Movie};
 use crate::app::{icons::MovieIcon, resource_view::ResourceView};
 use leptos::prelude::*;
@@ -24,6 +24,7 @@ impl LazyRoute for MoviesPage {
                     view_fn=MoviesCards
                     adapter=adapter
                     context="تحميل االفلام"
+                    fallback=CardsLoading
                 />
             </div>
         }
