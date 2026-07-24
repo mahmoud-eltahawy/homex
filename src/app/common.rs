@@ -4,7 +4,6 @@ use crate::app::{
 };
 use leptos::{either::Either, prelude::*};
 
-// ── Shared shell ──────────────────────────────────────────────
 #[component]
 fn MediaLink(href: String, children: Children) -> impl IntoView {
     view! {
@@ -14,7 +13,6 @@ fn MediaLink(href: String, children: Children) -> impl IntoView {
     }
 }
 
-// ── Page header (unchanged) ───────────────────────────────────
 #[component]
 pub fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
     view! {
@@ -28,7 +26,6 @@ pub fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
     }
 }
 
-// ── Movie card ─────────────────────────────────────────────────
 #[component]
 pub fn MovieCard(item: Movie) -> impl IntoView {
     let href = format!("/detail/movie/{}", item.id.0);
@@ -84,7 +81,6 @@ fn MovieCardInfo(item: Movie) -> impl IntoView {
     }
 }
 
-// ── Series card ────────────────────────────────────────────────
 #[component]
 pub fn SeriesCard(item: Series) -> impl IntoView {
     let href = format!("/detail/series/{}", item.id.0);
@@ -136,7 +132,6 @@ fn SeriesCardInfo(item: Series) -> impl IntoView {
     }
 }
 
-// ── Top‑level facing component ─────────────────────────────────
 #[component]
 pub fn MediaCard(item: Media) -> impl IntoView {
     match item {
@@ -145,7 +140,6 @@ pub fn MediaCard(item: Media) -> impl IntoView {
     }
 }
 
-// ── Skeleton loading (unchanged) ───────────────────────────────
 #[component]
 pub fn CardsLoading() -> impl IntoView {
     let cards = (0..5).map(|_| CardSkeleton()).collect_view();

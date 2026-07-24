@@ -8,8 +8,7 @@ use crate::app::{
     series::fetch_series,
 };
 use leptos::prelude::*;
-use leptos_router::{hooks::use_navigate, lazy_route, LazyRoute};
-use web_sys::MouseEvent;
+use leptos_router::{lazy_route, LazyRoute};
 
 #[component]
 pub fn HomeHero() -> impl IntoView {
@@ -34,11 +33,6 @@ fn MediaSection(
     items: Vec<impl Into<Media>>,
     kind: MediaType,
 ) -> impl IntoView {
-    let navigate = use_navigate();
-    let on_click = move |ev: MouseEvent| {
-        ev.prevent_default();
-        navigate(&kind.to_string(), Default::default());
-    };
     view! {
         <section class="mb-12 md:mb-16">
             <div class="flex items-center justify-between mb-6">
@@ -46,7 +40,7 @@ fn MediaSection(
                     <span class="text-cyan-400">{icon}</span> {title.clone()}
                 </h2>
                 <a class="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-all flex items-center gap-1 group"
-                    on:click=on_click>
+                    href={kind.to_string()}>
                     <span class="text-lg group-hover:translate-x-1 transition-transform">"←"</span> " عرض الكل"
                 </a>
             </div>
