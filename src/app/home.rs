@@ -1,7 +1,7 @@
 use super::{model::Media, model::MediaType};
 use crate::app::{
     common::{CardsLoading, MediaCard},
-    icons::{MovieIcon, SeriesIcon},
+    icons::{MovieIcon, NextIcon, PrevIcon, SeriesIcon},
     model::{Movie, Series},
     movies::listing::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
@@ -35,39 +35,84 @@ fn MediaSection(
     items_offset: RwSignal<usize>,
     items_count: Resource<Result<usize, ServerFnError>>,
 ) -> impl IntoView {
-    let go_left = move |_| {
-        if let Some(count) = items_count.get().transpose().ok().flatten() {
-            items_offset.update(|x| {
-                if *x < count - MEDIA_LIST_SIZE {
-                    *x += 1
-                }
-            });
-        };
+    let can_prev = move || items_offset.get() > 0;
+
+    let can_next = move || {
+        items_count
+            .get()
+            .transpose()
+            .ok()
+            .flatten()
+            .map(|count| items_offset.get() < count.saturating_sub(MEDIA_LIST_SIZE))
+            .unwrap_or(false)
     };
-    let go_right = move |_| {
+
+    let go_prev = move |_| {
         items_offset.update(|x| {
             if *x > 0 {
-                *x -= 1
+                *x -= 1;
             }
         });
     };
+
+    let go_next = move |_| {
+        items_offset.update(|x| {
+            let max_offset = items_count
+                .get()
+                .transpose()
+                .ok()
+                .flatten()
+                .unwrap_or(0)
+                .saturating_sub(MEDIA_LIST_SIZE);
+
+            if *x < max_offset {
+                *x += 1;
+            }
+        });
+    };
+
     view! {
         <section class="mb-12 md:mb-16">
-            <button on:click=go_left>"left"</button>
-            <div class="flex items-center justify-between mb-6">
-                <h2 class="text-2xl sm:text-3xl md:text-4xl font-black text-white flex items-center gap-3">
-                    <span class="text-cyan-400">{icon}</span> {title.clone()}
+            <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+                <h2 class="flex items-center gap-3 text-2xl font-black text-white sm:text-3xl md:text-4xl">
+                    <span class="text-cyan-400">{icon}</span>
+                    {title.clone()}
                 </h2>
-                <a
-                    class="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-all flex items-center gap-1 group"
-                    href={kind.to_string()}>
-                    <span class="text-lg group-hover:translate-x-1 transition-transform">"←"</span> " عرض الكل"
-                </a>
+
+                <div class="flex items-center gap-3 sm:gap-4">
+                    <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur">
+                        <button
+                            on:click=go_prev
+                            disabled=move || !can_prev()
+                            aria-label="Previous"
+                            class="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                            <PrevIcon/>
+                        </button>
+
+                        <button
+                            on:click=go_next
+                            disabled=move || !can_next()
+                            aria-label="Next"
+                            class="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                            <NextIcon/>
+                        </button>
+                    </div>
+
+                    <a
+                        href={kind.to_string()}
+                        class="group inline-flex items-center gap-1 text-sm font-semibold text-cyan-400 transition hover:text-cyan-300"
+                    >
+                        <span class="transition-transform group-hover:translate-x-1">"عرض الكل"</span>
+                        <span class="text-lg transition-transform group-hover:translate-x-1" aria-hidden="true">"←"</span>
+                    </a>
+                </div>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
+
+            <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:gap-6">
                 {items.into_iter().map(|item| view! { <MediaCard item=item.into()/> }).collect_view()}
             </div>
-            <button on:click=go_right>"right"</button>
         </section>
     }
 }
