@@ -39,7 +39,7 @@ fn MediaTypeSearch(
                         _ => media_type.set(None),
                     }
                 }
-                class="mx-2 px-3 py-2.5 rounded-full bg-white/5 backdrop-blur-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 cursor-pointer"
+                class="mx-2 px-2 sm:px-3 py-2 sm:py-2.5 rounded-full bg-white/5 backdrop-blur-xl text-white text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 cursor-pointer max-w-[120px] sm:max-w-none"
             >
                 <option value="any" selected=move || media_type.get().is_none()>"فيلم او مسلسل"</option>
                 <option value="movie" selected=move || media_type.get() == Some(MediaType::Movie)>"فيلم"</option>
@@ -96,22 +96,22 @@ async fn get_suggetions(
     ];
     let series = vec![
         Suggestion {
-            id: 1,
+            id: 101,
             name: "Series 1".to_string(),
             media_type: MediaType::Series,
         },
         Suggestion {
-            id: 2,
+            id: 102,
             name: "Series 2".to_string(),
             media_type: MediaType::Series,
         },
         Suggestion {
-            id: 3,
+            id: 103,
             name: "Series 3".to_string(),
             media_type: MediaType::Series,
         },
         Suggestion {
-            id: 4,
+            id: 104,
             name: "Series 4".to_string(),
             media_type: MediaType::Series,
         },
@@ -142,8 +142,12 @@ fn SearchInput(
 ) -> impl IntoView {
     let class = move || {
         format!(
-            "flex-1 min-w-0 bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full py-2.5 pe-4 ps-12 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}",
-            if search_open.get() { "opacity-100 scale-100" } else { "opacity-0 scale-95 pointer-events-none" }
+            "bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}",
+            if search_open.get() {
+                "w-full flex-1 py-2.5 pe-4 ps-12 opacity-100 scale-100"
+            } else {
+                "w-0 p-0 border-0 opacity-0 scale-95 pointer-events-none overflow-hidden"
+            }
         )
     };
     let placeholder = move || match media_type.get() {
@@ -153,25 +157,27 @@ fn SearchInput(
     };
 
     view! {
-        <input
-            type="text"
-            prop:value=search_term
-            on:input=move |ev| search_term.set(event_target_value(&ev))
-            on:focus=move |_| search_open.set(true)
-            on:blur=move |_| {
-                set_timeout(
-                    move || {
-                        if !search_term.read().is_empty() {
-                            search_open.set(false);
-                        }
-                    },
-                    std::time::Duration::from_millis(150),
-                );
-            }
-            placeholder=placeholder
-            class=class
-        />
-        <Suggestions search_open search_term media_type/>
+        <div class="relative flex-1 min-w-0">
+            <input
+                type="text"
+                prop:value=search_term
+                on:input=move |ev| search_term.set(event_target_value(&ev))
+                on:focus=move |_| search_open.set(true)
+                on:blur=move |_| {
+                    set_timeout(
+                        move || {
+                            if !search_term.read().is_empty() {
+                                search_open.set(false);
+                            }
+                        },
+                        std::time::Duration::from_millis(150),
+                    );
+                }
+                placeholder=placeholder
+                class=class
+            />
+            <Suggestions search_open search_term media_type/>
+        </div>
     }
 }
 
@@ -201,8 +207,8 @@ pub fn Suggestions(
     Effect::new(move || log!("{:#?}", helper()));
 
     let href = move |kind: MediaType, id: usize| match kind {
-        MediaType::Movie => format!("detail/movie/{}", id),
-        MediaType::Series => format!("detail/series/{}", id),
+        MediaType::Movie => format!("/detail/movie/{}", id),
+        MediaType::Series => format!("/detail/series/{}", id),
     };
 
     view! {
@@ -217,7 +223,7 @@ pub fn Suggestions(
                         <li>
                             <a
                                 href=href(item.media_type, item.id)
-                                class="block px-4 py-2 hover:bg-white/10 transition-colors"
+                                class="block px-4 py-2 text-xs sm:text-sm hover:bg-white/10 transition-colors"
                             >
                                 {item.name}
                             </a>
