@@ -10,8 +10,8 @@ pub fn SearchBox(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> 
     let media_type = RwSignal::new(None);
     let class = move || {
         format!(
-            "relative me-2 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] {}",
-            if search_open.get() { "w-128" } else { "w-10" }
+            "relative flex items-center me-2 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] {}",
+            if search_open.get() { "w-full sm:w-128" } else { "w-10" }
         )
     };
     view! {
@@ -28,15 +28,22 @@ fn MediaTypeSearch(
     search_open: RwSignal<bool>,
     media_type: RwSignal<Option<MediaType>>,
 ) -> impl IntoView {
-    let select_any = move |_| media_type.set(None);
-    let select_movie = move |_| media_type.set(Some(MediaType::Movie));
-    let select_series = move |_| media_type.set(Some(MediaType::Series));
     view! {
         <Show when=move || search_open.get()>
-            <select class="mx-5">
-                <option on:click=select_any>"فيلم او مسلسل"</option>
-                <option on:click=select_movie>"فيلم"</option>
-                <option on:click=select_series>"مسلسل"</option>
+            <select
+                on:change=move |ev| {
+                    let value = event_target_value(&ev);
+                    match value.as_str() {
+                        "movie" => media_type.set(Some(MediaType::Movie)),
+                        "series" => media_type.set(Some(MediaType::Series)),
+                        _ => media_type.set(None),
+                    }
+                }
+                class="mx-2 px-3 py-2.5 rounded-full bg-white/5 backdrop-blur-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 cursor-pointer"
+            >
+                <option value="any" selected=move || media_type.get().is_none()>"فيلم او مسلسل"</option>
+                <option value="movie" selected=move || media_type.get() == Some(MediaType::Movie)>"فيلم"</option>
+                <option value="series" selected=move || media_type.get() == Some(MediaType::Series)>"مسلسل"</option>
             </select>
         </Show>
     }
@@ -47,7 +54,7 @@ fn SearchToggle(search_open: RwSignal<bool>) -> impl IntoView {
     let on_click = move |_| search_open.set(!search_open.get());
     view! {
         <button type="button" on:click=on_click
-            class="absolute start-1 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+            class="absolute start-1 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors z-10">
             <SearchIcon/>
         </button>
     }
@@ -134,8 +141,10 @@ fn SearchInput(
     media_type: RwSignal<Option<MediaType>>,
 ) -> impl IntoView {
     let class = move || {
-        format!("w-full bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full py-2.5 pe-4 ps-12 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}",
-            if search_open.get() { "opacity-100 scale-100" } else { "opacity-0 scale-95 pointer-events-none" })
+        format!(
+            "flex-1 min-w-0 bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full py-2.5 pe-4 ps-12 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}",
+            if search_open.get() { "opacity-100 scale-100" } else { "opacity-0 scale-95 pointer-events-none" }
+        )
     };
     let placeholder = move || match media_type.get() {
         Some(MediaType::Movie) => "ابحث عن فيلم ...",
@@ -149,7 +158,16 @@ fn SearchInput(
             prop:value=search_term
             on:input=move |ev| search_term.set(event_target_value(&ev))
             on:focus=move |_| search_open.set(true)
-            on:blur=move |_| search_open.set(!search_term.read().is_empty())
+            on:blur=move |_| {
+                set_timeout(
+                    move || {
+                        if !search_term.read().is_empty() {
+                            search_open.set(false);
+                        }
+                    },
+                    std::time::Duration::from_millis(150),
+                );
+            }
             placeholder=placeholder
             class=class
         />
@@ -170,10 +188,6 @@ pub fn Suggestions(
             get_suggetions(term, kind).await
         },
     );
-    let class = move || {
-        format!("w-full bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full py-2.5 pe-4 ps-12 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}",
-            if search_open.get() { "opacity-100 scale-100" } else { "opacity-0 scale-95 pointer-events-none" })
-    };
 
     let helper = move || {
         suggestions
@@ -190,16 +204,24 @@ pub fn Suggestions(
         MediaType::Movie => format!("detail/movie/{}", id),
         MediaType::Series => format!("detail/series/{}", id),
     };
+
     view! {
         <Show when=move || search_open.get() && !search_term.read().is_empty()>
             <Suspense>
-                <ul class=class>
+                <ul class="absolute left-0 top-full mt-2 w-full max-h-60 overflow-y-auto rounded-xl bg-gray-900/90 backdrop-blur-xl shadow-lg shadow-black/30 border border-white/10 divide-y divide-white/10">
                     <For
                         each=helper
                         key=|x| x.id
                         let:item
                     >
-                        <li><a href=href(item.media_type,item.id)>{item.name}</a></li>
+                        <li>
+                            <a
+                                href=href(item.media_type, item.id)
+                                class="block px-4 py-2 hover:bg-white/10 transition-colors"
+                            >
+                                {item.name}
+                            </a>
+                        </li>
                     </For>
                 </ul>
             </Suspense>
