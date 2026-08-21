@@ -1,6 +1,8 @@
-use crate::app::icons::SearchIcon;
+use crate::app::layout::search::SearchBox;
 use leptos::prelude::*;
-use leptos_router::{components::Outlet, hooks::use_navigate};
+use leptos_router::components::Outlet;
+
+mod search;
 
 #[component]
 pub fn Layout() -> impl IntoView {
@@ -22,26 +24,17 @@ pub fn Layout() -> impl IntoView {
 
 #[component]
 fn Navbar() -> impl IntoView {
-    view! {
-        <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <NavbarTop/>
-                <MobileNav/>
-            </div>
-        </nav>
-    }
-}
-
-#[component]
-fn NavbarTop() -> impl IntoView {
     let search_term = RwSignal::new(String::new());
     let search_open = RwSignal::new(false);
     view! {
-        <div class="flex items-center justify-between h-16 md:h-20">
-            <NavbarBrand/>
-            <DesktopNavLinks search_term=search_term search_open=search_open/>
-            <MobileSearch search_term=search_term/>
-        </div>
+        <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex items-center justify-between h-16 md:h-20">
+                    <NavbarBrand/>
+                    <DesktopNavLinks search_term=search_term search_open=search_open/>
+                </div>
+            </div>
+        </nav>
     }
 }
 
@@ -61,9 +54,9 @@ fn NavbarBrand() -> impl IntoView {
 fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl IntoView {
     view! {
         <div class="hidden md:flex items-center gap-2">
+            <SearchBox search_term=search_term search_open=search_open/>
             <NavLink href="/movies" label="أفلام"/>
             <NavLink href="/series" label="مسلسلات"/>
-            <SearchBox search_term=search_term search_open=search_open/>
         </div>
     }
 }
@@ -77,117 +70,6 @@ fn NavLink(href: &'static str, label: &'static str) -> impl IntoView {
         >
             {label}
         </a>
-    }
-}
-
-#[component]
-fn SearchBox(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl IntoView {
-    let navigate = use_navigate();
-    let on_search = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        let term = search_term.get().trim().to_string();
-        if !term.is_empty() {
-            navigate(
-                &format!("/search?q={}", encode_uri_component(&term)),
-                Default::default(),
-            );
-            search_open.set(false);
-        }
-    };
-    let class = move || {
-        format!(
-            "relative me-2 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] {}",
-            if search_open.get() { "w-64" } else { "w-10" }
-        )
-    };
-    view! {
-        <div class=class>
-            <form
-                action="/search"
-                method="get"
-                on:submit=on_search
-                class="flex items-center"
-            >
-                <SearchToggle search_open=search_open/>
-                <SearchInput search_term=search_term search_open=search_open/>
-            </form>
-        </div>
-    }
-}
-
-#[component]
-fn SearchToggle(search_open: RwSignal<bool>) -> impl IntoView {
-    let on_click = move |_| search_open.set(!search_open.get());
-    view! {
-        <button type="button" on:click=on_click
-            class="absolute start-1 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
-            <SearchIcon/>
-        </button>
-    }
-}
-
-#[component]
-fn SearchInput(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl IntoView {
-    let class = move || {
-        format!("w-full bg-white/5 backdrop-blur-xl text-white placeholder-gray-500 rounded-full py-2.5 pe-4 ps-12 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/10 transition-all duration-300 {}",
-            if search_open.get() { "opacity-100 scale-100" } else { "opacity-0 scale-95 pointer-events-none" })
-    };
-    view! {
-        <input type="text"
-            name="q"
-            prop:value=search_term
-            on:input=move |ev| search_term.set(event_target_value(&ev))
-            on:focus=move |_| search_open.set(true)
-            on:blur=move |_| search_open.set(!search_term.get().is_empty())
-            placeholder="ابحث..."
-            class=class
-        />
-    }
-}
-
-#[component]
-fn MobileSearch(search_term: RwSignal<String>) -> impl IntoView {
-    let navigate = use_navigate();
-    let on_search = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        let term = search_term.get().trim().to_string();
-        if !term.is_empty() {
-            navigate(
-                &format!("/search?q={}", encode_uri_component(&term)),
-                Default::default(),
-            );
-        }
-    };
-    view! {
-        <div class="md:hidden flex items-center gap-2">
-            <form
-                action="/search"
-                method="get"
-                on:submit=on_search
-                class="relative flex items-center"
-            >
-                <input type="text"
-                    name="q"
-                    prop:value=search_term
-                    on:input=move |ev| search_term.set(event_target_value(&ev))
-                    placeholder="ابحث..."
-                    class="w-28 sm:w-36 bg-white/10 backdrop-blur-xl text-white placeholder-gray-400 rounded-full py-1.5 pe-3 ps-3 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400/50"
-                />
-                <button type="submit" class="absolute start-1.5 top-1/2 -translate-y-1/2 text-gray-400">
-                    <SearchIcon/>
-                </button>
-            </form>
-        </div>
-    }
-}
-
-#[component]
-fn MobileNav() -> impl IntoView {
-    view! {
-        <div class="md:hidden flex gap-1 pb-2">
-            <NavLink href="/movies" label="أفلام"/>
-            <NavLink href="/series" label="مسلسلات"/>
-        </div>
     }
 }
 
@@ -241,7 +123,6 @@ fn FooterLinks() -> impl IntoView {
             <ul class="space-y-2 text-sm">
                 <li><NavLink href="/movies" label="أفلام"/></li>
                 <li><NavLink href="/series" label="مسلسلات"/></li>
-                <li><NavLink href="/search" label="بحث"/></li>
             </ul>
         </div>
     }
@@ -268,29 +149,4 @@ fn FooterCopyright() -> impl IntoView {
             <p>"© 2025 وسائطي. صُنع بكل ❤️ لشبكتك المنزلية."</p>
         </div>
     }
-}
-
-fn encode_uri_component(s: &str) -> String {
-    s.chars().fold(String::new(), |mut acc, c| {
-        match c {
-            'A'..='Z'
-            | 'a'..='z'
-            | '0'..='9'
-            | '-'
-            | '_'
-            | '.'
-            | '!'
-            | '~'
-            | '*'
-            | '\''
-            | '('
-            | ')' => acc.push(c),
-            _ => {
-                for b in c.to_string().into_bytes() {
-                    acc.push_str(&format!("%{:02X}", b));
-                }
-            }
-        }
-        acc
-    })
 }

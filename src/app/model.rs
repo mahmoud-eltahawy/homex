@@ -63,18 +63,18 @@ pub enum Media {
     Series(Series),
 }
 
-impl Into<Media> for Series {
-    fn into(self) -> Media {
-        Media::Series(self)
+impl From<Series> for Media {
+    fn from(val: Series) -> Self {
+        Media::Series(val)
     }
 }
-impl Into<Media> for Movie {
-    fn into(self) -> Media {
-        Media::Movie(self)
+impl From<Movie> for Media {
+    fn from(val: Movie) -> Self {
+        Media::Movie(val)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MediaType {
     Movie,
     Series,
@@ -92,7 +92,7 @@ impl std::fmt::Display for MediaType {
 impl TryFrom<&str> for MediaType {
     type Error = &'static str;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
+        match value.to_lowercase().as_str() {
             "movie" => Ok(MediaType::Movie),
             "series" => Ok(MediaType::Series),
             _ => Err("Media type must be 'movie' or 'series'"),

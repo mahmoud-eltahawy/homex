@@ -2,7 +2,6 @@ use crate::app::{
     home::HomePage,
     layout::Layout,
     movies::{detail::MovieDetailPage, listing::MoviesPage},
-    search::Search,
     series::{details::SeriesDetailPage, listing::SeriesPage},
     settings::SettingsPage,
     upload::UploadPage,
@@ -21,7 +20,6 @@ mod layout;
 mod model;
 mod movies;
 mod resource_view;
-mod search;
 mod series;
 mod settings;
 mod upload;
@@ -78,7 +76,6 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/movies") view={Lazy::<MoviesPage>::new()}/>
                     <Route path=path!("/series") view={Lazy::<SeriesPage>::new()}/>
                     <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>
-                    <Route path=path!("/search") view=Search/>
                     <Route path=path!("/settings") view={Lazy::<SettingsPage>::new()}/>
                     <Route path=path!("/detail/series/:id") view={Lazy::<SeriesDetailPage>::new()}/>
                     <Route path=path!("/detail/movie/:id") view={Lazy::<MovieDetailPage>::new()}/>
