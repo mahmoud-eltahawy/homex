@@ -24,8 +24,22 @@ pub async fn fetch_season(series_id: i64, season_number: u32) -> Result<Season, 
 }
 
 #[server]
-pub async fn fetch_series() -> Result<Vec<Series>, ServerFnError> {
+pub async fn fetch_series(offset: usize, size: usize) -> Result<Vec<Series>, ServerFnError> {
     use crate::app::mockary::mock_series;
     delay(300).await;
-    Ok(mock_series())
+
+    let list = mock_series();
+    let size = size.clamp(0, list.len());
+    let offset = offset.clamp(0, list.len() - size);
+    let end = (offset + size).clamp(0, list.len());
+
+    Ok(list[offset..end].to_vec())
+}
+
+#[server]
+pub async fn fetch_series_count() -> Result<usize, ServerFnError> {
+    use crate::app::mockary::mock_series;
+    delay(300).await;
+
+    Ok(mock_series().len())
 }

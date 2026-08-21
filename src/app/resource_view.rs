@@ -40,9 +40,9 @@ where
     };
 
     view! {
-        <Suspense fallback=fallback>
+        <Transition fallback=fallback>
             {core}
-        </Suspense>
+        </Transition>
     }
 }
 

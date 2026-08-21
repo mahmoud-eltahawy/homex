@@ -10,7 +10,7 @@ pub struct MoviesPage {
 #[lazy_route]
 impl LazyRoute for MoviesPage {
     fn data() -> Self {
-        let movies = Resource::new(|| (), |_| async move { fetch_movies().await });
+        let movies = Resource::new(|| (), async |_| fetch_movies(0, 20).await);
         Self { movies }
     }
 
@@ -47,9 +47,23 @@ pub fn MoviesCards(movies: Vec<Movie>) -> impl IntoView {
 }
 
 #[server]
-pub async fn fetch_movies() -> Result<Vec<model::Movie>, ServerFnError> {
+pub async fn fetch_movies(offset: usize, size: usize) -> Result<Vec<model::Movie>, ServerFnError> {
     use crate::app::delay;
     use crate::app::mockary;
     delay(300).await;
-    Ok(mockary::mock_movies())
+    let list = mockary::mock_movies();
+    let size = size.clamp(0, list.len());
+    let offset = offset.clamp(0, list.len() - size);
+    let end = (offset + size).clamp(0, list.len());
+
+    Ok(list[offset..end].to_vec())
+}
+
+#[server]
+pub async fn fetch_movies_count() -> Result<usize, ServerFnError> {
+    use crate::app::delay;
+    use crate::app::mockary;
+    delay(300).await;
+
+    Ok(mockary::mock_movies().len())
 }

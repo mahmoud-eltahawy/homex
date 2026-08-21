@@ -136,5 +136,21 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
             file: fake_media_file(),
             duration: fake_duration(9240),
         },
+        Movie {
+            id: MediaId(6),
+            title: "Hateful eight".into(),
+            poster: "https://picsum.photos/seed/pulpfiction/300/450".into(),
+            description: Some("some description".into()),
+            file: fake_media_file(),
+            duration: fake_duration(9240),
+        },
+        Movie {
+            id: MediaId(7),
+            title: "Kill Bill".into(),
+            poster: "https://picsum.photos/seed/pulpfiction/300/450".into(),
+            description: Some("some description".into()),
+            file: fake_media_file(),
+            duration: fake_duration(9240),
+        },
     ]
 }

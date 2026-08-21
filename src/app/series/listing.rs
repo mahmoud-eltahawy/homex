@@ -18,7 +18,7 @@ pub struct SeriesPage {
 impl LazyRoute for SeriesPage {
     fn data() -> Self {
         Self {
-            data: Resource::new(|| (), |_| fetch_series()),
+            data: Resource::new(|| (), |_| fetch_series(0, 20)),
         }
     }
 

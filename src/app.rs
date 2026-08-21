@@ -73,7 +73,7 @@ pub fn App() -> impl IntoView {
             <Routes fallback=|| "Page not found.".into_view()>
                 <ParentRoute path=path!("") view=Layout>
                     <Route path=path!("/") view={Lazy::<HomePage>::new()}/>
-                    <Route path=path!("/movies") view={Lazy::<MoviesPage>::new()}/>
+                    <Route path=path!("/movie") view={Lazy::<MoviesPage>::new()}/>
                     <Route path=path!("/series") view={Lazy::<SeriesPage>::new()}/>
                     <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>
                     <Route path=path!("/settings") view={Lazy::<SettingsPage>::new()}/>
