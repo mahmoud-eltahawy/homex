@@ -1,6 +1,7 @@
 use crate::app::{
+    common::Poster,
     icons::{ClockIcon, DownloadIcon, MovieIcon},
-    model::{self, Movie},
+    model::{self, MediaType, Movie},
     resource_view::ResourceView,
     video_player::VideoPlayer,
 };
@@ -54,8 +55,7 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
             <div class="absolute inset-0">
-                <img src=movie.poster.to_string()
-                     class="w-full h-full object-cover scale-110 blur-3xl opacity-20" alt="" />
+                <Poster poster=movie.poster.clone() media_type=MediaType::Movie/>
                 <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
             </div>
             <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
@@ -72,7 +72,9 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
 fn DetailBody(data: Movie, video_src: String) -> impl IntoView {
     view! {
         <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
-            <DetailPoster poster=data.poster.to_string() title=data.title.to_string() />
+            <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
+                <Poster poster=data.poster.clone() media_type=MediaType::Movie/>
+            </div>
             <div class="flex-1 w-full">
                 <DetailMetaBadge/>
                 <DetailInfo data=data.clone() />
@@ -84,15 +86,6 @@ fn DetailBody(data: Movie, video_src: String) -> impl IntoView {
                 <VideoPlayer src=Signal::from(video_src) title=data.title.to_string() />
             </div>
         })}
-    }
-}
-
-#[component]
-fn DetailPoster(poster: String, title: String) -> impl IntoView {
-    view! {
-        <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
-            <img src=poster class="w-full rounded-2xl shadow-2xl border border-white/10" alt=title />
-        </div>
     }
 }
 

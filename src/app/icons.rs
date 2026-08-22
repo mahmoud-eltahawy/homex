@@ -153,3 +153,63 @@ pub fn PrevIcon() -> impl IntoView {
          </svg>
     }
 }
+
+#[component]
+pub fn MoviePosterSvg() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="100%" height="100%">
+          <rect width="600" height="900" fill="#1a2634" rx="10"/>
+
+          <circle cx="300" cy="350" r="90" fill="none" stroke="#a0aec0" stroke-width="8"/>
+          <circle cx="300" cy="350" r="20" fill="#a0aec0"/>
+          <circle cx="300" cy="260" r="30" fill="none" stroke="#a0aec0" stroke-width="6"/>
+          <circle cx="390" cy="350" r="30" fill="none" stroke="#a0aec0" stroke-width="6"/>
+          <circle cx="300" cy="440" r="30" fill="none" stroke="#a0aec0" stroke-width="6"/>
+          <circle cx="210" cy="350" r="30" fill="none" stroke="#a0aec0" stroke-width="6"/>
+
+          <rect x="220" y="480" width="160" height="20" fill="#a0aec0" rx="3"/>
+          <rect x="230" y="500" width="140" height="15" fill="none" stroke="#a0aec0" stroke-width="4"/>
+
+        </svg>
+    }
+}
+
+#[component]
+pub fn SeriesPosterSvg() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="100%" height="100%">
+          <rect width="600" height="900" fill="#1a2634" rx="10"/>
+
+          <rect x="180" y="280" width="240" height="180" rx="15" fill="none" stroke="#a0aec0" stroke-width="8"/>
+
+          <polygon points="280,340 280,400 340,370" fill="#a0aec0"/>
+
+          <rect x="285" y="460" width="30" height="30" fill="#a0aec0"/>
+          <rect x="250" y="490" width="100" height="10" fill="#a0aec0" rx="3"/>
+
+          <path d="M 180 250 Q 200 230 220 250" fill="none" stroke="#a0aec0" stroke-width="5"/>
+          <path d="M 170 230 Q 200 200 230 230" fill="none" stroke="#a0aec0" stroke-width="5"/>
+
+        </svg>
+    }
+}
+
+#[component]
+pub fn MusicPosterSvg() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="100%" height="100%">
+          <rect width="600" height="600" fill="#1a2634" rx="10"/>
+
+          <circle cx="300" cy="300" r="180" fill="none" stroke="#a0aec0" stroke-width="8"/>
+          <circle cx="300" cy="300" r="140" fill="none" stroke="#a0aec0" stroke-width="2"/>
+          <circle cx="300" cy="300" r="100" fill="none" stroke="#a0aec0" stroke-width="2"/>
+          <circle cx="300" cy="300" r="30" fill="#a0aec0"/>
+          <circle cx="300" cy="300" r="10" fill="#1a2634"/>
+
+          <path d="M 380 180 Q 400 170 420 180 L 420 260 Q 400 270 380 260 Z" fill="#a0aec0"/>
+          <circle cx="370" cy="260" r="12" fill="#a0aec0"/>
+          <circle cx="430" cy="260" r="12" fill="#a0aec0"/>
+
+        </svg>
+    }
+}

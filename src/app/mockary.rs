@@ -8,7 +8,7 @@ pub fn mock_series() -> Vec<Series> {
         Series {
             id: MediaId(101),
             title: "Breaking Bad".into(),
-            poster: "https://picsum.photos/seed/breakingbad/300/450".into(),
+            poster: Some("https://picsum.photos/seed/breakingbad/300/450".into()),
             description: Some("مدرس كيمياء يتحول إلى تاجر مخدرات.".into()),
             season_count: 5,
             season_summaries: vec![
@@ -25,7 +25,7 @@ pub fn mock_series() -> Vec<Series> {
         Series {
             id: MediaId(102),
             title: "Stranger Things".into(),
-            poster: "https://picsum.photos/seed/strangerthings/300/450".into(),
+            poster: Some("https://picsum.photos/seed/strangerthings/300/450".into()),
             description: Some("مجموعة من الأطفال يكشفون أسرارًا خارقة في بلدتهم.".into()),
             season_count: 4,
             season_summaries: vec![SeasonSummary {
@@ -36,7 +36,7 @@ pub fn mock_series() -> Vec<Series> {
         Series {
             id: MediaId(103),
             title: "The Crown".into(),
-            poster: "https://picsum.photos/seed/thecrown/300/450".into(),
+            poster: Some("https://picsum.photos/seed/thecrown/300/450".into()),
             description: Some("عهد الملكة إليزابيث الثانية.".into()),
             season_count: 4,
             season_summaries: vec![SeasonSummary {
@@ -47,8 +47,19 @@ pub fn mock_series() -> Vec<Series> {
         Series {
             id: MediaId(104),
             title: "Game of Thrones".into(),
-            poster: "https://picsum.photos/seed/got/300/450".into(),
+            poster: Some("https://picsum.photos/seed/got/300/450".into()),
             description: Some("عائلات نبيلة تتصارع على السيطرة على ويستروس.".into()),
+            season_count: 8,
+            season_summaries: vec![SeasonSummary {
+                season_number: 1,
+                episode_count: 2,
+            }],
+        },
+        Series {
+            id: MediaId(105),
+            title: "Prison Break".into(),
+            poster: None,
+            description: None,
             season_count: 8,
             season_summaries: vec![SeasonSummary {
                 season_number: 1,
@@ -99,7 +110,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
         Movie {
             id: MediaId(1),
             title: "Inception".into(),
-            poster: "https://picsum.photos/seed/inception/300/450".into(),
+            poster: Some("https://picsum.photos/seed/inception/300/450".into()),
             description: Some("لص يسرق أسرار الشركات من خلال تقنية مشاركة الأحلام.".into()),
             file: fake_media_file(),
             duration: fake_duration(8880), // 2h28m
@@ -107,7 +118,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
         Movie {
             id: MediaId(2),
             title: "The Matrix".into(),
-            poster: "https://picsum.photos/seed/matrix/300/450".into(),
+            poster: Some("https://picsum.photos/seed/matrix/300/450".into()),
             description: Some("هاكر كمبيوتر يكتشف حقيقة الواقع.".into()),
             file: fake_media_file(),
             duration: fake_duration(8160),
@@ -115,7 +126,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
         Movie {
             id: MediaId(3),
             title: "Interstellar".into(),
-            poster: "https://picsum.photos/seed/interstellar/300/450".into(),
+            poster: Some("https://picsum.photos/seed/interstellar/300/450".into()),
             description: Some("فريق من المستكشفين يسافرون عبر ثقب دودي في الفضاء.".into()),
             file: fake_media_file(),
             duration: fake_duration(10140),
@@ -123,7 +134,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
         Movie {
             id: MediaId(4),
             title: "The Dark Knight".into(),
-            poster: "https://picsum.photos/seed/darkknight/300/450".into(),
+            poster: Some("https://picsum.photos/seed/darkknight/300/450".into()),
             description: Some("عندما يهدد الجوكر مدينة غوثام بالدمار.".into()),
             file: fake_media_file(),
             duration: fake_duration(9120),
@@ -131,7 +142,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
         Movie {
             id: MediaId(5),
             title: "Pulp Fiction".into(),
-            poster: "https://picsum.photos/seed/pulpfiction/300/450".into(),
+            poster: Some("https://picsum.photos/seed/pulpfiction/300/450".into()),
             description: Some("تتشابك حياة اثنين من القتلة وملاكم وزوجين من اللصوص.".into()),
             file: fake_media_file(),
             duration: fake_duration(9240),
@@ -139,7 +150,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
         Movie {
             id: MediaId(6),
             title: "Hateful eight".into(),
-            poster: "https://picsum.photos/seed/pulpfiction/300/450".into(),
+            poster: None,
             description: Some("some description".into()),
             file: fake_media_file(),
             duration: fake_duration(9240),
@@ -147,7 +158,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
         Movie {
             id: MediaId(7),
             title: "Kill Bill".into(),
-            poster: "https://picsum.photos/seed/pulpfiction/300/450".into(),
+            poster: None,
             description: Some("some description".into()),
             file: fake_media_file(),
             duration: fake_duration(9240),

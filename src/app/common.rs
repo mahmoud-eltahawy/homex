@@ -1,6 +1,6 @@
 use crate::app::{
-    icons::{ClockIcon, MovieIcon, SeriesIcon},
-    model::{Media, Movie, Series},
+    icons::{ClockIcon, MovieIcon, MoviePosterSvg, SeriesIcon, SeriesPosterSvg},
+    model::{Media, MediaType, Movie, Series},
 };
 use leptos::{either::Either, prelude::*};
 
@@ -38,15 +38,30 @@ pub fn MovieCard(item: Movie) -> impl IntoView {
 }
 
 #[component]
+pub fn Poster(poster: Option<String>, media_type: MediaType) -> impl IntoView {
+    match poster {
+        Some(poster) => Either::Left(view! {
+            <img
+                src=poster
+                class="w-full h-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110"
+                loading="lazy"
+            />
+        }),
+        None => Either::Right(match media_type {
+            MediaType::Movie => Either::Left(MoviePosterSvg()),
+            MediaType::Series => Either::Right(SeriesPosterSvg()),
+        }),
+    }
+}
+
+#[component]
 fn MovieCardImage(item: Movie) -> impl IntoView {
-    let poster = item.poster.to_string();
     let title = item.title.to_string();
     let duration_display = item.duration.human_readable();
+
     view! {
         <div class="aspect-[2/3] relative overflow-hidden">
-            <img src=poster alt=title.clone()
-                class="w-full h-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110"
-                loading="lazy" on:error=|_| {} />
+            <Poster poster=item.poster media_type=MediaType::Movie/>
             <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4">
                 <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
                     <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">{title}</h3>
@@ -94,15 +109,10 @@ pub fn SeriesCard(item: Series) -> impl IntoView {
 
 #[component]
 fn SeriesCardImage(item: Series) -> impl IntoView {
-    let poster = item.poster.to_string();
     let title = item.title.to_string();
-    // Series may have a different field, e.g. episode_count.
-    // Here we simply omit duration to show how the branching pays off.
     view! {
         <div class="aspect-[2/3] relative overflow-hidden">
-            <img src=poster alt=title.clone()
-                class="w-full h-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110"
-                loading="lazy" on:error=|_| {} />
+            <Poster poster=item.poster media_type=MediaType::Series/>
             <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4">
                 <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
                     <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">{title}</h3>

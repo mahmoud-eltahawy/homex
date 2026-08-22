@@ -50,7 +50,7 @@ pub struct MediaFile {
 pub struct Movie {
     pub id: MediaId,
     pub title: String,
-    pub poster: String,
+    pub poster: Option<String>,
     pub description: Option<String>,
     pub file: MediaFile,
     pub duration: DurationSeconds,
@@ -113,10 +113,10 @@ impl Media {
             Media::Series(s) => &s.title,
         }
     }
-    pub fn poster(&self) -> &str {
+    pub fn poster(&self) -> Option<&str> {
         match self {
-            Media::Movie(m) => &m.poster,
-            Media::Series(s) => &s.poster,
+            Media::Movie(m) => m.poster.as_deref(),
+            Media::Series(s) => s.poster.as_deref(),
         }
     }
     pub fn description(&self) -> Option<&str> {
@@ -164,7 +164,7 @@ pub struct Episode {
 pub struct Series {
     pub id: MediaId,
     pub title: String,
-    pub poster: String,
+    pub poster: Option<String>,
     pub description: Option<String>,
     pub season_count: u32,
     pub season_summaries: Vec<SeasonSummary>,

@@ -1,7 +1,8 @@
 use super::{fetch_season, fetch_series_detail};
 use crate::app::{
+    common::Poster,
     icons::{ClockIcon, SeriesIcon},
-    model::{Episode, Season, SeasonSummary, Series},
+    model::{Episode, MediaType, Season, SeasonSummary, Series},
     resource_view::ResourceView,
     series::listing::{EpisodeSelector, EpisodeSelectorProps, SeasonSelector},
     video_player::VideoPlayer,
@@ -101,7 +102,10 @@ fn SeriesView(
 
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
-            <Poster src=poster.clone()/>
+            <div class="absolute inset-0">
+                <Poster poster=poster.clone() media_type=MediaType::Series/>
+                <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
+            </div>
             <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
                 <Info
                     poster
@@ -123,22 +127,12 @@ fn SeriesView(
 }
 
 #[component]
-fn Poster(src: String) -> impl IntoView {
-    view! {
-        <div class="absolute inset-0">
-            <img
-                src=src
-                class="w-full h-full object-cover scale-110 blur-3xl opacity-20"
-                alt=""
-            />
-            <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
-        </div>
-
-    }
-}
-
-#[component]
-fn Info(poster: String, title: String, season_count: u32, description: String) -> impl IntoView {
+fn Info(
+    poster: Option<String>,
+    title: String,
+    season_count: u32,
+    description: String,
+) -> impl IntoView {
     view! {
     <div
         class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start"
