@@ -9,6 +9,15 @@ use leptos_router::{lazy_route, LazyRoute};
 use serde::{Deserialize, Serialize};
 use web_sys::{wasm_bindgen::JsCast, HtmlInputElement, HtmlSelectElement};
 
+const INPUT_CLASS: &str = "w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition";
+const TEXTAREA_CLASS: &str = "w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition resize-none";
+const CARD_CLASS: &str =
+    "backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl";
+const ITEM_CARD_CLASS: &str = "bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 flex flex-col sm:flex-row gap-3 items-start";
+const TOOLBAR_BTN_CLASS: &str = "inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-1.5 px-3 rounded-lg transition text-sm";
+const UPLOAD_BTN_CLASS: &str = "inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm";
+const ICON_BTN_CLASS: &str = "text-gray-400 hover:text-white transition disabled:opacity-30 p-1";
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SeriesTitle {
     pub id: MediaId,
@@ -16,7 +25,7 @@ pub struct SeriesTitle {
 }
 
 #[derive(Clone, Debug)]
-pub struct EpUpload {
+pub struct UploadItem {
     pub id: u32,
     pub file: web_sys::File,
     pub title: String,
@@ -64,7 +73,7 @@ impl LazyRoute for UploadPage {
         view! {
             <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
                 <UploadHeader/>
-                <div class="backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl">
+                <div class=CARD_CLASS>
                     <ActionForm action=upload_action prop:class="space-y-6 md:space-y-8">
                         <UploadContent series_res=this.series/>
                     </ActionForm>
@@ -73,6 +82,28 @@ impl LazyRoute for UploadPage {
         }
         .into_any()
     }
+}
+
+fn tab_class(is_active: bool, active_classes: &'static str) -> String {
+    format!(
+        "px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}",
+        if is_active {
+            active_classes
+        } else {
+            "text-gray-400 hover:text-white"
+        }
+    )
+}
+
+fn toggle_btn_class(is_active: bool) -> String {
+    format!(
+        "px-3 py-1.5 rounded-lg text-sm font-medium transition {}",
+        if is_active {
+            "bg-cyan-500/20 text-cyan-400"
+        } else {
+            "text-gray-400 hover:text-white"
+        }
+    )
 }
 
 #[component]
@@ -90,7 +121,7 @@ fn UploadContent(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) 
     view! {
         <MediaKindSelector media_type/>
         <div class="space-y-4">
-            <TitleInput/>
+            <TitleInput media_type/>
             <DescriptionInput/>
         </div>
         <HiddenFormState media_type is_new_series existing_series_id/>
@@ -110,176 +141,6 @@ fn UploadContent(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) 
 }
 
 #[component]
-fn AudioGroupSection() -> impl IntoView {
-    let tracks = RwSignal::new(Vec::<EpUpload>::new());
-    let next_id = RwSignal::new(1u32);
-
-    view! {
-        <div class="space-y-4">
-            <AudioTracksToolbar tracks=tracks next_id=next_id/>
-            <AudioTrackList tracks=tracks/>
-            <p class="text-xs text-gray-500">
-                "يتم ترقيم المقاطع الصوتية تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
-            </p>
-        </div>
-    }
-}
-
-#[component]
-fn AudioTracksToolbar(tracks: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) -> impl IntoView {
-    view! {
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">
-                <MovieIcon/> "المقاطع الصوتية"
-            </h2>
-            <div class="flex flex-wrap items-center gap-2">
-                <AudioFilesInput tracks=tracks next_id=next_id/>
-                <EpisodesSortButton episodes=tracks/>
-            </div>
-        </div>
-    }
-}
-
-#[component]
-fn AudioFilesInput(tracks: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) -> impl IntoView {
-    let file_handler = move |ev: web_sys::Event| {
-        if let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-        {
-            if let Some(files) = input.files() {
-                let mut new_tracks: Vec<EpUpload> = (0..files.length())
-                    .filter_map(|i| files.get(i))
-                    .map(|file| {
-                        let name = file.name();
-                        let title = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-                        EpUpload {
-                            id: next_id.get(),
-                            file,
-                            title,
-                        }
-                    })
-                    .collect();
-
-                new_tracks.sort_by_key(|x| x.file.name());
-                tracks.update(|tracks| tracks.extend(new_tracks));
-                next_id.update(|id| *id += files.length());
-                input.set_value("");
-            }
-        }
-    };
-
-    view! {
-        <input
-            type="file"
-            id="multiAudioInput"
-            class="hidden"
-            multiple
-            accept="audio/*"
-            on:change=file_handler
-        />
-        <label
-            for="multiAudioInput"
-            class="inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm"
-        >
-            <UploadIcon/> "اختيار ملفات صوتية"
-        </label>
-    }
-}
-
-#[component]
-fn AudioTrackList(tracks: RwSignal<Vec<EpUpload>>) -> impl IntoView {
-    view! {
-        <div class="space-y-3 max-h-80 overflow-y-auto p-1">
-            <For
-                each={move || tracks.get().into_iter().enumerate().collect::<Vec<_>>()}
-                key=|(_, ep)| ep.id
-                let:item>
-                {move || {
-                    let (i, ep) = item.clone();
-                    view! { <AudioTrackItem tracks=tracks ep_id=ep.id index=i/> }
-                }}
-            </For>
-        </div>
-    }
-}
-
-#[component]
-fn AudioTrackItem(tracks: RwSignal<Vec<EpUpload>>, ep_id: u32, index: usize) -> impl IntoView {
-    let total = move || tracks.get().len();
-
-    let remove = move |_| tracks.update(|tracks| tracks.retain(|e| e.id != ep_id));
-
-    let move_up = move |_| {
-        tracks.update(|tracks| {
-            if let Some(pos) = tracks.iter().position(|e| e.id == ep_id) {
-                if pos > 0 {
-                    tracks.swap(pos, pos - 1);
-                }
-            }
-        })
-    };
-
-    let move_down = move |_| {
-        tracks.update(|tracks| {
-            if let Some(pos) = tracks.iter().position(|e| e.id == ep_id) {
-                if pos + 1 < tracks.len() {
-                    tracks.swap(pos, pos + 1);
-                }
-            }
-        })
-    };
-
-    let title_update = move |ev: web_sys::Event| {
-        if let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-        {
-            tracks.update(|tracks| {
-                if let Some(track) = tracks.iter_mut().find(|e| e.id == ep_id) {
-                    track.title = input.value();
-                }
-            });
-        }
-    };
-
-    let track = move || tracks.get().into_iter().find(|e| e.id == ep_id).unwrap();
-
-    view! {
-        <div class="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 flex flex-col sm:flex-row gap-3 items-start">
-            <div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
-                <div>
-                    <span class="text-gray-400 text-sm font-medium">رقم المقطع</span>
-                    <div class="text-white font-semibold mt-0.5">{index + 1}</div>
-                </div>
-                <div class="sm:col-span-2">
-                    <label class="text-xs text-gray-400 mb-0.5 block">"عنوان المقطع الصوتي"</label>
-                    <input type="text"
-                        prop:value=move || track().title
-                        on:input=title_update
-                        placeholder="عنوان المقطع الصوتي"
-                        class="w-full bg-white/10 text-white rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                    />
-                </div>
-                <div class="hidden sm:block">
-                    <span class="text-xs text-gray-400">"الملف"</span>
-                    <div class="text-xs text-gray-300 truncate mt-0.5 max-w-32">
-                        {move || track().file.name()}
-                    </div>
-                </div>
-            </div>
-            <EpisodeItemControls
-                on_move_up=move_up
-                on_move_down=move_down
-                on_remove=remove
-                index=index
-                total=total
-            />
-        </div>
-    }
-}
-
-#[component]
 fn HiddenFormState(
     media_type: RwSignal<MediaType>,
     is_new_series: RwSignal<bool>,
@@ -295,17 +156,24 @@ fn HiddenFormState(
 #[component]
 fn MediaKindSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
     let series_class = move || {
-        format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}",
-            if matches!(media_type.get(), MediaType::Series) { "bg-purple-500/20 text-purple-400 shadow-lg shadow-purple-500/10" } else { "text-gray-400 hover:text-white" })
+        tab_class(
+            matches!(media_type.get(), MediaType::Series),
+            "bg-purple-500/20 text-purple-400 shadow-lg shadow-purple-500/10",
+        )
     };
     let movie_class = move || {
-        format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}",
-            if matches!(media_type.get(), MediaType::Movie) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })
+        tab_class(
+            matches!(media_type.get(), MediaType::Movie),
+            "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10",
+        )
     };
     let audio_class = move || {
-        format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}",
-            if matches!(media_type.get(), MediaType::AudioGroup) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })
+        tab_class(
+            matches!(media_type.get(), MediaType::AudioGroup),
+            "bg-green-500/20 text-green-400 shadow-lg shadow-green-500/10",
+        )
     };
+
     view! {
         <div class="flex justify-center">
             <div class="inline-flex bg-white/5 rounded-2xl p-1" role="group">
@@ -324,13 +192,16 @@ fn MediaKindSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
 }
 
 #[component]
-fn TitleInput() -> impl IntoView {
+fn TitleInput(media_type: RwSignal<MediaType>) -> impl IntoView {
+    let placeholder = move || match media_type.get() {
+        MediaType::Movie => "مثال : Pulp Fiction",
+        MediaType::Series => "مثال : Breaking Bad",
+        MediaType::AudioGroup => "مثال : اغاني اصالة",
+    };
     view! {
         <div>
             <label class="block text-sm font-medium text-gray-300 mb-1.5">"العنوان *"</label>
-            <input type="text" name="title" required placeholder="مثال: Breaking Bad"
-                class="w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition"
-            />
+            <input type="text" name="title" required placeholder=placeholder class=INPUT_CLASS/>
         </div>
     }
 }
@@ -340,9 +211,7 @@ fn DescriptionInput() -> impl IntoView {
     view! {
         <div>
             <label class="block text-sm font-medium text-gray-300 mb-1.5">"الوصف (اختياري)"</label>
-            <textarea name="description" rows=3 placeholder="وصف مختصر (اختياري)..."
-                class="w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition resize-none"
-            />
+            <textarea name="description" rows=3 placeholder="وصف مختصر (اختياري)..." class=TEXTAREA_CLASS/>
         </div>
     }
 }
@@ -352,6 +221,8 @@ fn SeriesSection(
     series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>,
     adapter: impl Fn(Vec<SeriesTitle>) -> SeriesSettingsProps + Send + 'static,
 ) -> impl IntoView {
+    let episode_icon: fn() -> AnyView = || view! { <SeriesIcon/> }.into_any();
+
     view! {
         <ResourceView
             resource=series_res
@@ -359,7 +230,17 @@ fn SeriesSection(
             adapter=adapter
             context="جارٍ تحميل قائمة المسلسلات"
         />
-        <EpisodesSection/>
+        <MediaFilesSection
+            heading="الحلقات"
+            hint="يتم ترقيم الحلقات تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
+            input_id="multiEpisodeInput"
+            accept="video/*"
+            select_label="اختيار الحلقات"
+            number_label="رقم الحلقة"
+            title_label="عنوان الحلقة"
+            file_label="الملف"
+            icon=episode_icon
+        />
     }
 }
 
@@ -392,14 +273,12 @@ fn SeriesTypeToggle(
             <div class="inline-flex bg-white/5 rounded-xl p-0.5">
                 <button type="button"
                     on:click=move |_| { is_new_series.set(true); existing_series_id.set(None); }
-                    class=move || format!("px-3 py-1.5 rounded-lg text-sm font-medium transition {}",
-                        if is_new_series.get() { "bg-cyan-500/20 text-cyan-400" } else { "text-gray-400 hover:text-white" })>
+                    class=move || toggle_btn_class(is_new_series.get())>
                     جديد
                 </button>
                 <button type="button"
                     on:click=move |_| is_new_series.set(false)
-                    class=move || format!("px-3 py-1.5 rounded-lg text-sm font-medium transition {}",
-                        if !is_new_series.get() { "bg-cyan-500/20 text-cyan-400" } else { "text-gray-400 hover:text-white" })>
+                    class=move || toggle_btn_class(!is_new_series.get())>
                     موجود
                 </button>
             </div>
@@ -425,7 +304,7 @@ fn ExistingSeriesSelect(
                                 existing_series_id.set(sel.value().parse().ok());
                             }
                         }
-                        class="w-full bg-white/10 backdrop-blur-md text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                        class=INPUT_CLASS
                     >
                         <option value="" class="bg-gray-800">"-- اختر --"</option>
                         {series_list.iter().map(|series| view! {
@@ -453,6 +332,7 @@ fn MovieFileInput() -> impl IntoView {
             }
         }
     };
+
     view! {
         <div>
             <label class="block text-sm font-medium text-gray-300 mb-1.5">"ملف الفيلم"</label>
@@ -490,31 +370,177 @@ fn FileSelector(
 }
 
 #[component]
-fn EpisodesSection() -> impl IntoView {
-    let episodes = RwSignal::new(Vec::<EpUpload>::new());
+fn AudioGroupSection() -> impl IntoView {
+    let audio_icon: fn() -> AnyView = || view! { <MovieIcon/> }.into_any();
+
+    view! {
+        <MediaFilesSection
+            heading="المقاطع الصوتية"
+            hint="يتم ترقيم المقاطع الصوتية تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
+            input_id="multiAudioInput"
+            accept="audio/*"
+            select_label="اختيار ملفات صوتية"
+            number_label="رقم المقطع"
+            title_label="عنوان المقطع الصوتي"
+            file_label="الملف"
+            icon=audio_icon
+        />
+    }
+}
+
+#[component]
+fn MediaFilesSection(
+    heading: &'static str,
+    hint: &'static str,
+    input_id: &'static str,
+    accept: &'static str,
+    select_label: &'static str,
+    number_label: &'static str,
+    title_label: &'static str,
+    file_label: &'static str,
+    icon: fn() -> AnyView,
+) -> impl IntoView {
+    let items = RwSignal::new(Vec::<UploadItem>::new());
     let next_id = RwSignal::new(1u32);
+
     view! {
         <div class="space-y-4">
-            <EpisodesToolbar episodes=episodes next_id=next_id/>
-            <EpisodeList episodes=episodes/>
-            <p class="text-xs text-gray-500">
-                "يتم ترقيم الحلقات تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
-            </p>
+            <MediaFilesToolbar
+                items=items
+                next_id=next_id
+                heading=heading
+                input_id=input_id
+                accept=accept
+                select_label=select_label
+                icon=icon
+            />
+            <MediaItemList
+                items=items
+                number_label=number_label
+                title_label=title_label
+                file_label=file_label
+            />
+            <p class="text-xs text-gray-500">{hint}</p>
         </div>
     }
 }
 
 #[component]
-fn EpisodeList(episodes: RwSignal<Vec<EpUpload>>) -> impl IntoView {
+fn MediaFilesToolbar(
+    items: RwSignal<Vec<UploadItem>>,
+    next_id: RwSignal<u32>,
+    heading: &'static str,
+    input_id: &'static str,
+    accept: &'static str,
+    select_label: &'static str,
+    icon: fn() -> AnyView,
+) -> impl IntoView {
+    view! {
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                {icon()} {heading}
+            </h2>
+            <div class="flex flex-wrap items-center gap-2">
+                <MediaFilesInput
+                    items=items
+                    next_id=next_id
+                    input_id=input_id
+                    accept=accept
+                    select_label=select_label
+                />
+                <SortMediaButton items=items/>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn MediaFilesInput(
+    items: RwSignal<Vec<UploadItem>>,
+    next_id: RwSignal<u32>,
+    input_id: &'static str,
+    accept: &'static str,
+    select_label: &'static str,
+) -> impl IntoView {
+    let file_handler = move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        {
+            if let Some(files) = input.files() {
+                let mut new_items: Vec<UploadItem> = (0..files.length())
+                    .filter_map(|i| files.get(i))
+                    .map(|file| {
+                        let name = file.name();
+                        let title = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+                        UploadItem {
+                            id: next_id.get(),
+                            file,
+                            title,
+                        }
+                    })
+                    .collect();
+
+                new_items.sort_by_key(|x| x.file.name());
+                items.update(|list| list.extend(new_items));
+                next_id.update(|id| *id += files.length());
+                input.set_value("");
+            }
+        }
+    };
+
+    view! {
+        <input
+            type="file"
+            id=input_id
+            class="hidden"
+            multiple
+            accept=accept
+            on:change=file_handler
+        />
+        <label for=input_id class=UPLOAD_BTN_CLASS>
+            <UploadIcon/> {select_label}
+        </label>
+    }
+}
+
+#[component]
+fn SortMediaButton(items: RwSignal<Vec<UploadItem>>) -> impl IntoView {
+    let sort = move |_| items.update(|list| list.sort_by_key(|x| x.file.name()));
+
+    view! {
+        <button type="button" on:click=sort class=TOOLBAR_BTN_CLASS>
+            <SortIcon/> "ترتيب"
+        </button>
+    }
+}
+
+#[component]
+fn MediaItemList(
+    items: RwSignal<Vec<UploadItem>>,
+    number_label: &'static str,
+    title_label: &'static str,
+    file_label: &'static str,
+) -> impl IntoView {
     view! {
         <div class="space-y-3 max-h-80 overflow-y-auto p-1">
             <For
-                each={move || episodes.get().into_iter().enumerate().collect::<Vec<_>>()}
-                key=|(_, ep)| ep.id
-                let:item>
+                each={move || items.get().into_iter().enumerate().collect::<Vec<_>>()}
+                key=|(_, item)| item.id
+                let:item
+            >
                 {move || {
-                    let (i, ep) = item.clone();
-                    view! { <EpisodeItem episodes=episodes ep_id=ep.id index=i/> }
+                    let (index, item) = item.clone();
+                    view! {
+                        <MediaItemRow
+                            items=items
+                            item_id=item.id
+                            index=index
+                            number_label=number_label
+                            title_label=title_label
+                            file_label=file_label
+                        />
+                    }
                 }}
             </For>
         </div>
@@ -522,85 +548,30 @@ fn EpisodeList(episodes: RwSignal<Vec<EpUpload>>) -> impl IntoView {
 }
 
 #[component]
-fn EpisodesToolbar(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) -> impl IntoView {
-    view! {
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">
-                <SeriesIcon/> "الحلقات"
-            </h2>
-            <div class="flex flex-wrap items-center gap-2">
-                <EpisodesFileInput episodes=episodes next_id=next_id/>
-                <EpisodesSortButton episodes=episodes/>
-            </div>
-        </div>
-    }
-}
-
-#[component]
-fn EpisodesFileInput(episodes: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) -> impl IntoView {
-    let file_handler = move |ev: web_sys::Event| {
-        if let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-        {
-            if let Some(files) = input.files() {
-                let mut new_eps: Vec<EpUpload> = (0..files.length())
-                    .filter_map(|i| files.get(i))
-                    .map(|file| {
-                        let name = file.name();
-                        let title = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-                        EpUpload {
-                            id: next_id.get(),
-                            file,
-                            title,
-                        }
-                    })
-                    .collect();
-                new_eps.sort_by_key(|x| x.file.name());
-                episodes.update(|eps| eps.extend(new_eps));
-                next_id.update(|id| *id += files.length());
-                input.set_value("");
-            }
-        }
-    };
-    view! {
-        <input type="file" id="multiEpisodeInput" class="hidden" multiple accept="video/*" on:change=file_handler/>
-        <label for="multiEpisodeInput"
-            class="inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm">
-            <UploadIcon/> "اختيار ملفات"
-        </label>
-    }
-}
-
-#[component]
-fn EpisodesSortButton(episodes: RwSignal<Vec<EpUpload>>) -> impl IntoView {
-    let sort = move |_| episodes.update(|eps| eps.sort_by_key(|x| x.file.name()));
-    view! {
-        <button type="button" on:click=sort
-            class="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-1.5 px-3 rounded-lg transition text-sm">
-            <SortIcon/> "ترتيب"
-        </button>
-    }
-}
-
-#[component]
-fn EpisodeItem(episodes: RwSignal<Vec<EpUpload>>, ep_id: u32, index: usize) -> impl IntoView {
-    let total = move || episodes.get().len();
-    let remove = move |_| episodes.update(|eps| eps.retain(|e| e.id != ep_id));
+fn MediaItemRow(
+    items: RwSignal<Vec<UploadItem>>,
+    item_id: u32,
+    index: usize,
+    number_label: &'static str,
+    title_label: &'static str,
+    file_label: &'static str,
+) -> impl IntoView {
+    let total = move || items.get().len();
+    let remove = move |_| items.update(|list| list.retain(|e| e.id != item_id));
     let move_up = move |_| {
-        episodes.update(|eps| {
-            if let Some(pos) = eps.iter().position(|e| e.id == ep_id) {
+        items.update(|list| {
+            if let Some(pos) = list.iter().position(|e| e.id == item_id) {
                 if pos > 0 {
-                    eps.swap(pos, pos - 1);
+                    list.swap(pos, pos - 1);
                 }
             }
         })
     };
     let move_down = move |_| {
-        episodes.update(|eps| {
-            if let Some(pos) = eps.iter().position(|e| e.id == ep_id) {
-                if pos + 1 < eps.len() {
-                    eps.swap(pos, pos + 1);
+        items.update(|list| {
+            if let Some(pos) = list.iter().position(|e| e.id == item_id) {
+                if pos + 1 < list.len() {
+                    list.swap(pos, pos + 1);
                 }
             }
         })
@@ -610,37 +581,39 @@ fn EpisodeItem(episodes: RwSignal<Vec<EpUpload>>, ep_id: u32, index: usize) -> i
             .target()
             .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
         {
-            episodes.update(|eps| {
-                if let Some(ep) = eps.iter_mut().find(|e| e.id == ep_id) {
-                    ep.title = input.value();
+            items.update(|list| {
+                if let Some(item) = list.iter_mut().find(|e| e.id == item_id) {
+                    item.title = input.value();
                 }
             });
         }
     };
-    let ep = move || episodes.get().into_iter().find(|e| e.id == ep_id).unwrap();
+    let item = move || items.get().into_iter().find(|e| e.id == item_id).unwrap();
 
     view! {
-        <div class="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 flex flex-col sm:flex-row gap-3 items-start">
+        <div class=ITEM_CARD_CLASS>
             <div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
                 <div>
-                    <span class="text-gray-400 text-sm font-medium">رقم الحلقة</span>
+                    <span class="text-gray-400 text-sm font-medium">{number_label}</span>
                     <div class="text-white font-semibold mt-0.5">{index + 1}</div>
                 </div>
                 <div class="sm:col-span-2">
-                    <label class="text-xs text-gray-400 mb-0.5 block">"عنوان الحلقة"</label>
+                    <label class="text-xs text-gray-400 mb-0.5 block">{title_label}</label>
                     <input type="text"
-                        prop:value=move || ep().title
+                        prop:value=move || item().title
                         on:input=title_update
-                        placeholder="عنوان الحلقة"
+                        placeholder=title_label
                         class="w-full bg-white/10 text-white rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400"
                     />
                 </div>
                 <div class="hidden sm:block">
-                    <span class="text-xs text-gray-400">"الملف"</span>
-                    <div class="text-xs text-gray-300 truncate mt-0.5 max-w-32">{move || ep().file.name()}</div>
+                    <span class="text-xs text-gray-400">{file_label}</span>
+                    <div class="text-xs text-gray-300 truncate mt-0.5 max-w-32">
+                        {move || item().file.name()}
+                    </div>
                 </div>
             </div>
-            <EpisodeItemControls
+            <MediaItemControls
                 on_move_up=move_up
                 on_move_down=move_down
                 on_remove=remove
@@ -652,7 +625,7 @@ fn EpisodeItem(episodes: RwSignal<Vec<EpUpload>>, ep_id: u32, index: usize) -> i
 }
 
 #[component]
-fn EpisodeItemControls(
+fn MediaItemControls(
     on_move_up: impl Fn(web_sys::MouseEvent) + 'static,
     on_move_down: impl Fn(web_sys::MouseEvent) + 'static,
     on_remove: impl Fn(web_sys::MouseEvent) + 'static,
@@ -662,15 +635,15 @@ fn EpisodeItemControls(
     view! {
         <div class="flex items-center gap-1 mt-1 sm:mt-0">
             <button on:click=on_move_up disabled=move || index == 0
-                class="text-gray-400 hover:text-white transition disabled:opacity-30 p-1" title="نقل للأعلى">
+                class=ICON_BTN_CLASS title="نقل للأعلى">
                 <UpArrow/>
             </button>
             <button on:click=on_move_down disabled=move || index + 1 == total()
-                class="text-gray-400 hover:text-white transition disabled:opacity-30 p-1" title="نقل للأسفل">
+                class=ICON_BTN_CLASS title="نقل للأسفل">
                 <DownArrow/>
             </button>
             <button on:click=on_remove
-                class="text-red-400 hover:text-red-300 transition p-1" title="حذف الحلقة">
+                class="text-red-400 hover:text-red-300 transition p-1" title="حذف">
                 <DeleteIcon/>
             </button>
         </div>
@@ -685,7 +658,7 @@ fn UploadHeader() -> impl IntoView {
                 <span class="text-cyan-400"><UploadIcon/></span>
             </div>
             <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">"رفع وسائط جديدة"</h1>
-            <p class="text-gray-400 text-sm sm:text-base mt-2">"أضف فيلمًا أو مسلسلًا إلى مكتبتك المنزلية"</p>
+            <p class="text-gray-400 text-sm sm:text-base mt-2">"أضف فيلمًا أو مسلسلًا أو مجموعة صوتية إلى مكتبتك المنزلية"</p>
         </div>
     }
 }
