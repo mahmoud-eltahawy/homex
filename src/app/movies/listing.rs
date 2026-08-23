@@ -1,6 +1,6 @@
 use crate::app::common::{CardsLoading, MediaPageHeader};
 use crate::app::model::{self, Movie};
-use crate::app::CardsList;
+use crate::app::view_schema::CardsList;
 use crate::app::{icons::MovieIcon, resource_view::ResourceView};
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};

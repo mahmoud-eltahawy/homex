@@ -5,7 +5,7 @@ use crate::app::{
     resource_view::ResourceView,
     series::listing::{EpisodeSelector, EpisodeSelectorProps, SeasonSelector},
     video_player::VideoPlayer,
-    PosterView,
+    view_schema::PosterView,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};

@@ -7,7 +7,7 @@ use crate::app::{
     movies::listing::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
     series::{fetch_series, fetch_series_count},
-    Card,
+    view_schema::Card,
 };
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};

@@ -13,68 +13,72 @@ use leptos_router::{
     path, Lazy,
 };
 
-pub trait IconView {
-    fn icon() -> impl IntoView;
-}
+mod view_schema {
+    use leptos::prelude::*;
 
-pub trait PosterSvgView {
-    fn svg_poster() -> impl IntoView;
-}
+    pub trait IconView {
+        fn icon() -> impl IntoView;
+    }
 
-pub trait PosterView: PosterSvgView {
-    fn poster(self) -> impl IntoView;
-}
+    pub trait PosterSvgView {
+        fn svg_poster() -> impl IntoView;
+    }
 
-pub trait OverPosterView: PosterSvgView {
-    fn over_poster(self) -> impl IntoView;
-}
+    pub trait PosterView: PosterSvgView {
+        fn poster(self) -> impl IntoView;
+    }
 
-pub trait CardImageView: IconView + PosterSvgView + OverPosterView {
-    fn card_image(self) -> impl IntoView;
-}
+    pub trait OverPosterView: PosterSvgView {
+        fn over_poster(self) -> impl IntoView;
+    }
 
-pub trait InfoView {
-    fn info_view(self) -> impl IntoView;
-}
+    pub trait CardImageView: IconView + PosterSvgView + OverPosterView {
+        fn card_image(self) -> impl IntoView;
+    }
 
-pub trait Href {
-    fn href(self) -> String;
-}
+    pub trait InfoView {
+        fn info_view(self) -> impl IntoView;
+    }
 
-pub trait Card: Href + CardImageView + InfoView {
-    fn card(self) -> impl IntoView;
-}
+    pub trait Href {
+        fn href(self) -> String;
+    }
 
-impl<T> Card for T
-where
-    T: Href + CardImageView + InfoView + Clone,
-{
-    fn card(self) -> impl IntoView {
-        let href = self.clone().href();
-        view! {
-            <a href=href class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2">
-                {self.clone().card_image()}
-                {self.info_view()}
-            </a>
+    pub trait Card: Href + CardImageView + InfoView {
+        fn card(self) -> impl IntoView;
+    }
+
+    impl<T> Card for T
+    where
+        T: Href + CardImageView + InfoView + Clone,
+    {
+        fn card(self) -> impl IntoView {
+            let href = self.clone().href();
+            view! {
+                <a href=href class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2">
+                    {self.clone().card_image()}
+                    {self.info_view()}
+                </a>
+            }
         }
     }
-}
 
-pub trait CardsList {
-    fn cards_list(self) -> impl IntoView;
-}
+    pub trait CardsList {
+        fn cards_list(self) -> impl IntoView;
+    }
 
-impl<L, T> CardsList for L
-where
-    T: Card,
-    L: IntoIterator<Item = T>,
-{
-    fn cards_list(self) -> impl IntoView {
-        let core = self.into_iter().map(|item| item.card()).collect_view();
-        view! {
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                {core}
-            </div>
+    impl<L, T> CardsList for L
+    where
+        T: Card,
+        L: IntoIterator<Item = T>,
+    {
+        fn cards_list(self) -> impl IntoView {
+            let core = self.into_iter().map(|item| item.card()).collect_view();
+            view! {
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
+                    {core}
+                </div>
+            }
         }
     }
 }

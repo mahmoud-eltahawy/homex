@@ -4,7 +4,7 @@ use crate::app::{
     model::{Episode, SeasonSummary, Series},
     resource_view::ResourceView,
     series::fetch_series,
-    CardsList,
+    view_schema::CardsList,
 };
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;

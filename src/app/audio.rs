@@ -2,7 +2,9 @@ use crate::app::{
     common::{PosterImg, PosterImgProps},
     icons::{AudioIcon, MusicPosterSvg},
     model::{self, AudioGroup},
-    CardImageView, Href, IconView, InfoView, OverPosterView, PosterSvgView, PosterView,
+    view_schema::{
+        CardImageView, Href, IconView, InfoView, OverPosterView, PosterSvgView, PosterView,
+    },
 };
 use leptos::{either::Either, prelude::*};
 
