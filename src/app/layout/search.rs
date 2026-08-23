@@ -35,6 +35,7 @@ fn MediaTypeSearch(
                     match value.as_str() {
                         "movie" => media_type.set(Some(MediaType::Movie)),
                         "series" => media_type.set(Some(MediaType::Series)),
+                        "audio" => media_type.set(Some(MediaType::AudioGroup)),
                         _ => media_type.set(None),
                     }
                 }
@@ -43,6 +44,7 @@ fn MediaTypeSearch(
                 <option value="any" selected=move || media_type.get().is_none()>"فيلم او مسلسل"</option>
                 <option value="movie" selected=move || media_type.get() == Some(MediaType::Movie)>"فيلم"</option>
                 <option value="series" selected=move || media_type.get() == Some(MediaType::Series)>"مسلسل"</option>
+                <option value="audio" selected=move || media_type.get() == Some(MediaType::AudioGroup)>"صوتيات"</option>
             </select>
         </Show>
     }
