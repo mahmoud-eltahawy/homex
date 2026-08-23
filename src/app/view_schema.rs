@@ -1,7 +1,12 @@
 use leptos::prelude::*;
 
+use crate::app::model::MediaType;
+
 pub trait IconView {
     fn icon() -> impl IntoView;
+}
+pub trait MediaTypeT {
+    fn media_type() -> MediaType;
 }
 
 pub trait PosterSvgView {
@@ -28,13 +33,13 @@ pub trait Href {
     fn href(self) -> String;
 }
 
-pub trait Card: Href + CardImageView + InfoView {
+pub trait Card: Href + CardImageView + InfoView + MediaTypeT {
     fn card(self) -> impl IntoView;
 }
 
 impl<T> Card for T
 where
-    T: Href + CardImageView + InfoView + Clone,
+    T: Href + CardImageView + InfoView + MediaTypeT + Clone,
 {
     fn card(self) -> impl IntoView {
         let href = self.clone().href();

@@ -3,10 +3,13 @@ use crate::app::{
     icons::{ClockIcon, MovieIcon, MoviePosterSvg},
     model::Movie,
     view_schema::{
-        CardImageView, Href, IconView, InfoView, OverPosterView, PosterSvgView, PosterView,
+        CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
+        PosterView,
     },
 };
 use leptos::{either::Either, prelude::*};
+
+use super::model::MediaType;
 
 pub mod detail;
 pub mod listing;
@@ -14,6 +17,12 @@ pub mod listing;
 impl IconView for Movie {
     fn icon() -> impl IntoView {
         MovieIcon()
+    }
+}
+
+impl MediaTypeT for Movie {
+    fn media_type() -> MediaType {
+        MediaType::Movie
     }
 }
 

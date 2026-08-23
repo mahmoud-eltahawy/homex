@@ -1,4 +1,3 @@
-use super::model::MediaType;
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
     common::CardsLoading,
@@ -32,7 +31,6 @@ pub fn HomeHero() -> impl IntoView {
 fn MediaSection<C>(
     title: String,
     items: Vec<C>,
-    kind: MediaType,
     items_offset: RwSignal<usize>,
     items_count: Resource<Result<usize, ServerFnError>>,
 ) -> impl IntoView
@@ -47,7 +45,7 @@ where
                     {title.clone()}
                 </h2>
 
-                <MediaSectionNav items_offset items_count kind/>
+                <MediaSectionNav items_offset items_count href={C::media_type().to_string()}/>
             </div>
 
             {items.cards_list()}
@@ -59,16 +57,13 @@ where
 fn MediaSectionNav(
     items_offset: RwSignal<usize>,
     items_count: Resource<Result<usize, ServerFnError>>,
-    kind: MediaType,
+    href: String,
 ) -> impl IntoView {
     let can_prev = move || items_offset.get() > 0;
 
+    let get_items_count = move || items_count.get().transpose().ok().flatten();
     let can_next = move || {
-        items_count
-            .get()
-            .transpose()
-            .ok()
-            .flatten()
+        get_items_count()
             .map(|count| items_offset.get() < count.saturating_sub(MEDIA_LIST_SIZE))
             .unwrap_or(false)
     };
@@ -83,11 +78,7 @@ fn MediaSectionNav(
 
     let go_next = move |_| {
         items_offset.update(|x| {
-            let max_offset = items_count
-                .get()
-                .transpose()
-                .ok()
-                .flatten()
+            let max_offset = get_items_count()
                 .unwrap_or(0)
                 .saturating_sub(MEDIA_LIST_SIZE);
 
@@ -121,7 +112,7 @@ fn MediaSectionNav(
             </div>
 
             <a
-                href={kind.to_string()}
+                href=href
                 class="group inline-flex items-center gap-1 text-sm font-semibold text-cyan-400 transition hover:text-cyan-300"
             >
                 <span class="transition-transform group-hover:translate-x-1">"عرض الكل"</span>
@@ -186,21 +177,18 @@ impl LazyRoute for HomePage {
         let movie_adapter = move |movies: Vec<Movie>| MediaSectionProps {
             title: "أفلام".to_string(),
             items: movies,
-            kind: MediaType::Movie,
             items_offset: this.movies_offset,
             items_count: this.movies_count,
         };
         let series_adapter = move |series: Vec<Series>| MediaSectionProps {
             title: "مسلسلات".to_string(),
             items: series,
-            kind: MediaType::Series,
             items_offset: this.series_offset,
             items_count: this.series_count,
         };
         let audio_adapter = move |audio: Vec<AudioGroup>| MediaSectionProps {
             title: "مجموعات صوتية".to_string(),
             items: audio,
-            kind: MediaType::AudioGroup,
             items_offset: this.audio_offset,
             items_count: this.audio_count,
         };

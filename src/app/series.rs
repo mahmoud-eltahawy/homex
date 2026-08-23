@@ -3,9 +3,10 @@ use crate::app::delay;
 use crate::app::{
     common::{PosterImg, PosterImgProps},
     icons::{SeriesIcon, SeriesPosterSvg},
-    model::{Season, Series},
+    model::{MediaType, Season, Series},
     view_schema::{
-        CardImageView, Href, IconView, InfoView, OverPosterView, PosterSvgView, PosterView,
+        CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
+        PosterView,
     },
 };
 use leptos::{either::Either, prelude::*};
@@ -16,6 +17,12 @@ pub mod listing;
 impl IconView for Series {
     fn icon() -> impl IntoView {
         SeriesIcon()
+    }
+}
+
+impl MediaTypeT for Series {
+    fn media_type() -> MediaType {
+        MediaType::Series
     }
 }
 
