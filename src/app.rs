@@ -64,19 +64,16 @@ pub trait CardsList {
     fn cards_list(self) -> impl IntoView;
 }
 
-impl<T> CardsList for Vec<T>
+impl<L, T> CardsList for L
 where
     T: Card,
+    L: IntoIterator<Item = T>,
 {
     fn cards_list(self) -> impl IntoView {
+        let core = self.into_iter().map(|item| item.card()).collect_view();
         view! {
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                {
-                self
-                    .into_iter()
-                    .map(|item| item.card())
-                    .collect_view()
-                }
+                {core}
             </div>
         }
     }
