@@ -57,6 +57,7 @@ fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -
             <SearchBox search_term=search_term search_open=search_open/>
             <NavLink href="/movie" label="أفلام"/>
             <NavLink href="/series" label="مسلسلات"/>
+            <NavLink href="/audio" label="صوتيات"/>
         </div>
     }
 }
