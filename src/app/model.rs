@@ -57,10 +57,20 @@ pub struct Movie {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AudioGroup {
+    pub id: MediaId,
+    pub title: String,
+    pub poster: Option<String>,
+    pub description: Option<String>,
+    pub audios_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Media {
     Movie(Movie),
     Series(Series),
+    AudioGroup(AudioGroup),
 }
 
 impl From<Series> for Media {
@@ -71,6 +81,12 @@ impl From<Series> for Media {
 impl From<Movie> for Media {
     fn from(val: Movie) -> Self {
         Media::Movie(val)
+    }
+}
+
+impl From<AudioGroup> for Media {
+    fn from(val: AudioGroup) -> Self {
+        Media::AudioGroup(val)
     }
 }
 
@@ -107,48 +123,55 @@ impl Media {
         match self {
             Media::Movie(_) => MediaType::Movie,
             Media::Series(_) => MediaType::Series,
+            Media::AudioGroup(_) => MediaType::AudioGroup,
         }
     }
     pub fn title(&self) -> &str {
         match self {
             Media::Movie(m) => &m.title,
             Media::Series(s) => &s.title,
+            Media::AudioGroup(a) => &a.title,
         }
     }
     pub fn poster(&self) -> Option<&str> {
         match self {
             Media::Movie(m) => m.poster.as_deref(),
             Media::Series(s) => s.poster.as_deref(),
+            Media::AudioGroup(a) => a.poster.as_deref(),
         }
     }
     pub fn description(&self) -> Option<&str> {
         match self {
             Media::Movie(m) => m.description.as_deref(),
             Media::Series(s) => s.description.as_deref(),
+            Media::AudioGroup(a) => a.description.as_deref(),
         }
     }
     pub fn duration_display(&self) -> String {
         match self {
             Media::Movie(m) => m.duration.human_readable(),
             Media::Series(s) => format!("{} مواسم", s.season_count),
+            Media::AudioGroup(a) => format!("{} عدد الصوتيات", a.audios_count),
         }
     }
     pub fn size_display(&self) -> String {
         match self {
             Media::Movie(m) => m.file.size.human_readable(),
             Media::Series(s) => format!("{} مواسم", s.season_count),
+            Media::AudioGroup(a) => format!("{} عدد الصوتيات", a.audios_count),
         }
     }
     pub fn id(&self) -> i64 {
         match self {
             Media::Movie(m) => m.id.0,
             Media::Series(s) => s.id.0,
+            Media::AudioGroup(a) => a.id.0,
         }
     }
     pub fn file_path(&self) -> Option<&str> {
         match self {
             Media::Movie(m) => Some(&m.file.path),
-            Media::Series(_) => None,
+            Media::Series(_) | Media::AudioGroup(_) => todo!(),
         }
     }
 }

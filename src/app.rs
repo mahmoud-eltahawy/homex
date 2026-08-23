@@ -28,6 +28,36 @@ mod video_player;
 #[cfg(feature = "ssr")]
 mod mockary;
 
+mod audio {
+    use crate::app::model;
+    use leptos::prelude::*;
+
+    #[server]
+    pub async fn fetch_audio_groups(
+        offset: usize,
+        size: usize,
+    ) -> Result<Vec<model::AudioGroup>, ServerFnError> {
+        use crate::app::delay;
+        use crate::app::mockary;
+        delay(300).await;
+        let list = mockary::mock_audio_groups();
+        let size = size.clamp(0, list.len());
+        let offset = offset.clamp(0, list.len() - size);
+        let end = (offset + size).clamp(0, list.len());
+
+        Ok(list[offset..end].to_vec())
+    }
+
+    #[server]
+    pub async fn fetch_audio_groups_count() -> Result<usize, ServerFnError> {
+        use crate::app::delay;
+        use crate::app::mockary;
+        delay(300).await;
+
+        Ok(mockary::mock_audio_groups().len())
+    }
+}
+
 //TODO : DELETE this
 #[cfg(feature = "ssr")]
 async fn delay(ms: i32) {

@@ -1,6 +1,9 @@
 use crate::app::{
-    icons::{ClockIcon, MovieIcon, MoviePosterSvg, MusicPosterSvg, SeriesIcon, SeriesPosterSvg},
-    model::{Media, MediaType, Movie, Series},
+    icons::{
+        AudioIcon, ClockIcon, MovieIcon, MoviePosterSvg, MusicPosterSvg, SeriesIcon,
+        SeriesPosterSvg,
+    },
+    model::{AudioGroup, Media, MediaType, Movie, Series},
 };
 use leptos::{either::Either, prelude::*};
 
@@ -71,7 +74,6 @@ fn MovieCardImage(item: Movie) -> impl IntoView {
                     </div>
                 </div>
             </div>
-            // Badge is specific to movies here
             <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
                 <MovieIcon/>
                 "فيلم"
@@ -117,7 +119,6 @@ fn SeriesCardImage(item: Series) -> impl IntoView {
             <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4">
                 <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
                     <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">{title}</h3>
-                    // No duration here – we can later add season/episode info if needed
                 </div>
             </div>
             <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
@@ -144,10 +145,56 @@ fn SeriesCardInfo(item: Series) -> impl IntoView {
 }
 
 #[component]
+pub fn AudioCard(item: AudioGroup) -> impl IntoView {
+    let href = format!("/detail/audio/{}", item.id.0);
+    view! {
+        <MediaLink href=href>
+            <AudioCardImage item=item.clone()/>
+            <AudioCardInfo item=item/>
+        </MediaLink>
+    }
+}
+
+#[component]
+fn AudioCardImage(item: AudioGroup) -> impl IntoView {
+    let title = item.title.to_string();
+    view! {
+        <div class="aspect-[2/3] relative overflow-hidden">
+            <Poster poster=item.poster media_type=MediaType::AudioGroup/>
+            <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4">
+                <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
+                    <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">{title}</h3>
+                </div>
+            </div>
+            <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
+                <AudioIcon/>
+                "مجموعة صوتية"
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn AudioCardInfo(item: AudioGroup) -> impl IntoView {
+    let title = item.title.to_string();
+    view! {
+        <div class="p-4 flex flex-col gap-1">
+            <h3 class="text-white font-semibold truncate text-sm">{title}</h3>
+            <div class="flex items-center justify-between text-gray-500 text-xs">
+                <span class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                    "← التفاصيل"
+                </span>
+            </div>
+        </div>
+    }
+}
+
+#[component]
 pub fn MediaCard(item: Media) -> impl IntoView {
     match item {
         Media::Movie(item) => Either::Left(view! { <MovieCard item=item/> }),
-        Media::Series(item) => Either::Right(view! { <SeriesCard item=item/> }),
+        Media::Series(item) => Either::Right(Either::Left(view! { <SeriesCard item=item/> })),
+        Media::AudioGroup(item) => Either::Right(Either::Right(view! { <AudioCard item=item/> })),
     }
 }
 

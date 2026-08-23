@@ -1,5 +1,6 @@
 use crate::app::model::{
-    DurationSeconds, Episode, FileSize, MediaFile, MediaId, Movie, Season, SeasonSummary, Series,
+    AudioGroup, DurationSeconds, Episode, FileSize, MediaFile, MediaId, Movie, Season,
+    SeasonSummary, Series,
 };
 pub const TEST_VIDEO: &str = "https://www.w3schools.com/html/mov_bbb.mp4";
 
@@ -162,6 +163,32 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
             description: Some("some description".into()),
             file: fake_media_file(),
             duration: fake_duration(9240),
+        },
+    ]
+}
+
+pub fn mock_audio_groups() -> Vec<AudioGroup> {
+    vec![
+        AudioGroup {
+            id: MediaId(401),
+            title: "shakria songs".to_string(),
+            poster: None,
+            description: None,
+            audios_count: 3,
+        },
+        AudioGroup {
+            id: MediaId(402),
+            title: "rihhana songs".to_string(),
+            poster: None,
+            description: None,
+            audios_count: 4,
+        },
+        AudioGroup {
+            id: MediaId(403),
+            title: "amr diab songs".to_string(),
+            poster: None,
+            description: None,
+            audios_count: 5,
         },
     ]
 }

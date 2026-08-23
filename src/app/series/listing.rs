@@ -11,7 +11,7 @@ use leptos_router::{lazy_route, LazyRoute};
 use web_sys::HtmlSelectElement;
 
 pub struct SeriesPage {
-    pub(crate) data: Resource<Result<Vec<Series>, ServerFnError>>,
+    pub data: Resource<Result<Vec<Series>, ServerFnError>>,
 }
 
 #[lazy_route]
