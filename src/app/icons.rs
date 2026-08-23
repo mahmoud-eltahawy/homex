@@ -21,6 +21,18 @@ pub fn MovieIcon() -> impl IntoView {
 }
 
 #[component]
+pub fn AudioIcon() -> impl IntoView {
+    icon(
+        view! {
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        },
+        "h-5 w-5",
+    )
+}
+
+#[component]
 pub fn SeriesIcon() -> impl IntoView {
     icon(
         view! { <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/> },

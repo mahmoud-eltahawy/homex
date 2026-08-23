@@ -1,6 +1,8 @@
 use super::model::MediaType;
 use crate::app::{
-    icons::{DeleteIcon, DownArrow, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon},
+    icons::{
+        AudioIcon, DeleteIcon, DownArrow, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon,
+    },
     model::MediaId,
     resource_view::ResourceView,
 };
@@ -184,7 +186,7 @@ fn MediaKindSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
                     <MovieIcon/> "فيلم"
                 </button>
                 <button type="button" on:click=move |_| media_type.set(MediaType::AudioGroup) class=audio_class>
-                    <MovieIcon/> "مجموعة صوتية"
+                    <AudioIcon/> "مجموعة صوتية"
                 </button>
             </div>
         </div>

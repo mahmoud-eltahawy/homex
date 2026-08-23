@@ -1,4 +1,3 @@
-use leptos::logging::log;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
