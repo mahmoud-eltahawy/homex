@@ -98,11 +98,184 @@ fn UploadContent(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) 
             MediaType::Series => Either::Left(view! {
                 <SeriesSection series_res=series_res adapter=adapter/>
             }),
-            MediaType::Movie => Either::Right(view! {
+            MediaType::Movie => Either::Right(Either::Left(view! {
                 <MovieFileInput/>
-            }),
+            })),
+            MediaType::AudioGroup => Either::Right(Either::Right(view! {
+                <AudioGroupSection/>
+            })),
         }}
         <UploadSubmitButton/>
+    }
+}
+
+#[component]
+fn AudioGroupSection() -> impl IntoView {
+    let tracks = RwSignal::new(Vec::<EpUpload>::new());
+    let next_id = RwSignal::new(1u32);
+
+    view! {
+        <div class="space-y-4">
+            <AudioTracksToolbar tracks=tracks next_id=next_id/>
+            <AudioTrackList tracks=tracks/>
+            <p class="text-xs text-gray-500">
+                "يتم ترقيم المقاطع الصوتية تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
+            </p>
+        </div>
+    }
+}
+
+#[component]
+fn AudioTracksToolbar(tracks: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) -> impl IntoView {
+    view! {
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                <MovieIcon/> "المقاطع الصوتية"
+            </h2>
+            <div class="flex flex-wrap items-center gap-2">
+                <AudioFilesInput tracks=tracks next_id=next_id/>
+                <EpisodesSortButton episodes=tracks/>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn AudioFilesInput(tracks: RwSignal<Vec<EpUpload>>, next_id: RwSignal<u32>) -> impl IntoView {
+    let file_handler = move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        {
+            if let Some(files) = input.files() {
+                let mut new_tracks: Vec<EpUpload> = (0..files.length())
+                    .filter_map(|i| files.get(i))
+                    .map(|file| {
+                        let name = file.name();
+                        let title = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+                        EpUpload {
+                            id: next_id.get(),
+                            file,
+                            title,
+                        }
+                    })
+                    .collect();
+
+                new_tracks.sort_by_key(|x| x.file.name());
+                tracks.update(|tracks| tracks.extend(new_tracks));
+                next_id.update(|id| *id += files.length());
+                input.set_value("");
+            }
+        }
+    };
+
+    view! {
+        <input
+            type="file"
+            id="multiAudioInput"
+            class="hidden"
+            multiple
+            accept="audio/*"
+            on:change=file_handler
+        />
+        <label
+            for="multiAudioInput"
+            class="inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm"
+        >
+            <UploadIcon/> "اختيار ملفات صوتية"
+        </label>
+    }
+}
+
+#[component]
+fn AudioTrackList(tracks: RwSignal<Vec<EpUpload>>) -> impl IntoView {
+    view! {
+        <div class="space-y-3 max-h-80 overflow-y-auto p-1">
+            <For
+                each={move || tracks.get().into_iter().enumerate().collect::<Vec<_>>()}
+                key=|(_, ep)| ep.id
+                let:item>
+                {move || {
+                    let (i, ep) = item.clone();
+                    view! { <AudioTrackItem tracks=tracks ep_id=ep.id index=i/> }
+                }}
+            </For>
+        </div>
+    }
+}
+
+#[component]
+fn AudioTrackItem(tracks: RwSignal<Vec<EpUpload>>, ep_id: u32, index: usize) -> impl IntoView {
+    let total = move || tracks.get().len();
+
+    let remove = move |_| tracks.update(|tracks| tracks.retain(|e| e.id != ep_id));
+
+    let move_up = move |_| {
+        tracks.update(|tracks| {
+            if let Some(pos) = tracks.iter().position(|e| e.id == ep_id) {
+                if pos > 0 {
+                    tracks.swap(pos, pos - 1);
+                }
+            }
+        })
+    };
+
+    let move_down = move |_| {
+        tracks.update(|tracks| {
+            if let Some(pos) = tracks.iter().position(|e| e.id == ep_id) {
+                if pos + 1 < tracks.len() {
+                    tracks.swap(pos, pos + 1);
+                }
+            }
+        })
+    };
+
+    let title_update = move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        {
+            tracks.update(|tracks| {
+                if let Some(track) = tracks.iter_mut().find(|e| e.id == ep_id) {
+                    track.title = input.value();
+                }
+            });
+        }
+    };
+
+    let track = move || tracks.get().into_iter().find(|e| e.id == ep_id).unwrap();
+
+    view! {
+        <div class="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 flex flex-col sm:flex-row gap-3 items-start">
+            <div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
+                <div>
+                    <span class="text-gray-400 text-sm font-medium">رقم المقطع</span>
+                    <div class="text-white font-semibold mt-0.5">{index + 1}</div>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="text-xs text-gray-400 mb-0.5 block">"عنوان المقطع الصوتي"</label>
+                    <input type="text"
+                        prop:value=move || track().title
+                        on:input=title_update
+                        placeholder="عنوان المقطع الصوتي"
+                        class="w-full bg-white/10 text-white rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                    />
+                </div>
+                <div class="hidden sm:block">
+                    <span class="text-xs text-gray-400">"الملف"</span>
+                    <div class="text-xs text-gray-300 truncate mt-0.5 max-w-32">
+                        {move || track().file.name()}
+                    </div>
+                </div>
+            </div>
+            <EpisodeItemControls
+                on_move_up=move_up
+                on_move_down=move_down
+                on_remove=remove
+                index=index
+                total=total
+            />
+        </div>
     }
 }
 
@@ -129,6 +302,10 @@ fn MediaKindSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
         format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}",
             if matches!(media_type.get(), MediaType::Movie) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })
     };
+    let audio_class = move || {
+        format!("px-4 sm:px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 {}",
+            if matches!(media_type.get(), MediaType::AudioGroup) { "bg-cyan-500/20 text-cyan-400 shadow-lg shadow-cyan-500/10" } else { "text-gray-400 hover:text-white" })
+    };
     view! {
         <div class="flex justify-center">
             <div class="inline-flex bg-white/5 rounded-2xl p-1" role="group">
@@ -137,6 +314,9 @@ fn MediaKindSelector(media_type: RwSignal<MediaType>) -> impl IntoView {
                 </button>
                 <button type="button" on:click=move |_| media_type.set(MediaType::Movie) class=movie_class>
                     <MovieIcon/> "فيلم"
+                </button>
+                <button type="button" on:click=move |_| media_type.set(MediaType::AudioGroup) class=audio_class>
+                    <MovieIcon/> "مجموعة صوتية"
                 </button>
             </div>
         </div>

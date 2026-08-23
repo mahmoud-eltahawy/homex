@@ -1,5 +1,5 @@
 use crate::app::{
-    icons::{ClockIcon, MovieIcon, MoviePosterSvg, SeriesIcon, SeriesPosterSvg},
+    icons::{ClockIcon, MovieIcon, MoviePosterSvg, MusicPosterSvg, SeriesIcon, SeriesPosterSvg},
     model::{Media, MediaType, Movie, Series},
 };
 use leptos::{either::Either, prelude::*};
@@ -49,7 +49,8 @@ pub fn Poster(poster: Option<String>, media_type: MediaType) -> impl IntoView {
         }),
         None => Either::Right(match media_type {
             MediaType::Movie => Either::Left(MoviePosterSvg()),
-            MediaType::Series => Either::Right(SeriesPosterSvg()),
+            MediaType::Series => Either::Right(Either::Left(SeriesPosterSvg())),
+            MediaType::AudioGroup => Either::Right(Either::Right(MusicPosterSvg())),
         }),
     }
 }

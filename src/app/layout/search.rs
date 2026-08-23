@@ -116,21 +116,32 @@ async fn get_suggetions(
             media_type: MediaType::Series,
         },
     ];
+    let audio = vec![
+        Suggestion {
+            id: 201,
+            name: "hamaki".to_string(),
+            media_type: MediaType::AudioGroup,
+        },
+        Suggestion {
+            id: 202,
+            name: "quran".to_string(),
+            media_type: MediaType::AudioGroup,
+        },
+        Suggestion {
+            id: 203,
+            name: "amr diab".to_string(),
+            media_type: MediaType::AudioGroup,
+        },
+    ];
     let res = match media_type {
-        Some(MediaType::Movie) => movies
-            .into_iter()
-            .filter(|x| x.name.to_lowercase().starts_with(&term))
-            .collect(),
-        Some(MediaType::Series) => series
-            .into_iter()
-            .filter(|x| x.name.to_lowercase().starts_with(&term))
-            .collect(),
-        None => movies
-            .into_iter()
-            .chain(series)
-            .filter(|x| x.name.to_lowercase().starts_with(&term))
-            .collect(),
-    };
+        Some(MediaType::Movie) => movies,
+        Some(MediaType::Series) => series,
+        Some(MediaType::AudioGroup) => audio,
+        None => movies.into_iter().chain(series).chain(audio).collect(),
+    }
+    .into_iter()
+    .filter(|x| x.name.to_lowercase().starts_with(&term))
+    .collect();
     Ok(res)
 }
 
@@ -153,7 +164,8 @@ fn SearchInput(
     let placeholder = move || match media_type.get() {
         Some(MediaType::Movie) => "ابحث عن فيلم ...",
         Some(MediaType::Series) => "ابحث عن مسلسل...",
-        None => "ابحث عن فيلم او مسلسل ...",
+        Some(MediaType::AudioGroup) => "ابحث عن صوتيات...",
+        None => "ابحث عن فيلم او مسلسل او صوتيات...",
     };
 
     view! {
@@ -204,11 +216,10 @@ pub fn Suggestions(
             .unwrap_or_default()
     };
 
-    Effect::new(move || log!("{:#?}", helper()));
-
     let href = move |kind: MediaType, id: usize| match kind {
         MediaType::Movie => format!("/detail/movie/{}", id),
         MediaType::Series => format!("/detail/series/{}", id),
+        MediaType::AudioGroup => format!("/detail/audio/{}", id),
     };
 
     view! {

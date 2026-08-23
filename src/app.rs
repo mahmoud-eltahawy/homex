@@ -34,17 +34,6 @@ async fn delay(ms: i32) {
     tokio::time::sleep(std::time::Duration::from_millis(ms as u64)).await;
 }
 
-#[server]
-async fn fetch_all_media() -> Result<Vec<model::Media>, ServerFnError> {
-    delay(300).await;
-    let mut all = mockary::mock_movies()
-        .into_iter()
-        .map(model::Media::Movie)
-        .collect::<Vec<_>>();
-    all.extend(mockary::mock_series().into_iter().map(model::Media::Series));
-    Ok(all)
-}
-
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>

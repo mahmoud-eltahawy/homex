@@ -55,7 +55,7 @@ fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -
     view! {
         <div class="hidden md:flex items-center gap-2">
             <SearchBox search_term=search_term search_open=search_open/>
-            <NavLink href="/movies" label="أفلام"/>
+            <NavLink href="/movie" label="أفلام"/>
             <NavLink href="/series" label="مسلسلات"/>
         </div>
     }

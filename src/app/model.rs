@@ -78,6 +78,7 @@ impl From<Movie> for Media {
 pub enum MediaType {
     Movie,
     Series,
+    AudioGroup,
 }
 
 impl std::fmt::Display for MediaType {
@@ -85,6 +86,7 @@ impl std::fmt::Display for MediaType {
         match self {
             MediaType::Movie => write!(f, "movie"),
             MediaType::Series => write!(f, "series"),
+            MediaType::AudioGroup => write!(f, "audio"),
         }
     }
 }
