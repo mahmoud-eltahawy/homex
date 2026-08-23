@@ -1,9 +1,9 @@
 use crate::app::{
-    common::Poster,
     icons::{ClockIcon, DownloadIcon, MovieIcon},
-    model::{self, MediaType, Movie},
+    model::{self, Movie},
     resource_view::ResourceView,
     video_player::VideoPlayer,
+    PosterView,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
@@ -55,7 +55,7 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
             <div class="absolute inset-0">
-                <Poster poster=movie.poster.clone() media_type=MediaType::Movie/>
+                {movie.clone().poster()}
                 <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
             </div>
             <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
@@ -73,7 +73,7 @@ fn DetailBody(data: Movie, video_src: String) -> impl IntoView {
     view! {
         <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
             <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
-                <Poster poster=data.poster.clone() media_type=MediaType::Movie/>
+                {data.clone().poster()}
             </div>
             <div class="flex-1 w-full">
                 <DetailMetaBadge/>

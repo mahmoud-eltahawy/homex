@@ -1,11 +1,11 @@
 use super::{fetch_season, fetch_series_detail};
 use crate::app::{
-    common::Poster,
     icons::{ClockIcon, SeriesIcon},
-    model::{Episode, MediaType, Season, SeasonSummary, Series},
+    model::{Episode, Season, SeasonSummary, Series},
     resource_view::ResourceView,
     series::listing::{EpisodeSelector, EpisodeSelectorProps, SeasonSelector},
     video_player::VideoPlayer,
+    PosterView,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
@@ -103,7 +103,7 @@ fn SeriesView(
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
             <div class="absolute inset-0">
-                <Poster poster=poster.clone() media_type=MediaType::Series/>
+                {series.clone().poster()}
                 <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
             </div>
             <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">

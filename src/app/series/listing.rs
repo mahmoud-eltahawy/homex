@@ -1,9 +1,10 @@
 use crate::app::{
-    common::{CardsLoading, MediaPageHeader, SeriesCard, SeriesCardProps},
+    common::{CardsLoading, MediaPageHeader},
     icons::SeriesIcon,
     model::{Episode, SeasonSummary, Series},
     resource_view::ResourceView,
     series::fetch_series,
+    CardsList,
 };
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
@@ -23,13 +24,13 @@ impl LazyRoute for SeriesPage {
     }
 
     fn view(this: Self) -> AnyView {
-        let adapter = |series| SeriesListProps { series };
+        let adapter = |series| series;
         view! {
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <MediaPageHeader title="مسلسلات".to_string() icon=SeriesIcon()/>
             <ResourceView
                 resource=this.data
-                view_fn=SeriesList
+                view_fn=CardsList::cards_list
                 fallback=CardsLoading
                 adapter=adapter
                 context="تحميل مسلسلات"
@@ -37,19 +38,6 @@ impl LazyRoute for SeriesPage {
         </div>
         }
         .into_any()
-    }
-}
-
-#[component]
-fn SeriesList(series: Vec<Series>) -> impl IntoView {
-    view! {
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-            {
-                series.into_iter().map(|item| {
-                    SeriesCard(SeriesCardProps { item })
-                }).collect_view()
-            }
-        </div>
     }
 }
 

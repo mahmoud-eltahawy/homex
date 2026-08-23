@@ -1,5 +1,6 @@
-use crate::app::common::{CardsLoading, MediaPageHeader, MovieCard, MovieCardProps};
+use crate::app::common::{CardsLoading, MediaPageHeader};
 use crate::app::model::{self, Movie};
+use crate::app::CardsList;
 use crate::app::{icons::MovieIcon, resource_view::ResourceView};
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
@@ -15,13 +16,13 @@ impl LazyRoute for MoviesPage {
     }
 
     fn view(this: Self) -> AnyView {
-        let adapter = move |x| MoviesCardsProps { movies: x };
+        let adapter = move |x| x;
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <MediaPageHeader title="أفلام".to_string() icon=MovieIcon()/>
                 <ResourceView
                     resource=this.movies
-                    view_fn=MoviesCards
+                    view_fn=CardsList::cards_list
                     adapter=adapter
                     context="تحميل االفلام"
                     fallback=CardsLoading
@@ -29,20 +30,6 @@ impl LazyRoute for MoviesPage {
             </div>
         }
         .into_any()
-    }
-}
-
-#[component]
-pub fn MoviesCards(movies: Vec<Movie>) -> impl IntoView {
-    view! {
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-            {
-            movies
-                .into_iter()
-                .map(|item| MovieCard(MovieCardProps{ item  }))
-                .collect_view()
-            }
-        </div>
     }
 }
 

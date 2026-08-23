@@ -1,12 +1,13 @@
-use super::{model::Media, model::MediaType};
+use super::model::MediaType;
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
-    common::{CardsLoading, MediaCard},
+    common::CardsLoading,
     icons::{AudioIcon, MovieIcon, NextIcon, PrevIcon, SeriesIcon},
     model::{AudioGroup, Movie, Series},
     movies::listing::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
     series::{fetch_series, fetch_series_count},
+    Card,
 };
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
@@ -31,7 +32,7 @@ pub fn HomeHero() -> impl IntoView {
 fn MediaSection(
     title: String,
     icon: impl IntoView,
-    items: Vec<impl Into<Media>>,
+    items: Vec<impl Card>,
     kind: MediaType,
     items_offset: RwSignal<usize>,
     items_count: Resource<Result<usize, ServerFnError>>,
@@ -112,7 +113,7 @@ fn MediaSection(
             </div>
 
             <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:gap-6">
-                {items.into_iter().map(|item| view! { <MediaCard item=item.into()/> }).collect_view()}
+                {items.into_iter().map(|item| item.card()).collect_view()}
             </div>
         </section>
     }
