@@ -2,7 +2,7 @@ use super::model::MediaType;
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
     common::CardsLoading,
-    icons::{AudioIcon, MovieIcon, NextIcon, PrevIcon, SeriesIcon},
+    icons::{NextIcon, PrevIcon},
     model::{AudioGroup, Movie, Series},
     movies::listing::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
@@ -29,22 +29,23 @@ pub fn HomeHero() -> impl IntoView {
 }
 
 #[component]
-fn MediaSection(
+fn MediaSection<C>(
     title: String,
-    icon: impl IntoView,
-    items: Vec<impl Card>,
+    items: Vec<C>,
     kind: MediaType,
     items_offset: RwSignal<usize>,
     items_count: Resource<Result<usize, ServerFnError>>,
-) -> impl IntoView {
+) -> impl IntoView
+where
+    C: Card,
+{
     view! {
         <section class="mb-12 md:mb-16">
             <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <h2 class="flex items-center gap-3 text-2xl font-black text-white sm:text-3xl md:text-4xl">
-                    <span class="text-cyan-400">{icon}</span>
+                    <span class="text-cyan-400">{C::icon()}</span>
                     {title.clone()}
                 </h2>
-
 
                 <MediaSectionNav items_offset items_count kind/>
             </div>
@@ -184,7 +185,6 @@ impl LazyRoute for HomePage {
     fn view(this: Self) -> AnyView {
         let movie_adapter = move |movies: Vec<Movie>| MediaSectionProps {
             title: "أفلام".to_string(),
-            icon: MovieIcon(),
             items: movies,
             kind: MediaType::Movie,
             items_offset: this.movies_offset,
@@ -192,7 +192,6 @@ impl LazyRoute for HomePage {
         };
         let series_adapter = move |series: Vec<Series>| MediaSectionProps {
             title: "مسلسلات".to_string(),
-            icon: SeriesIcon(),
             items: series,
             kind: MediaType::Series,
             items_offset: this.series_offset,
@@ -200,7 +199,6 @@ impl LazyRoute for HomePage {
         };
         let audio_adapter = move |audio: Vec<AudioGroup>| MediaSectionProps {
             title: "مجموعات صوتية".to_string(),
-            icon: AudioIcon(),
             items: audio,
             kind: MediaType::AudioGroup,
             items_offset: this.audio_offset,
