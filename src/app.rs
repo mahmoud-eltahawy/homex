@@ -24,6 +24,7 @@ mod layout;
 mod listing;
 mod model;
 mod movies;
+mod pagination;
 mod resource_view;
 mod series;
 mod settings;
