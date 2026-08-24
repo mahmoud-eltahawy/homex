@@ -1,9 +1,9 @@
 use crate::app::{
-    audio::listing::AudioGroupPage,
     home::HomePage,
     layout::Layout,
-    movies::{detail::MovieDetailPage, listing::MoviesPage},
-    series::{details::SeriesDetailPage, listing::SeriesPage},
+    listing::{AudioGroupListingPage, MovieListingPage, SeriesListingPage},
+    movies::detail::MovieDetailPage,
+    series::details::SeriesDetailPage,
     settings::SettingsPage,
     upload::UploadPage,
 };
@@ -20,6 +20,7 @@ mod common;
 mod home;
 mod icons;
 mod layout;
+mod listing;
 mod model;
 mod movies;
 mod resource_view;
@@ -67,9 +68,9 @@ pub fn App() -> impl IntoView {
             <Routes fallback=|| "Page not found.".into_view()>
                 <ParentRoute path=path!("") view=Layout>
                     <Route path=path!("/") view={Lazy::<HomePage>::new()}/>
-                    <Route path=path!("/movie") view={Lazy::<MoviesPage>::new()}/>
-                    <Route path=path!("/series") view={Lazy::<SeriesPage>::new()}/>
-                    <Route path=path!("/audio") view={Lazy::<AudioGroupPage>::new()}/>
+                    <Route path=path!("/movie") view={Lazy::<MovieListingPage>::new()}/>
+                    <Route path=path!("/series") view={Lazy::<SeriesListingPage>::new()}/>
+                    <Route path=path!("/audio") view={Lazy::<AudioGroupListingPage>::new()}/>
                     <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>
                     <Route path=path!("/settings") view={Lazy::<SettingsPage>::new()}/>
                     <Route path=path!("/detail/series/:id") view={Lazy::<SeriesDetailPage>::new()}/>

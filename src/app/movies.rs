@@ -12,7 +12,6 @@ use leptos::{either::Either, prelude::*};
 use super::model::MediaType;
 
 pub mod detail;
-pub mod listing;
 
 impl IconView for Movie {
     fn icon() -> impl IntoView {

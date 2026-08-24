@@ -12,7 +12,6 @@ use crate::app::{
 use leptos::{either::Either, prelude::*};
 
 pub mod details;
-pub mod listing;
 
 impl IconView for Series {
     fn icon() -> impl IntoView {

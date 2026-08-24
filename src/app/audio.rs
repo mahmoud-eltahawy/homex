@@ -9,8 +9,6 @@ use crate::app::{
 };
 use leptos::{either::Either, prelude::*};
 
-pub mod listing;
-
 impl Href for AudioGroup {
     fn href(self) -> String {
         format!("/detail/audio/{}", self.id.0)
