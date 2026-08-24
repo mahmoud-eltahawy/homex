@@ -29,7 +29,6 @@ pub fn HomeHero() -> impl IntoView {
 
 #[component]
 fn MediaSection<C>(
-    title: String,
     items: Vec<C>,
     items_offset: RwSignal<usize>,
     items_count: Resource<Result<usize, ServerFnError>>,
@@ -37,15 +36,16 @@ fn MediaSection<C>(
 where
     C: Card,
 {
+    let media_type = C::media_type();
     view! {
         <section class="mb-12 md:mb-16">
             <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <h2 class="flex items-center gap-3 text-2xl font-black text-white sm:text-3xl md:text-4xl">
                     <span class="text-cyan-400">{C::icon()}</span>
-                    {title.clone()}
+                    {media_type.ar_title()}
                 </h2>
 
-                <MediaSectionNav items_offset items_count href={C::media_type().to_string()}/>
+                <MediaSectionNav items_offset items_count href={media_type.to_string()}/>
             </div>
 
             {items.cards_list()}
@@ -175,19 +175,16 @@ impl LazyRoute for HomePage {
 
     fn view(this: Self) -> AnyView {
         let movie_adapter = move |movies: Vec<Movie>| MediaSectionProps {
-            title: "أفلام".to_string(),
             items: movies,
             items_offset: this.movies_offset,
             items_count: this.movies_count,
         };
         let series_adapter = move |series: Vec<Series>| MediaSectionProps {
-            title: "مسلسلات".to_string(),
             items: series,
             items_offset: this.series_offset,
             items_count: this.series_count,
         };
         let audio_adapter = move |audio: Vec<AudioGroup>| MediaSectionProps {
-            title: "مجموعات صوتية".to_string(),
             items: audio,
             items_offset: this.audio_offset,
             items_count: this.audio_count,

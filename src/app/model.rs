@@ -72,6 +72,16 @@ pub enum MediaType {
     AudioGroup,
 }
 
+impl MediaType {
+    pub fn ar_title(&self) -> &'static str {
+        match self {
+            MediaType::Movie => "افلام",
+            MediaType::Series => "مسلاسلات",
+            MediaType::AudioGroup => "مجموعات صوتية",
+        }
+    }
+}
+
 impl std::fmt::Display for MediaType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
