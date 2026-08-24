@@ -97,3 +97,25 @@ impl InfoView for Movie {
         }
     }
 }
+
+#[server]
+pub async fn fetch_movies(offset: usize, size: usize) -> Result<Vec<Movie>, ServerFnError> {
+    use crate::app::delay;
+    use crate::app::mockary;
+    delay(300).await;
+    let list = mockary::mock_movies();
+    let size = size.clamp(0, list.len());
+    let offset = offset.clamp(0, list.len() - size);
+    let end = (offset + size).clamp(0, list.len());
+
+    Ok(list[offset..end].to_vec())
+}
+
+#[server]
+pub async fn fetch_movies_count() -> Result<usize, ServerFnError> {
+    use crate::app::delay;
+    use crate::app::mockary;
+    delay(300).await;
+
+    Ok(mockary::mock_movies().len())
+}

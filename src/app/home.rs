@@ -3,7 +3,7 @@ use crate::app::{
     common::CardsLoading,
     icons::{NextIcon, PrevIcon},
     model::{AudioGroup, Movie, Series},
-    movies::listing::{fetch_movies, fetch_movies_count},
+    movies::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
     series::{fetch_series, fetch_series_count},
     view_schema::{Card, CardsList},
@@ -11,6 +11,78 @@ use crate::app::{
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{de::DeserializeOwned, Serialize};
+
+pub struct HomePage {
+    movies: MediaLoaderProps<Movie>,
+    series: MediaLoaderProps<Series>,
+    audio: MediaLoaderProps<AudioGroup>,
+}
+
+const MEDIA_LIST_SIZE: usize = 6;
+
+#[lazy_route]
+impl LazyRoute for HomePage {
+    fn data() -> Self {
+        let offset = RwSignal::new(0usize);
+        let resource = Resource::new(
+            move || offset.get(),
+            async |offset| fetch_movies(offset, MEDIA_LIST_SIZE).await,
+        );
+        let count = Resource::new(|| (), async |_| fetch_movies_count().await);
+        let movies = MediaLoaderProps {
+            resource,
+            offset,
+            count,
+        };
+
+        let offset = RwSignal::new(0);
+        let resource = Resource::new(
+            move || offset.get(),
+            async |offset| fetch_series(offset, MEDIA_LIST_SIZE).await,
+        );
+        let count = Resource::new(|| (), async |_| fetch_series_count().await);
+        let series = MediaLoaderProps {
+            resource,
+            offset,
+            count,
+        };
+
+        let offset = RwSignal::new(0);
+        let resource = Resource::new(
+            move || offset.get(),
+            async |offset| fetch_audio_groups(offset, MEDIA_LIST_SIZE).await,
+        );
+        let count = Resource::new(|| (), async |_| fetch_audio_groups_count().await);
+        let audio = MediaLoaderProps {
+            resource,
+            offset,
+            count,
+        };
+
+        Self {
+            movies,
+            series,
+            audio,
+        }
+    }
+
+    fn view(this: Self) -> AnyView {
+        let HomePage {
+            movies,
+            series,
+            audio,
+        } = this;
+        view! {
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <HomeHero/>
+                {MediaLoader(movies)}
+                {MediaLoader(series)}
+                {MediaLoader(audio)}
+            </div>
+        }
+        .into_any()
+    }
+}
 
 #[component]
 pub fn HomeHero() -> impl IntoView {
@@ -120,78 +192,6 @@ fn MediaSectionNav(
                 <span class="text-lg transition-transform group-hover:translate-x-1" aria-hidden="true">"←"</span>
             </a>
         </div>
-    }
-}
-
-pub struct HomePage {
-    movies: MediaLoaderProps<Movie>,
-    series: MediaLoaderProps<Series>,
-    audio: MediaLoaderProps<AudioGroup>,
-}
-
-const MEDIA_LIST_SIZE: usize = 6;
-
-#[lazy_route]
-impl LazyRoute for HomePage {
-    fn data() -> Self {
-        let offset = RwSignal::new(0usize);
-        let resource = Resource::new(
-            move || offset.get(),
-            async |offset| fetch_movies(offset, MEDIA_LIST_SIZE).await,
-        );
-        let count = Resource::new(|| (), async |_| fetch_movies_count().await);
-        let movies = MediaLoaderProps {
-            resource,
-            offset,
-            count,
-        };
-
-        let offset = RwSignal::new(0);
-        let resource = Resource::new(
-            move || offset.get(),
-            async |offset| fetch_series(offset, MEDIA_LIST_SIZE).await,
-        );
-        let count = Resource::new(|| (), async |_| fetch_series_count().await);
-        let series = MediaLoaderProps {
-            resource,
-            offset,
-            count,
-        };
-
-        let offset = RwSignal::new(0);
-        let resource = Resource::new(
-            move || offset.get(),
-            async |offset| fetch_audio_groups(offset, MEDIA_LIST_SIZE).await,
-        );
-        let count = Resource::new(|| (), async |_| fetch_audio_groups_count().await);
-        let audio = MediaLoaderProps {
-            resource,
-            offset,
-            count,
-        };
-
-        Self {
-            movies,
-            series,
-            audio,
-        }
-    }
-
-    fn view(this: Self) -> AnyView {
-        let HomePage {
-            movies,
-            series,
-            audio,
-        } = this;
-        view! {
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <HomeHero/>
-                {MediaLoader(movies)}
-                {MediaLoader(series)}
-                {MediaLoader(audio)}
-            </div>
-        }
-        .into_any()
     }
 }
 

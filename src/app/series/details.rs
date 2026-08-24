@@ -3,12 +3,13 @@ use crate::app::{
     icons::{ClockIcon, SeriesIcon},
     model::{Episode, Season, SeasonSummary, Series},
     resource_view::ResourceView,
-    series::listing::{EpisodeSelector, EpisodeSelectorProps, SeasonSelector},
     video_player::VideoPlayer,
     view_schema::PosterView,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
+use web_sys::wasm_bindgen::JsCast;
+use web_sys::HtmlSelectElement;
 
 pub struct SeriesDetailPage {
     pub series: Resource<Result<Series, ServerFnError>>,
@@ -199,6 +200,89 @@ fn Selectors(
                 adapter=adapter
                 context="تحميل تلخيصات المواسم"
             />
+        </div>
+    }
+}
+
+#[component]
+pub fn SeasonSelector(
+    summaries: Vec<SeasonSummary>,
+    selected_season: RwSignal<u32>,
+) -> impl IntoView {
+    view! {
+        <div class="flex items-center gap-2 mt-6 mb-4">
+            <span class="text-gray-300 text-sm">اختر الموسم:</span>
+            <select
+                class="bg-white/10 backdrop-blur-md text-white rounded-xl py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                prop:value=move || selected_season.get().to_string()
+                on:change=move |ev| {
+                    if let Some(sel) = ev.target().and_then(|t| t.dyn_into::<HtmlSelectElement>().ok()) {
+                        if let Ok(num) = sel.value().parse::<u32>() {
+                            selected_season.set(num);
+                        }
+                    }
+                }
+            >
+                <For each={move || summaries.clone()} key=|s| s.season_number let:sum>
+                    <option value={sum.season_number.to_string()} selected={sum.season_number == selected_season.get()}>
+                        {format!("الموسم {} ({} حلقات)", sum.season_number, sum.episode_count)}
+                    </option>
+                </For>
+            </select>
+        </div>
+    }
+}
+
+#[component]
+pub fn EpisodeSelector(
+    episodes: Vec<Episode>,
+    selected_episode: RwSignal<Option<Episode>>,
+) -> impl IntoView {
+    view! {
+        <div class="mt-6">
+            <h2 class="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center gap-2">
+                <SeriesIcon/> " الحلقات"
+            </h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                <For each={move || episodes.clone()} key=|ep| ep.id let:ep>
+                    <EpisodeCard ep=ep selected_episode=selected_episode/>
+                </For>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+pub fn EpisodeCard(ep: Episode, selected_episode: RwSignal<Option<Episode>>) -> impl IntoView {
+    let is_selected = move || {
+        selected_episode
+            .get()
+            .as_ref()
+            .is_some_and(|s| s.id == ep.id)
+    };
+    let class = move || {
+        format!(
+            "p-3 rounded-xl border transition-all cursor-pointer backdrop-blur-sm {}",
+            if is_selected() {
+                "border-cyan-400 bg-cyan-400/10 shadow-lg shadow-cyan-400/10"
+            } else {
+                "border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20"
+            }
+        )
+    };
+    let label = format!("حلقة {}", ep.episode);
+    let on_click = {
+        let ep = ep.clone();
+        move |_| selected_episode.set(Some(ep.clone()))
+    };
+    view! {
+        <div class=class on:click=on_click>
+            <div class="flex items-center gap-3">
+                <span class="text-sm font-mono text-gray-400">
+                    "S"{format!("{:02}", ep.season)}"E"{format!("{:02}", ep.episode)}
+                </span>
+                <span class="text-sm text-white truncate">{label}</span>
+            </div>
         </div>
     }
 }
