@@ -5,7 +5,7 @@ use crate::app::model::{
 pub const TEST_VIDEO: &str = "https://www.w3schools.com/html/mov_bbb.mp4";
 
 pub fn mock_series() -> Vec<Series> {
-    vec![
+    [
         Series {
             id: MediaId(101),
             title: "Breaking Bad".into(),
@@ -67,68 +67,11 @@ pub fn mock_series() -> Vec<Series> {
                 episode_count: 2,
             }],
         },
-        Series {
-            id: MediaId(106),
-            title: "Breaking Bad".into(),
-            poster: Some("https://picsum.photos/seed/breakingbad/300/450".into()),
-            description: Some("مدرس كيمياء يتحول إلى تاجر مخدرات.".into()),
-            season_count: 5,
-            season_summaries: vec![
-                SeasonSummary {
-                    season_number: 1,
-                    episode_count: 3,
-                },
-                SeasonSummary {
-                    season_number: 2,
-                    episode_count: 2,
-                },
-            ],
-        },
-        Series {
-            id: MediaId(107),
-            title: "Stranger Things".into(),
-            poster: Some("https://picsum.photos/seed/strangerthings/300/450".into()),
-            description: Some("مجموعة من الأطفال يكشفون أسرارًا خارقة في بلدتهم.".into()),
-            season_count: 4,
-            season_summaries: vec![SeasonSummary {
-                season_number: 1,
-                episode_count: 2,
-            }],
-        },
-        Series {
-            id: MediaId(108),
-            title: "The Crown".into(),
-            poster: Some("https://picsum.photos/seed/thecrown/300/450".into()),
-            description: Some("عهد الملكة إليزابيث الثانية.".into()),
-            season_count: 4,
-            season_summaries: vec![SeasonSummary {
-                season_number: 1,
-                episode_count: 1,
-            }],
-        },
-        Series {
-            id: MediaId(109),
-            title: "Game of Thrones".into(),
-            poster: Some("https://picsum.photos/seed/got/300/450".into()),
-            description: Some("عائلات نبيلة تتصارع على السيطرة على ويستروس.".into()),
-            season_count: 8,
-            season_summaries: vec![SeasonSummary {
-                season_number: 1,
-                episode_count: 2,
-            }],
-        },
-        Series {
-            id: MediaId(110),
-            title: "Prison Break".into(),
-            poster: None,
-            description: None,
-            season_count: 8,
-            season_summaries: vec![SeasonSummary {
-                season_number: 1,
-                episode_count: 2,
-            }],
-        },
     ]
+    .into_iter()
+    .cycle()
+    .take(100)
+    .collect()
 }
 
 pub fn mock_season(series_id: i64, season_number: u32) -> Option<Season> {
@@ -168,7 +111,7 @@ pub(crate) fn fake_duration(seconds: u64) -> DurationSeconds {
 }
 
 pub(crate) fn mock_movies() -> Vec<Movie> {
-    vec![
+    [
         Movie {
             id: MediaId(1),
             title: "Inception".into(),
@@ -226,10 +169,14 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
             duration: fake_duration(9240),
         },
     ]
+    .into_iter()
+    .cycle()
+    .take(100)
+    .collect()
 }
 
 pub fn mock_audio_groups() -> Vec<AudioGroup> {
-    vec![
+    [
         AudioGroup {
             id: MediaId(401),
             title: "shakria songs".to_string(),
@@ -252,4 +199,8 @@ pub fn mock_audio_groups() -> Vec<AudioGroup> {
             audios_count: 5,
         },
     ]
+    .into_iter()
+    .cycle()
+    .take(100)
+    .collect()
 }
