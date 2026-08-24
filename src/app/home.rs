@@ -10,6 +10,7 @@ use crate::app::{
 };
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
+use serde::{de::DeserializeOwned, Serialize};
 
 #[component]
 pub fn HomeHero() -> impl IntoView {
@@ -174,48 +175,54 @@ impl LazyRoute for HomePage {
     }
 
     fn view(this: Self) -> AnyView {
-        let movie_adapter = move |movies: Vec<Movie>| MediaSectionProps {
-            items: movies,
-            items_offset: this.movies_offset,
-            items_count: this.movies_count,
-        };
-        let series_adapter = move |series: Vec<Series>| MediaSectionProps {
-            items: series,
-            items_offset: this.series_offset,
-            items_count: this.series_count,
-        };
-        let audio_adapter = move |audio: Vec<AudioGroup>| MediaSectionProps {
-            items: audio,
-            items_offset: this.audio_offset,
-            items_count: this.audio_count,
-        };
-
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <HomeHero/>
-                <ResourceView
+                <MediaLoader
                     resource=this.movies
-                    view_fn=MediaSection
-                    adapter=movie_adapter
-                    fallback=CardsLoading
-                    context="تحميل الافلام"
+                    offset=this.movies_offset
+                    count=this.movies_count
                 />
-                <ResourceView
+                <MediaLoader
                     resource=this.series
-                    view_fn=MediaSection
-                    adapter=series_adapter
-                    fallback=CardsLoading
-                    context="تحميل المسلسلات"
+                    offset=this.series_offset
+                    count=this.series_count
                 />
-                <ResourceView
+                <MediaLoader
                     resource=this.audio
-                    view_fn=MediaSection
-                    adapter=audio_adapter
-                    fallback=CardsLoading
-                    context="تحميل المجموعات الصوتية"
+                    offset=this.audio_offset
+                    count=this.audio_count
                 />
             </div>
         }
         .into_any()
+    }
+}
+
+#[component]
+fn MediaLoader<T>(
+    resource: Resource<Result<Vec<T>, ServerFnError>>,
+    offset: RwSignal<usize>,
+    count: Resource<Result<usize, ServerFnError>>,
+) -> impl IntoView
+where
+    T: Card + Send + Sync + Serialize + DeserializeOwned + Clone + 'static,
+{
+    let context = format!("تحميل {}...", T::media_type().ar_title());
+
+    let adapter = move |items: Vec<T>| MediaSectionProps {
+        items,
+        items_offset: offset,
+        items_count: count,
+    };
+
+    view! {
+        <ResourceView
+            resource={resource}
+            view_fn={MediaSection}
+            adapter={adapter}
+            fallback={CardsLoading}
+            context={context}
+        />
     }
 }
