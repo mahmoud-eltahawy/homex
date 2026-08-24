@@ -124,15 +124,9 @@ fn MediaSectionNav(
 }
 
 pub struct HomePage {
-    movies_offset: RwSignal<usize>,
-    series_offset: RwSignal<usize>,
-    audio_offset: RwSignal<usize>,
-    series: Resource<Result<Vec<Series>, ServerFnError>>,
-    movies: Resource<Result<Vec<Movie>, ServerFnError>>,
-    audio: Resource<Result<Vec<AudioGroup>, ServerFnError>>,
-    movies_count: Resource<Result<usize, ServerFnError>>,
-    series_count: Resource<Result<usize, ServerFnError>>,
-    audio_count: Resource<Result<usize, ServerFnError>>,
+    movies: MediaLoaderProps<Movie>,
+    series: MediaLoaderProps<Series>,
+    audio: MediaLoaderProps<AudioGroup>,
 }
 
 const MEDIA_LIST_SIZE: usize = 6;
@@ -140,59 +134,61 @@ const MEDIA_LIST_SIZE: usize = 6;
 #[lazy_route]
 impl LazyRoute for HomePage {
     fn data() -> Self {
-        let movies_offset = RwSignal::new(0usize);
-        let series_offset = RwSignal::new(0);
-        let audio_offset = RwSignal::new(0);
-
-        let series = Resource::new(
-            move || series_offset.get(),
-            async |offset| fetch_series(offset, MEDIA_LIST_SIZE).await,
-        );
-        let movies = Resource::new(
-            move || movies_offset.get(),
+        let offset = RwSignal::new(0usize);
+        let resource = Resource::new(
+            move || offset.get(),
             async |offset| fetch_movies(offset, MEDIA_LIST_SIZE).await,
         );
-        let audio = Resource::new(
-            move || audio_offset.get(),
+        let count = Resource::new(|| (), async |_| fetch_movies_count().await);
+        let movies = MediaLoaderProps {
+            resource,
+            offset,
+            count,
+        };
+
+        let offset = RwSignal::new(0);
+        let resource = Resource::new(
+            move || offset.get(),
+            async |offset| fetch_series(offset, MEDIA_LIST_SIZE).await,
+        );
+        let count = Resource::new(|| (), async |_| fetch_series_count().await);
+        let series = MediaLoaderProps {
+            resource,
+            offset,
+            count,
+        };
+
+        let offset = RwSignal::new(0);
+        let resource = Resource::new(
+            move || offset.get(),
             async |offset| fetch_audio_groups(offset, MEDIA_LIST_SIZE).await,
         );
-
-        let movies_count = Resource::new(|| (), async |_| fetch_movies_count().await);
-        let series_count = Resource::new(|| (), async |_| fetch_series_count().await);
-        let audio_count = Resource::new(|| (), async |_| fetch_audio_groups_count().await);
+        let count = Resource::new(|| (), async |_| fetch_audio_groups_count().await);
+        let audio = MediaLoaderProps {
+            resource,
+            offset,
+            count,
+        };
 
         Self {
-            movies_offset,
-            series_offset,
-            audio_offset,
             movies,
             series,
             audio,
-            movies_count,
-            series_count,
-            audio_count,
         }
     }
 
     fn view(this: Self) -> AnyView {
+        let HomePage {
+            movies,
+            series,
+            audio,
+        } = this;
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <HomeHero/>
-                <MediaLoader
-                    resource=this.movies
-                    offset=this.movies_offset
-                    count=this.movies_count
-                />
-                <MediaLoader
-                    resource=this.series
-                    offset=this.series_offset
-                    count=this.series_count
-                />
-                <MediaLoader
-                    resource=this.audio
-                    offset=this.audio_offset
-                    count=this.audio_count
-                />
+                {MediaLoader(movies)}
+                {MediaLoader(series)}
+                {MediaLoader(audio)}
             </div>
         }
         .into_any()
