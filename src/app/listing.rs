@@ -8,6 +8,7 @@ use crate::app::{
     series::{fetch_series, fetch_series_count},
     view_schema::{Card, CardsList},
 };
+use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{de::DeserializeOwned, Serialize};
@@ -119,7 +120,7 @@ impl LazyRoute for AudioGroupListingPage {
 pub fn PaginationControls(
     offset: RwSignal<usize>,
     count: Resource<Result<usize, ServerFnError>>,
-    #[prop(default = 5)] window_size: usize,
+    #[prop(default = 8)] window_size: usize,
 ) -> impl IntoView {
     let total_pages = move || {
         count
@@ -153,24 +154,96 @@ pub fn PaginationControls(
         }
     });
 
-    let can_shift_left = move || window_start.get() > 1;
-    let can_shift_right = move || {
-        let total = total_pages().unwrap_or(1).max(1);
-        window_start.get() + window_size - 1 < total
+    view! {
+        <Transition>
+        <div class="flex items-center justify-center gap-2 mt-8">
+            <NavButton
+                forward=false
+                window_size
+                window_start
+                total_pages
+            />
+
+            <PagesNumber
+                offset
+                window_start
+                window_size
+                total_pages
+                current_page
+            />
+
+            <NavButton
+                forward=true
+                window_size
+                window_start
+                total_pages
+            />
+        </div>
+        </Transition>
+    }
+}
+
+#[component]
+fn NavButton<TP>(
+    forward: bool,
+    window_size: usize,
+    window_start: RwSignal<usize>,
+    total_pages: TP,
+) -> impl IntoView
+where
+    TP: Fn() -> Option<usize> + Send + Sync + Clone + 'static,
+{
+    let icon = if forward {
+        Either::Left(NextIcon())
+    } else {
+        Either::Right(PrevIcon())
     };
 
-    let shift_left = move |_| {
-        let new_start = window_start.get().saturating_sub(window_size).max(1);
-        window_start.set(new_start);
+    let can_shift = {
+        let total_pages = total_pages.clone();
+        move || {
+            let total = total_pages().unwrap_or(1).max(1);
+            (!forward && window_start.get() > 1)
+                || forward && window_start.get() + window_size - 1 < total
+        }
     };
 
-    let shift_right = move |_| {
-        let total = total_pages().unwrap_or(1).max(1);
-        let max_start = total.saturating_sub(window_size - 1).max(1);
-        let new_start = (window_start.get() + window_size).min(max_start);
-        window_start.set(new_start);
+    let shift = move |_| {
+        if forward {
+            let total = total_pages().unwrap_or(1).max(1);
+            let max_start = total.saturating_sub(window_size - 1).max(1);
+            let new_start = (window_start.get() + window_size).min(max_start);
+            window_start.set(new_start);
+        } else {
+            let new_start = window_start.get().saturating_sub(window_size).max(1);
+            window_start.set(new_start);
+        }
     };
 
+    view! {
+        <button
+            on:click=shift
+            disabled=move || !can_shift()
+            class="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="Next pages"
+        >
+            {icon}
+        </button>
+    }
+}
+
+#[component]
+fn PagesNumber<TP, CP>(
+    offset: RwSignal<usize>,
+    window_start: RwSignal<usize>,
+    window_size: usize,
+    total_pages: TP,
+    current_page: CP,
+) -> impl IntoView
+where
+    TP: Fn() -> Option<usize> + Send + Sync + Clone + 'static,
+    CP: Fn() -> usize + Send + Sync + Clone + 'static,
+{
     let go_to_page = move |page: usize| {
         offset.set((page - 1) * LISTING_PAGE_SIZE);
     };
@@ -186,48 +259,31 @@ pub fn PaginationControls(
     };
 
     view! {
-        <Transition>
-        <div class="flex items-center justify-center gap-2 mt-8">
-            <button
-                on:click=shift_left
-                disabled=move || !can_shift_left()
-                class="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
-                aria-label="Previous pages"
-            >
-                <PrevIcon/>
-            </button>
-
-            <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur">
-                <For
-                    each=pages
-                    key=|page| *page
-                    let:page
-                >
-                    <button
-                        on:click=move |_| go_to_page(page)
-                        class=move || format!(
-                            "flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-medium transition {}",
-                            if page == current_page() {
-                                "bg-cyan-500/20 text-cyan-400"
-                            } else {
-                                "text-slate-300 hover:bg-white/10 hover:text-white"
-                            }
-                        )
-                    >
-                        {page}
-                    </button>
-                </For>
-            </div>
-
-            <button
-                on:click=shift_right
-                disabled=move || !can_shift_right()
-                class="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
-                aria-label="Next pages"
-            >
-                <NextIcon/>
-            </button>
-        </div>
-        </Transition>
+         <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur">
+             <For
+                 each=pages
+                 key=|page| *page
+                 let:page
+             >
+                 <button
+                     on:click=move |_| go_to_page(page)
+                     class={
+                        let current_page = current_page.clone();
+                        move || {
+                            format!(
+                             "flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-medium transition {}",
+                             if page == current_page() {
+                                 "bg-cyan-500/20 text-cyan-400"
+                             } else {
+                                 "text-slate-300 hover:bg-white/10 hover:text-white"
+                             }
+                         )
+                        }
+                    }
+                 >
+                     {page}
+                 </button>
+             </For>
+         </div>
     }
 }

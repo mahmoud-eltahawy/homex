@@ -16,6 +16,7 @@ use leptos_router::{
 
 mod view_schema;
 
+mod audio;
 mod common;
 mod home;
 mod icons;
@@ -31,8 +32,6 @@ mod video_player;
 //TODO : DELETE this
 #[cfg(feature = "ssr")]
 mod mockary;
-
-mod audio;
 
 //TODO : DELETE this
 #[cfg(feature = "ssr")]

@@ -4,6 +4,8 @@ use crate::app::model::{
 };
 pub const TEST_VIDEO: &str = "https://www.w3schools.com/html/mov_bbb.mp4";
 
+const MOCK_SIZE: usize = 200;
+
 pub fn mock_series() -> Vec<Series> {
     [
         Series {
@@ -70,7 +72,7 @@ pub fn mock_series() -> Vec<Series> {
     ]
     .into_iter()
     .cycle()
-    .take(100)
+    .take(MOCK_SIZE)
     .collect()
 }
 
@@ -171,7 +173,7 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
     ]
     .into_iter()
     .cycle()
-    .take(100)
+    .take(MOCK_SIZE)
     .collect()
 }
 
@@ -201,6 +203,6 @@ pub fn mock_audio_groups() -> Vec<AudioGroup> {
     ]
     .into_iter()
     .cycle()
-    .take(100)
+    .take(MOCK_SIZE)
     .collect()
 }
