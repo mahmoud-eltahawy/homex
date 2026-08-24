@@ -108,12 +108,18 @@ where
         }
     };
 
+    let label = if forward {
+        "Next pages"
+    } else {
+        "Previous pages"
+    };
+
     view! {
         <button
             on:click=shift
             disabled=move || !can_shift()
             class="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="Next pages"
+            aria-label=label
         >
             {icon}
         </button>
