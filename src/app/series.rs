@@ -133,9 +133,16 @@ pub async fn fetch_series(
 }
 
 #[server]
-pub async fn fetch_series_count() -> Result<usize, ServerFnError> {
+pub async fn fetch_series_count(search_query: Option<String>) -> Result<usize, ServerFnError> {
     use crate::app::mockary::mock_series;
     delay(300).await;
+    let list = match search_query {
+        None => mock_series(),
+        Some(pat) => mock_series()
+            .into_iter()
+            .filter(|x| x.title.contains(&pat))
+            .collect(),
+    };
 
-    Ok(mock_series().len())
+    Ok(list.len())
 }

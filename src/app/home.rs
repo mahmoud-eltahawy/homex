@@ -28,7 +28,7 @@ impl LazyRoute for HomePage {
             move || offset.get(),
             async |offset| fetch_movies(offset, MEDIA_LIST_SIZE, None).await,
         );
-        let count = Resource::new(|| (), async |_| fetch_movies_count().await);
+        let count = Resource::new(|| (), async |_| fetch_movies_count(None).await);
         let movies = MediaLoaderProps {
             resource,
             offset,
@@ -40,7 +40,7 @@ impl LazyRoute for HomePage {
             move || offset.get(),
             async |offset| fetch_series(offset, MEDIA_LIST_SIZE, None).await,
         );
-        let count = Resource::new(|| (), async |_| fetch_series_count().await);
+        let count = Resource::new(|| (), async |_| fetch_series_count(None).await);
         let series = MediaLoaderProps {
             resource,
             offset,
@@ -52,7 +52,7 @@ impl LazyRoute for HomePage {
             move || offset.get(),
             async |offset| fetch_audio_groups(offset, MEDIA_LIST_SIZE, None).await,
         );
-        let count = Resource::new(|| (), async |_| fetch_audio_groups_count().await);
+        let count = Resource::new(|| (), async |_| fetch_audio_groups_count(None).await);
         let audio = MediaLoaderProps {
             resource,
             offset,

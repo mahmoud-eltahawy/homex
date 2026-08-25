@@ -72,8 +72,8 @@ where
     T: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     fn new<Fut1, Fut2>(
-        f1: impl Fn(usize, usize, Option<String>) -> Fut1 + Send + Sync + 'static,
-        f2: impl Fn() -> Fut2 + Send + Sync + 'static,
+        data_fn: impl Fn(usize, usize, Option<String>) -> Fut1 + Send + Sync + 'static,
+        count_fn: impl Fn(Option<String>) -> Fut2 + Send + Sync + 'static,
     ) -> Self
     where
         Fut1: Future<Output = Result<Vec<T>, ServerFnError>> + Send + 'static,
@@ -83,9 +83,12 @@ where
         let search_query = RwSignal::new(None);
         let data = Resource::new(
             move || (offset.get(), search_query.get()),
-            move |(offset, search_query)| f1(offset, LISTING_PAGE_SIZE, search_query),
+            move |(offset, search_query)| data_fn(offset, LISTING_PAGE_SIZE, search_query),
         );
-        let count = Resource::new(|| (), move |_| f2());
+        let count = Resource::new(
+            move || search_query.get(),
+            move |search_query| count_fn(search_query),
+        );
         Self {
             offset,
             search_query,

@@ -2,7 +2,6 @@ use super::model::MediaType;
 use crate::app::{
     common::{PosterImg, PosterImgProps},
     icons::{ClockIcon, MovieIcon, MoviePosterSvg},
-    mockary::mock_movies,
     model::Movie,
     view_schema::{
         CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
@@ -105,6 +104,7 @@ pub async fn fetch_movies(
     search_query: Option<String>,
 ) -> Result<Vec<Movie>, ServerFnError> {
     use crate::app::delay;
+    use crate::app::mockary::mock_movies;
     delay(300).await;
 
     let list = match search_query {
@@ -123,10 +123,18 @@ pub async fn fetch_movies(
 }
 
 #[server]
-pub async fn fetch_movies_count() -> Result<usize, ServerFnError> {
+pub async fn fetch_movies_count(search_query: Option<String>) -> Result<usize, ServerFnError> {
     use crate::app::delay;
-    use crate::app::mockary;
+    use crate::app::mockary::mock_movies;
     delay(300).await;
 
-    Ok(mockary::mock_movies().len())
+    let list = match search_query {
+        None => mock_movies(),
+        Some(pat) => mock_movies()
+            .into_iter()
+            .filter(|x| x.title.contains(&pat))
+            .collect(),
+    };
+
+    Ok(list.len())
 }
