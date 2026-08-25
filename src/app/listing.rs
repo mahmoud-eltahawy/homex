@@ -33,8 +33,6 @@ where
     C: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     fn view(self) -> impl IntoView {
-        let title = C::media_type().ar_title();
-
         let adapter = move |count| PaginationControlsProps {
             offset: self.offset,
             count,
@@ -44,7 +42,6 @@ where
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex flex-col gap-4 mb-6 md:mb-8">
-                    <Hero title=title.to_string() icon=C::icon()/>
                     <SearchBar search_query=self.search_query offset=self.offset/>
                 </div>
                 <ResourceView
@@ -60,21 +57,6 @@ where
                 />
             </div>
         }
-    }
-}
-
-#[component]
-fn Hero(title: String, icon: impl IntoView) -> impl IntoView {
-    view! {
-        <div class="flex items-center gap-4">
-            <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
-            <div>
-                <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
-                <p class="text-gray-400 text-sm md:text-base mt-0.5">
-                    "تصفح مجموعة "{title}"ك"
-                </p>
-            </div>
-        </div>
     }
 }
 
@@ -147,8 +129,8 @@ fn SearchBar(offset: RwSignal<usize>, search_query: RwSignal<Option<String>>) ->
             </span>
 
             <input
+                autofocus=true
                 type="text"
-                placeholder="ابحث..."
                 class="w-full bg-gray-800 text-white rounded-xl pl-10 pr-10 py-3 outline-none focus:ring-2 focus:ring-cyan-400 transition-all"
                 prop:value=move || input_value.get()
                 on:input=on_input
