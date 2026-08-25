@@ -1,5 +1,4 @@
-use std::future::Future;
-
+use crate::app::icons::XIcon;
 use crate::app::pagination::PaginationControls;
 use crate::app::series::fetch_series;
 use crate::app::{
@@ -14,6 +13,8 @@ use crate::app::{
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{de::DeserializeOwned, Serialize};
+use std::future::Future;
+use std::time::Duration;
 
 const LISTING_PAGE_SIZE: usize = 18;
 
@@ -66,12 +67,59 @@ fn MediaPageHeader(
     offset: RwSignal<usize>,
     search_query: RwSignal<Option<String>>,
 ) -> impl IntoView {
-    let on_search = move |ev| {
-        let query = event_target_value(&ev);
+    let mut debounce_handle: Option<TimeoutHandle> = None;
+
+    let mut clear_search = move || {
+        if let Some(handle) = debounce_handle.take() {
+            handle.clear();
+        }
+
         batch(move || {
             offset.set(0);
-            search_query.set(if query.is_empty() { None } else { Some(query) });
+            search_query.set(None);
         });
+    };
+
+    let on_input = move |ev| {
+        let text = event_target_value(&ev);
+
+        search_query.set(if text.is_empty() {
+            None
+        } else {
+            Some(text.clone())
+        });
+
+        if let Some(handle) = debounce_handle.take() {
+            handle.clear();
+        }
+
+        if text.is_empty() {
+            clear_search();
+        } else {
+            debounce_handle = set_timeout_with_handle(
+                move || {
+                    batch(move || {
+                        offset.set(0);
+                        search_query.set(Some(text));
+                    });
+                },
+                Duration::from_millis(300),
+            )
+            .ok();
+        }
+    };
+
+    let cancel_button = move || {
+        search_query.get().is_some().then_some(
+            view! {
+                <button
+                    on:click=move |_| clear_search()
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                    aria-label="Clear search"
+                >
+                    <XIcon/>
+                </button>
+            })
     };
 
     view! {
@@ -85,18 +133,23 @@ fn MediaPageHeader(
                     </p>
                 </div>
             </div>
-            <div class="relative">
+
+            <div class="relative w-full max-w-md self-start">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </span>
+
                 <input
                     type="text"
                     placeholder="ابحث..."
-                    class="w-full bg-gray-800 text-white rounded-xl px-4 py-3 pr-10 outline-none focus:ring-2 focus:ring-cyan-400"
+                    class="w-full bg-gray-800 text-white rounded-xl pl-10 pr-10 py-3 outline-none focus:ring-2 focus:ring-cyan-400 transition-all"
                     prop:value=move || search_query.get().unwrap_or_default()
-                    on:change=on_search
+                    on:input=on_input
                 />
-                // Optional search icon
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                    // SVG or similar
-                </span>
+
+                {cancel_button}
             </div>
         </div>
     }
