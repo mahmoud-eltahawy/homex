@@ -122,7 +122,7 @@ pub async fn fetch_series(
         None => mock_series(),
         Some(pat) => mock_series()
             .into_iter()
-            .filter(|x| x.title.contains(&pat))
+            .filter(|x| x.title.to_lowercase().contains(&pat.to_lowercase()))
             .collect(),
     };
     let size = size.clamp(0, list.len());

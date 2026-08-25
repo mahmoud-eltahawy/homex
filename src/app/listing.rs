@@ -36,7 +36,12 @@ where
         let context = format!("تحميل {} ...", title);
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <MediaPageHeader title=title.to_string() icon=C::icon()/>
+                <MediaPageHeader
+                    title=title.to_string()
+                    icon=C::icon()
+                    offset=self.offset
+                    search_query=self.search_query
+                />
                 <ResourceView
                     resource=self.data
                     view_fn=CardsList::cards_list
@@ -55,13 +60,43 @@ where
 }
 
 #[component]
-fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
+fn MediaPageHeader(
+    title: String,
+    icon: impl IntoView,
+    offset: RwSignal<usize>,
+    search_query: RwSignal<Option<String>>,
+) -> impl IntoView {
+    let on_search = move |ev| {
+        let query = event_target_value(&ev);
+        batch(move || {
+            offset.set(0);
+            search_query.set(if query.is_empty() { None } else { Some(query) });
+        });
+    };
+
     view! {
-        <div class="flex items-center gap-4 mb-6 md:mb-8">
-            <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
-            <div>
-                <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
-                <p class="text-gray-400 text-sm md:text-base mt-0.5">"تصفح مجموعة "{title}"ك"</p>
+        <div class="flex flex-col gap-4 mb-6 md:mb-8">
+            <div class="flex items-center gap-4">
+                <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
+                <div>
+                    <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
+                    <p class="text-gray-400 text-sm md:text-base mt-0.5">
+                        "تصفح مجموعة "{title}"ك"
+                    </p>
+                </div>
+            </div>
+            <div class="relative">
+                <input
+                    type="text"
+                    placeholder="ابحث..."
+                    class="w-full bg-gray-800 text-white rounded-xl px-4 py-3 pr-10 outline-none focus:ring-2 focus:ring-cyan-400"
+                    prop:value=move || search_query.get().unwrap_or_default()
+                    on:change=on_search
+                />
+                // Optional search icon
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                    // SVG or similar
+                </span>
             </div>
         </div>
     }
@@ -85,10 +120,7 @@ where
             move || (offset.get(), search_query.get()),
             move |(offset, search_query)| data_fn(offset, LISTING_PAGE_SIZE, search_query),
         );
-        let count = Resource::new(
-            move || search_query.get(),
-            move |search_query| count_fn(search_query),
-        );
+        let count = Resource::new(move || search_query.get(), count_fn);
         Self {
             offset,
             search_query,
