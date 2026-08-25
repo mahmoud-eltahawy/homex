@@ -60,11 +60,6 @@ impl InfoView for Series {
         view! {
             <div class="p-4 flex flex-col gap-1">
                 <h3 class="text-white font-semibold truncate text-sm">{title}</h3>
-                <div class="flex items-center justify-between text-gray-500 text-xs">
-                    <span class="text-cyan-400 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                        "← التفاصيل"
-                    </span>
-                </div>
             </div>
         }
     }
@@ -78,7 +73,6 @@ impl CardImageView for Series {
                 {self.over_poster()}
                 <div class="absolute top-3 end-3 bg-black/70 backdrop-blur-md rounded-full px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
                     {Self::icon()}
-                    "مسلسل"
                 </div>
             </div>
         }
