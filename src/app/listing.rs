@@ -1,7 +1,7 @@
 use crate::app::pagination::PaginationControls;
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
-    common::{CardsLoading, MediaPageHeader},
+    common::CardsLoading,
     model::{AudioGroup, Movie, Series},
     movies::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
@@ -47,6 +47,19 @@ where
                 />
             </div>
         }
+    }
+}
+
+#[component]
+fn MediaPageHeader(title: String, icon: impl IntoView) -> impl IntoView {
+    view! {
+        <div class="flex items-center gap-4 mb-6 md:mb-8">
+            <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
+            <div>
+                <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
+                <p class="text-gray-400 text-sm md:text-base mt-0.5">"تصفح مجموعة "{title}"ك"</p>
+            </div>
+        </div>
     }
 }
 

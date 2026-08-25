@@ -1,3 +1,4 @@
+use super::model::MediaType;
 use crate::app::{
     common::{PosterImg, PosterImgProps},
     icons::{ClockIcon, MovieIcon, MoviePosterSvg},
@@ -8,8 +9,6 @@ use crate::app::{
     },
 };
 use leptos::{either::Either, prelude::*};
-
-use super::model::MediaType;
 
 pub mod detail;
 
@@ -73,6 +72,7 @@ impl CardImageView for Movie {
         }
     }
 }
+
 impl Href for Movie {
     fn href(self) -> String {
         format!("/detail/movie/{}", self.id.0)
