@@ -1,7 +1,18 @@
 use leptos::prelude::*;
 
 fn icon(children: impl IntoView, class: &str) -> impl IntoView {
-    view! { <svg xmlns="http://www.w3.org/2000/svg" class=format!("{} fill-none stroke-current", class) viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{children}</svg> }.into_any()
+    view! {
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class=format!("{} fill-none stroke-current", class)
+            viewBox="0 0 24 24"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            {children}
+        </svg>
+    }
 }
 
 #[component]
@@ -137,39 +148,22 @@ pub fn FullscreenExitIcon() -> impl IntoView {
 
 #[component]
 pub fn NextIcon() -> impl IntoView {
-    view! {
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-        >
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-    }
+    icon(
+        view! { <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /> },
+        "h-5 w-5",
+    )
 }
 #[component]
 pub fn PrevIcon() -> impl IntoView {
-    view! {
-         <svg
-             xmlns="http://www.w3.org/2000/svg"
-             class="h-5 w-5"
-             fill="none"
-             viewBox="0 0 24 24"
-             stroke="currentColor"
-             stroke-width="2"
-         >
-             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-         </svg>
-    }
+    icon(
+        view! { <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /> },
+        "h-5 w-5",
+    )
 }
 
 #[component]
 pub fn MoviePosterSvg() -> impl IntoView {
     view! {
-
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="100%" height="100%">
           <defs>
             <linearGradient id="bg-movie" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -230,7 +224,6 @@ pub fn MoviePosterSvg() -> impl IntoView {
 #[component]
 pub fn SeriesPosterSvg() -> impl IntoView {
     view! {
-
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="100%" height="100%">
           <defs>
             <linearGradient id="bg-series" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -348,9 +341,8 @@ pub fn MusicPosterSvg() -> impl IntoView {
 
 #[component]
 pub fn XIcon() -> impl IntoView {
-    view! {
-     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-     </svg>
-    }
+    icon(
+        view! { <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /> },
+        "h-5 w-5",
+    )
 }

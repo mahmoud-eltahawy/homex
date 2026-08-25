@@ -1,4 +1,4 @@
-use crate::app::icons::XIcon;
+use crate::app::icons::{SearchIcon, XIcon};
 use crate::app::pagination::PaginationControls;
 use crate::app::series::fetch_series;
 use crate::app::{
@@ -37,12 +37,10 @@ where
         let context = format!("تحميل {} ...", title);
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <MediaPageHeader
-                    title=title.to_string()
-                    icon=C::icon()
-                    offset=self.offset
-                    search_query=self.search_query
-                />
+                <div class="flex flex-col gap-4 mb-6 md:mb-8">
+                    <Hero title=title.to_string() icon=C::icon()/>
+                    <SearchBar search_query=self.search_query offset=self.offset/>
+                </div>
                 <ResourceView
                     resource=self.data
                     view_fn=CardsList::cards_list
@@ -61,96 +59,97 @@ where
 }
 
 #[component]
-fn MediaPageHeader(
-    title: String,
-    icon: impl IntoView,
-    offset: RwSignal<usize>,
-    search_query: RwSignal<Option<String>>,
-) -> impl IntoView {
-    let mut debounce_handle: Option<TimeoutHandle> = None;
+fn Hero(title: String, icon: impl IntoView) -> impl IntoView {
+    view! {
+        <div class="flex items-center gap-4">
+            <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
+            <div>
+                <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
+                <p class="text-gray-400 text-sm md:text-base mt-0.5">
+                    "تصفح مجموعة "{title}"ك"
+                </p>
+            </div>
+        </div>
+    }
+}
 
-    let mut clear_search = move || {
-        if let Some(handle) = debounce_handle.take() {
+#[component]
+fn SearchBar(offset: RwSignal<usize>, search_query: RwSignal<Option<String>>) -> impl IntoView {
+    let input_value = RwSignal::new(search_query.get_untracked().unwrap_or_default());
+    let debounce_handle: RwSignal<Option<TimeoutHandle>> = RwSignal::new(None);
+
+    let clear_search = move |_| {
+        if let Some(handle) = debounce_handle.get_untracked() {
             handle.clear();
         }
+        debounce_handle.set(None);
 
         batch(move || {
-            offset.set(0);
+            input_value.set(String::new());
             search_query.set(None);
+            offset.set(0);
         });
     };
 
     let on_input = move |ev| {
-        let text = event_target_value(&ev);
-
-        search_query.set(if text.is_empty() {
-            None
-        } else {
-            Some(text.clone())
-        });
-
-        if let Some(handle) = debounce_handle.take() {
+        if let Some(handle) = debounce_handle.get_untracked() {
             handle.clear();
         }
 
+        let text = event_target_value(&ev);
+        input_value.set(text.clone());
+
         if text.is_empty() {
-            clear_search();
+            debounce_handle.set(None);
+            batch(move || {
+                offset.set(0);
+                search_query.set(None);
+            });
         } else {
-            debounce_handle = set_timeout_with_handle(
+            let text_clone = text.clone();
+            let handle = set_timeout_with_handle(
                 move || {
                     batch(move || {
                         offset.set(0);
-                        search_query.set(Some(text));
+                        search_query.set(Some(text_clone));
                     });
                 },
                 Duration::from_millis(300),
-            )
-            .ok();
+            );
+            debounce_handle.set(handle.ok());
         }
     };
 
-    let cancel_button = move || {
-        search_query.get().is_some().then_some(
-            view! {
-                <button
-                    on:click=move |_| clear_search()
-                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                    aria-label="Clear search"
-                >
-                    <XIcon/>
-                </button>
-            })
+    let clear_button = move || {
+        (!input_value.get().is_empty())
+            .then_some(
+                view! {
+                    <button
+                        on:click=clear_search
+                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                        aria-label="Clear search"
+                    >
+                        <XIcon/>
+                    </button>
+                }
+            )
     };
 
     view! {
-        <div class="flex flex-col gap-4 mb-6 md:mb-8">
-            <div class="flex items-center gap-4">
-                <div class="p-3 bg-cyan-400/10 rounded-2xl text-cyan-400">{icon}</div>
-                <div>
-                    <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white">{title.clone()}</h1>
-                    <p class="text-gray-400 text-sm md:text-base mt-0.5">
-                        "تصفح مجموعة "{title}"ك"
-                    </p>
-                </div>
-            </div>
+        <div class="relative w-full max-w-md self-start">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                <SearchIcon/>
+            </span>
 
-            <div class="relative w-full max-w-md self-start">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                </span>
+            <input
+                type="text"
+                placeholder="ابحث..."
+                class="w-full bg-gray-800 text-white rounded-xl pl-10 pr-10 py-3 outline-none focus:ring-2 focus:ring-cyan-400 transition-all"
+                prop:value=move || input_value.get()
+                on:input=on_input
+            />
 
-                <input
-                    type="text"
-                    placeholder="ابحث..."
-                    class="w-full bg-gray-800 text-white rounded-xl pl-10 pr-10 py-3 outline-none focus:ring-2 focus:ring-cyan-400 transition-all"
-                    prop:value=move || search_query.get().unwrap_or_default()
-                    on:input=on_input
-                />
-
-                {cancel_button}
-            </div>
+            {clear_button}
         </div>
     }
 }
