@@ -87,13 +87,6 @@ pub enum MediaType {
 }
 
 impl MediaType {
-    pub fn ar_title(&self) -> &'static str {
-        match self {
-            MediaType::Movie => "افلام",
-            MediaType::Series => "مسلاسلات",
-            MediaType::AudioGroup => "مجموعات صوتية",
-        }
-    }
     pub fn listing_href(&self) -> String {
         match self {
             MediaType::Movie => "/movie",
