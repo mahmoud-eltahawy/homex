@@ -217,12 +217,6 @@ pub fn Suggestions(
             .unwrap_or_default()
     };
 
-    let href = move |kind: MediaType, id: usize| match kind {
-        MediaType::Movie => format!("/detail/movie/{}", id),
-        MediaType::Series => format!("/detail/series/{}", id),
-        MediaType::AudioGroup => format!("/detail/audio/{}", id),
-    };
-
     view! {
         <Show when=move || search_open.get() && !search_term.read().is_empty()>
             <Suspense>
@@ -234,7 +228,7 @@ pub fn Suggestions(
                     >
                         <li>
                             <a
-                                href=href(item.media_type, item.id)
+                                href=item.media_type.detail_href(item.id)
                                 class="block px-4 py-2 text-xs sm:text-sm hover:bg-white/10 transition-colors"
                             >
                                 {item.name}

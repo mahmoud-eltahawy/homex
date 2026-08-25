@@ -4,8 +4,7 @@ use crate::app::{
     icons::{ClockIcon, MovieIcon, MoviePosterSvg},
     model::Movie,
     view_schema::{
-        CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
-        PosterView,
+        CardImageView, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView, PosterView,
     },
 };
 use leptos::{either::Either, prelude::*};
@@ -70,12 +69,6 @@ impl CardImageView for Movie {
                 </div>
             </div>
         }
-    }
-}
-
-impl Href for Movie {
-    fn href(self) -> String {
-        format!("/detail/movie/{}", self.id.0)
     }
 }
 

@@ -29,22 +29,20 @@ pub trait InfoView {
     fn info_view(self) -> impl IntoView;
 }
 
-pub trait Href {
-    fn href(self) -> String;
-}
-
-pub trait Card: Href + CardImageView + InfoView + MediaTypeT {
+pub trait Card: CardImageView + InfoView + MediaTypeT {
     fn card(self) -> impl IntoView;
 }
 
 impl<T> Card for T
 where
-    T: Href + CardImageView + InfoView + MediaTypeT + Clone,
+    T: CardImageView + InfoView + MediaTypeT + Clone,
 {
     fn card(self) -> impl IntoView {
-        let href = self.clone().href();
+        let href = T::media_type().listing_href();
         view! {
-            <a href=href class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2">
+            <a
+                href=href
+                class="group relative flex flex-col overflow-hidden rounded-2xl bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03] hover:-translate-y-2">
                 {self.clone().card_image()}
                 {self.info_view()}
             </a>

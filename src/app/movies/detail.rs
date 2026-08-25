@@ -108,8 +108,11 @@ fn DetailInfo(data: Movie) -> impl IntoView {
     let size = data.file.size.human_readable();
     let description = data.description.unwrap_or("لا يوجد وصف متاح.".to_string());
     let download = view! {
-        <a href=data.file.path.clone()
-            class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm">
+        <a
+            download="downlaod"
+            href=data.file.path.clone()
+            class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
+        >
             <DownloadIcon/> "تحميل"
         </a>
     };

@@ -117,8 +117,11 @@ where
                     <span class="text-cyan-400">{C::icon()}</span>
                     {media_type.ar_title()}
                 </h2>
-
-                <MediaSectionNav items_offset items_count href={media_type.to_string()}/>
+                <MediaSectionNav
+                    items_offset
+                    items_count
+                    href={media_type.listing_href()}
+                />
             </div>
 
             {items.cards_list()}

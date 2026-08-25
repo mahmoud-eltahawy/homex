@@ -1,4 +1,4 @@
-use crate::app::layout::search::SearchBox;
+use crate::app::{layout::search::SearchBox, model::MediaType};
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
@@ -55,18 +55,18 @@ fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -
     view! {
         <div class="hidden md:flex items-center gap-2">
             <SearchBox search_term=search_term search_open=search_open/>
-            <NavLink href="/movie" label="أفلام"/>
-            <NavLink href="/series" label="مسلسلات"/>
-            <NavLink href="/audio" label="صوتيات"/>
+            <NavLink href=MediaType::Movie.listing_href() label=MediaType::Movie.ar_title()/>
+            <NavLink href=MediaType::Series.listing_href() label=MediaType::Series.ar_title()/>
+            <NavLink href=MediaType::AudioGroup.listing_href() label=MediaType::AudioGroup.ar_title()/>
         </div>
     }
 }
 
 #[component]
-fn NavLink(href: &'static str, label: &'static str) -> impl IntoView {
+fn NavLink(href: String, label: &'static str) -> impl IntoView {
     view! {
         <a
-            href=href.to_string()
+            href=href
             class="px-4 py-2 rounded-2xl text-sm font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-all duration-300 backdrop-blur-sm"
         >
             {label}
@@ -122,8 +122,9 @@ fn FooterLinks() -> impl IntoView {
         <div>
             <h3 class="text-white font-semibold text-sm mb-4 tracking-wide">تصفح</h3>
             <ul class="space-y-2 text-sm">
-                <li><NavLink href="/movies" label="أفلام"/></li>
-                <li><NavLink href="/series" label="مسلسلات"/></li>
+                <li><NavLink href=MediaType::Movie.listing_href() label=MediaType::Movie.ar_title()/></li>
+                <li><NavLink href=MediaType::Series.listing_href() label=MediaType::Series.ar_title()/></li>
+                <li><NavLink href=MediaType::AudioGroup.listing_href() label=MediaType::AudioGroup.ar_title()/></li>
             </ul>
         </div>
     }
@@ -135,8 +136,8 @@ fn FooterLibrary() -> impl IntoView {
         <div>
             <h3 class="text-white font-semibold text-sm mb-4 tracking-wide">المكتبة</h3>
             <ul class="space-y-2 text-sm">
-                <li><NavLink href="/upload" label="رفع وسائط"/></li>
-                <li><NavLink href="/settings" label="الإعدادات"/></li>
+                <li><NavLink href="/upload".to_string() label="رفع وسائط"/></li>
+                <li><NavLink href="/settings".to_string() label="الإعدادات"/></li>
                 <li><span class="text-gray-500 cursor-default">v1.0.0</span></li>
             </ul>
         </div>

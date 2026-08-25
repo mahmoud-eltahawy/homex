@@ -3,17 +3,10 @@ use crate::app::{
     icons::{AudioIcon, MusicPosterSvg},
     model::{self, AudioGroup, MediaType},
     view_schema::{
-        CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
-        PosterView,
+        CardImageView, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView, PosterView,
     },
 };
 use leptos::{either::Either, prelude::*};
-
-impl Href for AudioGroup {
-    fn href(self) -> String {
-        format!("/detail/audio/{}", self.id.0)
-    }
-}
 
 impl IconView for AudioGroup {
     fn icon() -> impl IntoView {

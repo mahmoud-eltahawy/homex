@@ -5,8 +5,7 @@ use crate::app::{
     icons::{SeriesIcon, SeriesPosterSvg},
     model::{MediaType, Season, Series},
     view_schema::{
-        CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
-        PosterView,
+        CardImageView, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView, PosterView,
     },
 };
 use leptos::{either::Either, prelude::*};
@@ -83,12 +82,6 @@ impl CardImageView for Series {
                 </div>
             </div>
         }
-    }
-}
-
-impl Href for Series {
-    fn href(self) -> String {
-        format!("/detail/series/{}", self.id.0)
     }
 }
 

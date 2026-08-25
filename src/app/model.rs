@@ -80,6 +80,17 @@ impl MediaType {
             MediaType::AudioGroup => "مجموعات صوتية",
         }
     }
+    pub fn listing_href(&self) -> String {
+        match self {
+            MediaType::Movie => "/movie",
+            MediaType::Series => "/series",
+            MediaType::AudioGroup => "/audio",
+        }
+        .to_string()
+    }
+    pub fn detail_href(&self, id: usize) -> String {
+        format!("{}/detail/{}", self.listing_href(), id)
+    }
 }
 
 impl std::fmt::Display for MediaType {
