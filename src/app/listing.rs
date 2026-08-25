@@ -1,5 +1,5 @@
 use crate::app::icons::{SearchIcon, XIcon};
-use crate::app::pagination::PaginationControls;
+use crate::app::pagination::{PaginationControls, PaginationControlsProps};
 use crate::app::series::fetch_series;
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
@@ -35,6 +35,13 @@ where
     fn view(self) -> impl IntoView {
         let title = C::media_type().ar_title();
         let context = format!("تحميل {} ...", title);
+
+        let adapter = move |count| PaginationControlsProps {
+            offset: self.offset,
+            count,
+            window_size: 8,
+            page_size: LISTING_PAGE_SIZE,
+        };
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex flex-col gap-4 mb-6 md:mb-8">
@@ -48,10 +55,11 @@ where
                     adapter=|x| x
                     context=context
                 />
-                <PaginationControls
-                    offset=self.offset
-                    count=self.count
-                    page_size=LISTING_PAGE_SIZE
+                <ResourceView
+                    resource=self.count
+                    view_fn=PaginationControls
+                    adapter=adapter
+                    context=""
                 />
             </div>
         }

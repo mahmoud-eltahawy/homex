@@ -3,9 +3,10 @@ use std::future::Future;
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
     common::CardsLoading,
-    icons::{EmptyStateIcon, NextPageIcon, PrevPageIcon, ViewAllIcon},
+    icons::{EmptyStateIcon, ViewAllIcon},
     model::{AudioGroup, Movie, Series},
     movies::{fetch_movies, fetch_movies_count},
+    pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
     series::{fetch_series, fetch_series_count},
     view_schema::{Card, CardsList},
@@ -99,10 +100,11 @@ where
         count,
         href: media_type.listing_href(),
     };
-    let pagination_adapter = move |count| SectionPaginationProps {
+    let pagination_adapter = move |count| PaginationControlsProps {
         offset: items_offset,
-        total_count: count,
         page_size: MEDIA_LIST_SIZE,
+        count,
+        window_size: 5,
     };
     view! {
         <section class="bg-white/5 rounded-2xl p-4 md:p-6">
@@ -115,7 +117,7 @@ where
             <SectionContent items={items} />
             <ResourceView
                 resource=items_count
-                view_fn=SectionPagination
+                view_fn=PaginationControls
                 adapter=pagination_adapter
                 context=""
             />
@@ -157,73 +159,6 @@ fn SectionContent<C: Card + 'static>(items: Vec<C>) -> impl IntoView {
         <div class="flex flex-col items-center justify-center py-12 gap-3">
             <EmptyStateIcon />
             <span class="text-white/20 text-sm font-mono">0</span>
-        </div>
-    })
-}
-
-// ─── Pagination (Bottom) ────────────────────────────────────────────────────
-
-#[component]
-fn SectionPagination(
-    offset: RwSignal<usize>,
-    total_count: usize,
-    page_size: usize,
-) -> impl IntoView {
-    let total_pages = total_count.div_ceil(page_size).max(1);
-
-    if total_pages <= 1 {
-        return Either::Left(view! { <div class="h-1" /> });
-    }
-
-    let can_prev = move || offset.get() == 0;
-    let can_next = move || offset.get() > total_count.saturating_sub(page_size);
-
-    let go_prev = move |_| {
-        offset.update(|x| {
-            if *x > 0 {
-                *x -= 1
-            }
-        });
-    };
-    let go_next = move |_| {
-        offset.update(|x| {
-            let max = total_count.saturating_sub(page_size);
-            if *x < max {
-                *x += 1;
-            }
-        });
-    };
-
-    let status = move || {
-        let current = offset.get() + 1;
-        format!("{} / {}", current, total_pages)
-    };
-
-    Either::Right(view! {
-        <div class="flex items-center justify-end gap-4 mt-6 pt-4 border-t border-white/5">
-            <div class="flex items-center gap-2">
-                <button
-                    on:click=go_prev
-                    disabled=can_prev
-                    class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-                    aria-label="Previous page"
-                >
-                    <PrevPageIcon />
-                </button>
-
-                <span class="font-mono text-sm text-white/60 px-3 py-1 bg-white/10 rounded-lg min-w-[3.5rem] text-center">
-                    {status}
-                </span>
-
-                <button
-                    on:click=go_next
-                    disabled=can_next
-                    class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-                    aria-label="Next page"
-                >
-                    <NextPageIcon />
-                </button>
-            </div>
         </div>
     })
 }

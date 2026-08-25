@@ -5,25 +5,18 @@ use crate::app::icons::{NextPageIcon, PrevPageIcon};
 #[component]
 pub fn PaginationControls(
     offset: RwSignal<usize>,
-    count: Resource<Result<usize, ServerFnError>>,
-    #[prop(default = 8)] window_size: usize,
-    #[prop(default = 12)] page_size: usize,
+    count: usize,
+    window_size: usize,
+    page_size: usize,
 ) -> impl IntoView {
-    let total_pages = move || {
-        count
-            .get()
-            .transpose()
-            .ok()
-            .flatten()
-            .map(|total| (total.saturating_add(page_size - 1)) / page_size)
-    };
+    let total_pages = count.saturating_add(page_size - 1) / page_size;
 
     let current_page = move || offset.get() / page_size + 1;
 
     let window_start = RwSignal::new(1usize);
 
     Effect::new(move || {
-        let total = total_pages().unwrap_or(1).max(1);
+        let total = total_pages.max(1);
         let current = current_page().min(total);
 
         let mut new_start = window_start.get();
@@ -72,15 +65,12 @@ pub fn PaginationControls(
 }
 
 #[component]
-fn NavButton<TP>(
+fn NavButton(
     forward: bool,
     window_size: usize,
     window_start: RwSignal<usize>,
-    total_pages: TP,
-) -> impl IntoView
-where
-    TP: Fn() -> Option<usize> + Send + Sync + Clone + 'static,
-{
+    total_pages: usize,
+) -> impl IntoView {
     let icon = if forward {
         Either::Left(NextPageIcon())
     } else {
@@ -88,9 +78,8 @@ where
     };
 
     let can_shift = {
-        let total_pages = total_pages.clone();
         move || {
-            let total = total_pages().unwrap_or(1).max(1);
+            let total = total_pages.max(1);
             (!forward && window_start.get() > 1)
                 || forward && window_start.get() + window_size - 1 < total
         }
@@ -98,7 +87,7 @@ where
 
     let shift = move |_| {
         if forward {
-            let total = total_pages().unwrap_or(1).max(1);
+            let total = total_pages.max(1);
             let max_start = total.saturating_sub(window_size - 1).max(1);
             let new_start = (window_start.get() + window_size).min(max_start);
             window_start.set(new_start);
@@ -127,16 +116,15 @@ where
 }
 
 #[component]
-fn PagesNumber<TP, CP>(
+fn PagesNumber<CP>(
     offset: RwSignal<usize>,
     window_start: RwSignal<usize>,
     window_size: usize,
-    total_pages: TP,
+    total_pages: usize,
     current_page: CP,
     page_size: usize,
 ) -> impl IntoView
 where
-    TP: Fn() -> Option<usize> + Send + Sync + Clone + 'static,
     CP: Fn() -> usize + Send + Sync + Clone + 'static,
 {
     let go_to_page = move |page: usize| {
@@ -144,7 +132,7 @@ where
     };
 
     let pages = move || {
-        let total = total_pages().unwrap_or(0);
+        let total = total_pages;
         if total == 0 {
             return Vec::new();
         }
