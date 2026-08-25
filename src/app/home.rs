@@ -1,14 +1,14 @@
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
     common::CardsLoading,
-    icons::{NextIcon, PrevIcon},
+    icons::{EmptyStateIcon, NextPageIcon, PrevPageIcon, ViewAllIcon},
     model::{AudioGroup, Movie, Series},
     movies::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
     series::{fetch_series, fetch_series_count},
     view_schema::{Card, CardsList},
 };
-use leptos::prelude::*;
+use leptos::{either::Either, prelude::*};
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -73,11 +73,14 @@ impl LazyRoute for HomePage {
             audio,
         } = this;
         view! {
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <HomeHero/>
-                {MediaLoader(movies)}
-                {MediaLoader(series)}
-                {MediaLoader(audio)}
+            <div class="min-h-screen bg-[#0c0b1a] text-white">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10">
+                    {MediaLoader(movies)}
+                    <hr class="border-t border-white/5 my-10 md:my-12" />
+                    {MediaLoader(series)}
+                    <hr class="border-t border-white/5 my-10 md:my-12" />
+                    {MediaLoader(audio)}
+                </div>
             </div>
         }
         .into_any()
@@ -107,95 +110,142 @@ fn MediaSection<C>(
     items_count: Resource<Result<usize, ServerFnError>>,
 ) -> impl IntoView
 where
-    C: Card,
+    C: Card + 'static,
 {
     let media_type = C::media_type();
-    view! {
-        <section class="mb-12 md:mb-16">
-            <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-                <h2 class="flex items-center gap-3 text-2xl font-black text-white sm:text-3xl md:text-4xl">
-                    <span class="text-cyan-400">{C::icon()}</span>
-                    {media_type.ar_title()}
-                </h2>
-                <MediaSectionNav
-                    items_offset
-                    items_count
-                    href={media_type.listing_href()}
-                />
-            </div>
 
-            {items.cards_list()}
+    let header_adapter = move |count| SectionHeaderProps {
+        icon: C::icon(),
+        count,
+        href: media_type.listing_href(),
+    };
+    let pagination_adapter = move |count| SectionPaginationProps {
+        offset: items_offset,
+        total_count: count,
+        page_size: MEDIA_LIST_SIZE,
+    };
+    view! {
+        <section class="bg-white/5 rounded-2xl p-4 md:p-6">
+            <ResourceView
+                resource=items_count
+                view_fn=SectionHeader
+                adapter=header_adapter
+                context=""
+            />
+            <SectionContent items={items} />
+            <ResourceView
+                resource=items_count
+                view_fn=SectionPagination
+                adapter=pagination_adapter
+                context=""
+            />
         </section>
     }
 }
 
-#[component]
-fn MediaSectionNav(
-    items_offset: RwSignal<usize>,
-    items_count: Resource<Result<usize, ServerFnError>>,
-    href: String,
-) -> impl IntoView {
-    let can_prev = move || items_offset.get() > 0;
+// ─── Header: Icon + Count + ViewAll ────────────────────────────────────────
 
-    let get_items_count = move || items_count.get().transpose().ok().flatten();
-    let can_next = move || {
-        get_items_count()
-            .map(|count| items_offset.get() < count.saturating_sub(MEDIA_LIST_SIZE))
-            .unwrap_or(false)
+#[component]
+fn SectionHeader(icon: impl IntoView + 'static, count: usize, href: String) -> impl IntoView {
+    view! {
+        <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+                <span class="flex items-center">{icon}</span>
+                <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full">
+                    {count}
+                </span>
+            </div>
+            <a
+                href=href
+                class="group p-1 rounded hover:bg-white/10 transition-colors"
+                aria-label="View all"
+            >
+                <ViewAllIcon />
+            </a>
+        </div>
+    }
+}
+
+// ─── Content: Grid or Empty State ──────────────────────────────────────────
+
+#[component]
+fn SectionContent<C: Card + 'static>(items: Vec<C>) -> impl IntoView {
+    if !items.is_empty() {
+        return Either::Right(items.cards_list());
     };
+    Either::Left(view! {
+        <div class="flex flex-col items-center justify-center py-12 gap-3">
+            <EmptyStateIcon />
+            <span class="text-white/20 text-sm font-mono">0</span>
+        </div>
+    })
+}
+
+// ─── Pagination (Bottom) ────────────────────────────────────────────────────
+
+#[component]
+fn SectionPagination(
+    offset: RwSignal<usize>,
+    total_count: usize,
+    page_size: usize,
+) -> impl IntoView {
+    let total_pages = total_count.div_ceil(page_size).max(1);
+
+    if total_pages <= 1 {
+        return Either::Left(view! { <div class="h-1" /> });
+    }
+
+    let can_prev = move || offset.get() == 0;
+    let can_next = move || offset.get() > total_count.saturating_sub(page_size);
 
     let go_prev = move |_| {
-        items_offset.update(|x| {
+        offset.update(|x| {
             if *x > 0 {
-                *x -= 1;
+                *x -= 1
             }
         });
     };
-
     let go_next = move |_| {
-        items_offset.update(|x| {
-            let max_offset = get_items_count()
-                .unwrap_or(0)
-                .saturating_sub(MEDIA_LIST_SIZE);
-
-            if *x < max_offset {
+        offset.update(|x| {
+            let max = total_count.saturating_sub(page_size);
+            if *x < max {
                 *x += 1;
             }
         });
     };
 
-    view! {
+    let status = move || {
+        let current = offset.get() + 1;
+        format!("{} / {}", current, total_pages)
+    };
 
-        <div class="flex items-center gap-3 sm:gap-4">
-            <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur">
+    Either::Right(view! {
+        <div class="flex items-center justify-end gap-4 mt-6 pt-4 border-t border-white/5">
+            <div class="flex items-center gap-2">
                 <button
                     on:click=go_prev
-                    disabled=move || !can_prev()
-                    aria-label="Previous"
-                    class="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
+                    disabled=can_prev
+                    class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    aria-label="Previous page"
                 >
-                    <PrevIcon/>
+                    <PrevPageIcon />
                 </button>
+
+                <span class="font-mono text-sm text-white/60 px-3 py-1 bg-white/10 rounded-lg min-w-[3.5rem] text-center">
+                    {status}
+                </span>
 
                 <button
                     on:click=go_next
-                    disabled=move || !can_next()
-                    aria-label="Next"
-                    class="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
+                    disabled=can_next
+                    class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    aria-label="Next page"
                 >
-                    <NextIcon/>
+                    <NextPageIcon />
                 </button>
             </div>
-
-            <a
-                href=href
-                class="group inline-flex items-center gap-1 text-sm font-semibold text-cyan-400 transition hover:text-cyan-300"
-            >
-                <span class="transition-transform group-hover:translate-x-1">"عرض الكل"</span>
-                <span class="text-lg transition-transform group-hover:translate-x-1" aria-hidden="true">"←"</span>
-            </a>
         </div>
-    }
+    })
 }
 
 #[component]

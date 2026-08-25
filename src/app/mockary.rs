@@ -76,7 +76,7 @@ pub fn mock_series() -> Vec<Series> {
     .collect()
 }
 
-pub fn mock_season(series_id: i64, season_number: u32) -> Option<Season> {
+pub fn mock_season(series_id: usize, season_number: u32) -> Option<Season> {
     let episodes = match (series_id, season_number) {
         (101, 1) => vec![ep(1011, 1, 1), ep(1012, 1, 2), ep(1013, 1, 3)],
         (101, 2) => vec![ep(1014, 2, 1), ep(1015, 2, 2)],

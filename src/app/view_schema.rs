@@ -29,16 +29,20 @@ pub trait InfoView {
     fn info_view(self) -> impl IntoView;
 }
 
-pub trait Card: CardImageView + InfoView + MediaTypeT {
+pub trait IdT {
+    fn id(&self) -> usize;
+}
+
+pub trait Card: CardImageView + InfoView + MediaTypeT + IdT {
     fn card(self) -> impl IntoView;
 }
 
 impl<T> Card for T
 where
-    T: CardImageView + InfoView + MediaTypeT + Clone,
+    T: IdT + CardImageView + InfoView + MediaTypeT + Clone,
 {
     fn card(self) -> impl IntoView {
-        let href = T::media_type().listing_href();
+        let href = T::media_type().detail_href(self.id());
         view! {
             <a
                 href=href

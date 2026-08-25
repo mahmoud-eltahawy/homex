@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use crate::app::view_schema::IdT;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct MediaId(pub i64);
+pub struct MediaId(pub usize);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileSize(pub u64);
@@ -56,6 +58,12 @@ pub struct Movie {
     pub duration: DurationSeconds,
 }
 
+impl IdT for Movie {
+    fn id(&self) -> usize {
+        self.id.0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioGroup {
     pub id: MediaId,
@@ -63,6 +71,12 @@ pub struct AudioGroup {
     pub poster: Option<String>,
     pub description: Option<String>,
     pub audios_count: u32,
+}
+
+impl IdT for AudioGroup {
+    fn id(&self) -> usize {
+        self.id.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -131,6 +145,12 @@ pub struct Series {
     pub description: Option<String>,
     pub season_count: u32,
     pub season_summaries: Vec<SeasonSummary>,
+}
+
+impl IdT for Series {
+    fn id(&self) -> usize {
+        self.id.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 use leptos::{either::Either, prelude::*};
 
-use crate::app::icons::{NextIcon, PrevIcon};
+use crate::app::icons::{NextPageIcon, PrevPageIcon};
 
 #[component]
 pub fn PaginationControls(
@@ -82,9 +82,9 @@ where
     TP: Fn() -> Option<usize> + Send + Sync + Clone + 'static,
 {
     let icon = if forward {
-        Either::Left(NextIcon())
+        Either::Left(NextPageIcon())
     } else {
-        Either::Right(PrevIcon())
+        Either::Right(PrevPageIcon())
     };
 
     let can_shift = {
