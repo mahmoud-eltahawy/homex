@@ -1,4 +1,8 @@
-use crate::app::{layout::search::SearchBox, model::MediaType};
+use crate::app::{
+    icons::{AudioIcon, MediaCubeLogo, MovieIcon, SeriesIcon, SettingsIcon, UploadIcon},
+    layout::search::SearchBox,
+    model::MediaType,
+};
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
@@ -30,7 +34,7 @@ fn Navbar() -> impl IntoView {
         <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex items-center justify-between h-16 md:h-20">
-                    <NavbarBrand/>
+                    <Brand/>
                     <DesktopNavLinks search_term=search_term search_open=search_open/>
                 </div>
             </div>
@@ -39,13 +43,10 @@ fn Navbar() -> impl IntoView {
 }
 
 #[component]
-fn NavbarBrand() -> impl IntoView {
+fn Brand() -> impl IntoView {
     view! {
-        <a
-            href="/".to_string()
-            class="flex items-center gap-2 text-2xl sm:text-3xl md:text-4xl font-black tracking-tighter"
-        >
-            <span class="bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">وسائطي</span>
+        <a href="/".to_string() class="flex items-center">
+            <MediaCubeLogo />
         </a>
     }
 }
@@ -55,21 +56,22 @@ fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -
     view! {
         <div class="hidden md:flex items-center gap-2">
             <SearchBox search_term=search_term search_open=search_open/>
-            <NavLink href=MediaType::Movie.listing_href() label=MediaType::Movie.ar_title()/>
-            <NavLink href=MediaType::Series.listing_href() label=MediaType::Series.ar_title()/>
-            <NavLink href=MediaType::AudioGroup.listing_href() label=MediaType::AudioGroup.ar_title()/>
+            <NavLink href=MediaType::Movie.listing_href() icon=MovieIcon />
+            <NavLink href=MediaType::Series.listing_href() icon=SeriesIcon />
+            <NavLink href=MediaType::AudioGroup.listing_href() icon=AudioIcon />
         </div>
     }
 }
 
 #[component]
-fn NavLink(href: String, label: &'static str) -> impl IntoView {
+pub fn NavLink(href: String, icon: impl IntoView) -> impl IntoView {
     view! {
         <a
             href=href
-            class="px-4 py-2 rounded-2xl text-sm font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-all duration-300 backdrop-blur-sm"
+            class="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-300"
+            aria-label="Navigate"
         >
-            {label}
+            {icon}
         </a>
     }
 }
@@ -80,7 +82,6 @@ fn Footer() -> impl IntoView {
         <footer class="bg-[#0a0a0f]/90 backdrop-blur-xl border-t border-white/5 mt-auto">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
                 <FooterGrid/>
-                <FooterCopyright/>
             </div>
         </footer>
     }
@@ -89,66 +90,18 @@ fn Footer() -> impl IntoView {
 #[component]
 fn FooterGrid() -> impl IntoView {
     view! {
-        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8 md:gap-12">
-            <FooterBrand/>
-            <FooterLinks/>
-            <FooterLibrary/>
-        </div>
-    }
-}
-
-#[component]
-fn FooterBrand() -> impl IntoView {
-    view! {
-        <div class="space-y-4">
-            <a
-                href="/".to_string()
-                class="text-2xl font-black tracking-tighter"
-            >
-                <span class="bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">وسائطي</span>
-            </a>
-            <p
-                class="text-gray-400 text-sm max-w-xs leading-relaxed"
-            >
-                "خادم السينما الشخصي الخاص بك — شاهد، حمّل، واستمتع بمجموعتك في أي وقت."
-            </p>
-        </div>
-    }
-}
-
-#[component]
-fn FooterLinks() -> impl IntoView {
-    view! {
-        <div>
-            <h3 class="text-white font-semibold text-sm mb-4 tracking-wide">تصفح</h3>
-            <ul class="space-y-2 text-sm">
-                <li><NavLink href=MediaType::Movie.listing_href() label=MediaType::Movie.ar_title()/></li>
-                <li><NavLink href=MediaType::Series.listing_href() label=MediaType::Series.ar_title()/></li>
-                <li><NavLink href=MediaType::AudioGroup.listing_href() label=MediaType::AudioGroup.ar_title()/></li>
-            </ul>
-        </div>
-    }
-}
-
-#[component]
-fn FooterLibrary() -> impl IntoView {
-    view! {
-        <div>
-            <h3 class="text-white font-semibold text-sm mb-4 tracking-wide">المكتبة</h3>
-            <ul class="space-y-2 text-sm">
-                <li><NavLink href="/upload".to_string() label="رفع وسائط"/></li>
-                <li><NavLink href="/settings".to_string() label="الإعدادات"/></li>
-                <li><span class="text-gray-500 cursor-default">v1.0.0</span></li>
-            </ul>
-        </div>
-    }
-}
-
-#[component]
-fn FooterCopyright() -> impl IntoView {
-    view! {
-        <div class="mt-10 pt-6 border-t border-white/5 text-center text-gray-500 text-xs tracking-wide">
-            <p>"© 2025 وسائطي. صُنع بكل ❤️ لشبكتك المنزلية."</p>
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-8 md:gap-12">
+            <Brand/>
+            <div class="flex items-center gap-6">
+                <NavLink href=MediaType::Movie.listing_href() icon={MovieIcon()} />
+                <NavLink href=MediaType::Series.listing_href() icon={SeriesIcon()} />
+                <NavLink href=MediaType::AudioGroup.listing_href() icon={AudioIcon()} />
+            </div>
+            <div class="flex items-center gap-6">
+                <NavLink href="/upload".to_string() icon={UploadIcon()} />
+                <NavLink href="/settings".to_string() icon={SettingsIcon()} />
+                <span class="text-gray-500 text-xs font-mono">v1.0.0</span>
+            </div>
         </div>
     }
 }

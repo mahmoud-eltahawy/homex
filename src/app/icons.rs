@@ -67,14 +67,6 @@ pub fn ClockIcon() -> impl IntoView {
 }
 
 #[component]
-pub fn UploadIcon() -> impl IntoView {
-    stroked_icon(
-        view! { <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/> },
-        "h-6 w-6",
-    )
-}
-
-#[component]
 pub fn DeleteIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/> },
@@ -433,5 +425,53 @@ pub fn ErrorIcon() -> impl IntoView {
             <circle cx="12" cy="16" r="0.5" fill="currentColor" />
         },
         "h-6 w-6 text-red-400",
+    )
+}
+
+#[component]
+pub fn MediaCubeLogo() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-8 h-8">
+            <defs>
+                <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#22d3ee" /> // cyan-400
+                    <stop offset="100%" stop-color="#3b82f6" /> // blue-500
+                </linearGradient>
+            </defs>
+            <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#logoGrad)" />
+            <path d="M10 7 L10 17 L17 12 Z" fill="#0a0a0f" />
+        </svg>
+    }
+}
+
+#[component]
+pub fn SettingsIcon() -> impl IntoView {
+    stroked_icon(
+        view! {
+            <>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 1v3" />
+                <path d="M12 20v3" />
+                <path d="M4.22 4.22l2.12 2.12" />
+                <path d="M17.66 17.66l2.12 2.12" />
+                <path d="M1 12h3" />
+                <path d="M20 12h3" />
+                <path d="M4.22 19.78l2.12-2.12" />
+                <path d="M17.66 6.34l2.12-2.12" />
+            </>
+        },
+        "h-5 w-5 text-gray-400 hover:text-white transition-colors",
+    )
+}
+
+#[component]
+pub fn UploadIcon() -> impl IntoView {
+    stroked_icon(
+        view! {
+            <path d="M4 14.9A7 7 0 0 1 7 4.1a7 7 0 0 1 12.7 2.1A5 5 0 0 1 19 16h-5" />
+            <path d="M12 12v9" />
+            <path d="M9 15l3-3 3 3" />
+        },
+        "h-5 w-5 text-gray-400 hover:text-white transition-colors",
     )
 }
