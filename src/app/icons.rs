@@ -396,3 +396,42 @@ pub fn PrevPageIcon() -> impl IntoView {
 pub fn NextPageIcon() -> impl IntoView {
     stroked_icon(view! { <polyline points="15 6 9 12 15 18" /> }, "w-5 h-5")
 }
+
+#[component]
+pub fn LoadingIcon() -> impl IntoView {
+    stroked_icon(
+        view! {
+            <circle
+                cx="12"
+                cy="12"
+                r="10"
+                stroke-dasharray="70 200"
+                stroke-dashoffset="0"
+                stroke-linecap="round"
+            />
+        },
+        "h-8 w-8 animate-spin text-cyan-400",
+    )
+}
+
+#[component]
+pub fn RetryIcon() -> impl IntoView {
+    stroked_icon(
+        view! {
+            <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9h-4m4 0v4" />
+        },
+        "h-6 w-6 text-gray-400 hover:text-white transition-colors",
+    )
+}
+
+#[component]
+pub fn ErrorIcon() -> impl IntoView {
+    stroked_icon(
+        view! {
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <circle cx="12" cy="16" r="0.5" fill="currentColor" />
+        },
+        "h-6 w-6 text-red-400",
+    )
+}

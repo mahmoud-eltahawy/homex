@@ -112,20 +112,16 @@ where
                 resource=items_count
                 view_fn=SectionHeader
                 adapter=header_adapter
-                context=""
             />
-            <SectionContent items={items} />
+            <SectionContent items />
             <ResourceView
                 resource=items_count
                 view_fn=PaginationControls
                 adapter=pagination_adapter
-                context=""
             />
         </section>
     }
 }
-
-// ─── Header: Icon + Count + ViewAll ────────────────────────────────────────
 
 #[component]
 fn SectionHeader(icon: impl IntoView + 'static, count: usize, href: String) -> impl IntoView {
@@ -147,8 +143,6 @@ fn SectionHeader(icon: impl IntoView + 'static, count: usize, href: String) -> i
         </div>
     }
 }
-
-// ─── Content: Grid or Empty State ──────────────────────────────────────────
 
 #[component]
 fn SectionContent<C: Card + 'static>(items: Vec<C>) -> impl IntoView {
@@ -172,8 +166,6 @@ fn MediaLoader<T>(
 where
     T: Card + Send + Sync + Serialize + DeserializeOwned + Clone + 'static,
 {
-    let context = format!("تحميل {}...", T::media_type().ar_title());
-
     let adapter = move |items: Vec<T>| MediaSectionProps {
         items,
         items_offset: offset,
@@ -186,7 +178,6 @@ where
             view_fn={MediaSection}
             adapter={adapter}
             fallback={CardsLoading}
-            context={context}
         />
     }
 }

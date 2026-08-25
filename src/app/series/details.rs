@@ -52,7 +52,6 @@ impl LazyRoute for SeriesDetailPage {
                 resource=this.series
                 view_fn=SeriesView
                 adapter=adapter
-                context="تحميل الحلقات"
             />
         }
         .into_any()
@@ -203,7 +202,6 @@ fn Selectors(
                 resource=episodes
                 view_fn=EpisodeSelector
                 adapter=adapter
-                context="تحميل تلخيصات المواسم"
             />
         </div>
     }

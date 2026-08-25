@@ -46,7 +46,6 @@ impl LazyRoute for MovieDetailPage {
                 resource= this.movie
                 view_fn=MovieDetail
                 adapter=adapter
-                context="تحميل تفاصيل فيلم"
             />
         }
         .into_any()

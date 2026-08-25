@@ -34,7 +34,6 @@ where
 {
     fn view(self) -> impl IntoView {
         let title = C::media_type().ar_title();
-        let context = format!("تحميل {} ...", title);
 
         let adapter = move |count| PaginationControlsProps {
             offset: self.offset,
@@ -53,13 +52,11 @@ where
                     view_fn=CardsList::cards_list
                     fallback=CardsLoading
                     adapter=|x| x
-                    context=context
                 />
                 <ResourceView
                     resource=self.count
                     view_fn=PaginationControls
                     adapter=adapter
-                    context=""
                 />
             </div>
         }

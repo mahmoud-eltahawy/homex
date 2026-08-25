@@ -223,14 +223,11 @@ fn SeriesSection(
     series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>,
     adapter: impl Fn(Vec<SeriesTitle>) -> SeriesSettingsProps + Send + 'static,
 ) -> impl IntoView {
-    let episode_icon: fn() -> AnyView = || view! { <SeriesIcon/> }.into_any();
-
     view! {
         <ResourceView
             resource=series_res
             view_fn=SeriesSettings
             adapter=adapter
-            context="جارٍ تحميل قائمة المسلسلات"
         />
         <MediaFilesSection
             heading="الحلقات"
@@ -241,7 +238,7 @@ fn SeriesSection(
             number_label="رقم الحلقة"
             title_label="عنوان الحلقة"
             file_label="الملف"
-            icon=episode_icon
+            icon=SeriesIcon()
         />
     }
 }
@@ -400,7 +397,7 @@ fn MediaFilesSection(
     number_label: &'static str,
     title_label: &'static str,
     file_label: &'static str,
-    icon: fn() -> AnyView,
+    icon: impl IntoView,
 ) -> impl IntoView {
     let items = RwSignal::new(Vec::<UploadItem>::new());
     let next_id = RwSignal::new(1u32);
@@ -435,12 +432,12 @@ fn MediaFilesToolbar(
     input_id: &'static str,
     accept: &'static str,
     select_label: &'static str,
-    icon: fn() -> AnyView,
+    icon: impl IntoView,
 ) -> impl IntoView {
     view! {
         <div class="flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-lg font-bold text-white flex items-center gap-2">
-                {icon()} {heading}
+                {icon} {heading}
             </h2>
             <div class="flex flex-wrap items-center gap-2">
                 <MediaFilesInput
