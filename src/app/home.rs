@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
     common::CardsLoading,
@@ -12,6 +14,32 @@ use leptos::{either::Either, prelude::*};
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{de::DeserializeOwned, Serialize};
 
+impl<T> MediaLoaderProps<T>
+where
+    T: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
+{
+    fn new<Fut1, Fut2>(
+        data_fn: impl Fn(usize, usize, Option<String>) -> Fut1 + Send + Sync + 'static,
+        count_fn: impl Fn(Option<String>) -> Fut2 + Send + Sync + 'static,
+    ) -> Self
+    where
+        Fut1: Future<Output = Result<Vec<T>, ServerFnError>> + Send + 'static,
+        Fut2: Future<Output = Result<usize, ServerFnError>> + Send + 'static,
+    {
+        let offset = RwSignal::new(0usize);
+        let resource = Resource::new(
+            move || offset.get(),
+            move |offset| data_fn(offset, MEDIA_LIST_SIZE, None),
+        );
+        let count = Resource::new(|| None, count_fn);
+        Self {
+            offset,
+            resource,
+            count,
+        }
+    }
+}
+
 pub struct HomePage {
     movies: MediaLoaderProps<Movie>,
     series: MediaLoaderProps<Series>,
@@ -23,41 +51,9 @@ const MEDIA_LIST_SIZE: usize = 6;
 #[lazy_route]
 impl LazyRoute for HomePage {
     fn data() -> Self {
-        let offset = RwSignal::new(0usize);
-        let resource = Resource::new(
-            move || offset.get(),
-            async |offset| fetch_movies(offset, MEDIA_LIST_SIZE, None).await,
-        );
-        let count = Resource::new(|| (), async |_| fetch_movies_count(None).await);
-        let movies = MediaLoaderProps {
-            resource,
-            offset,
-            count,
-        };
-
-        let offset = RwSignal::new(0);
-        let resource = Resource::new(
-            move || offset.get(),
-            async |offset| fetch_series(offset, MEDIA_LIST_SIZE, None).await,
-        );
-        let count = Resource::new(|| (), async |_| fetch_series_count(None).await);
-        let series = MediaLoaderProps {
-            resource,
-            offset,
-            count,
-        };
-
-        let offset = RwSignal::new(0);
-        let resource = Resource::new(
-            move || offset.get(),
-            async |offset| fetch_audio_groups(offset, MEDIA_LIST_SIZE, None).await,
-        );
-        let count = Resource::new(|| (), async |_| fetch_audio_groups_count(None).await);
-        let audio = MediaLoaderProps {
-            resource,
-            offset,
-            count,
-        };
+        let movies = MediaLoaderProps::new(fetch_movies, fetch_movies_count);
+        let series = MediaLoaderProps::new(fetch_series, fetch_series_count);
+        let audio = MediaLoaderProps::new(fetch_audio_groups, fetch_audio_groups_count);
 
         Self {
             movies,
