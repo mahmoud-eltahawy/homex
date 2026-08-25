@@ -1,31 +1,55 @@
 use leptos::prelude::*;
 
-fn stroked_icon(children: impl IntoView, class: &'static str) -> impl IntoView {
+fn tooltip(children: impl IntoView, text: &'static str) -> impl IntoView {
     view! {
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class=format!("{} fill-none stroke-current", class)
-            viewBox="0 0 24 24"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-        >
+        <div class="relative group inline-flex">
             {children}
-        </svg>
+            <span class="
+                absolute top-full left-1/2 -translate-x-1/2 mt-2
+                px-2 py-1 rounded-md bg-gray-900 text-white text-xs font-medium
+                opacity-0 group-hover:opacity-100 transition-opacity duration-200
+                pointer-events-none whitespace-nowrap
+                border border-white/10 shadow-lg
+                z-50
+            ">
+                {text}
+            </span>
+        </div>
     }
 }
 
-fn filled_icon(children: impl IntoView, class: &'static str) -> impl IntoView {
-    view! {
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class=class
-            viewBox="0 0 24 24"
-            fill="currentColor"
-        >
-            {children}
-        </svg>
-    }
+fn stroked_icon(children: impl IntoView, class: &'static str, text: &'static str) -> impl IntoView {
+    tooltip(
+        view! {
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class=format!("{} fill-none stroke-current", class)
+                viewBox="0 0 24 24"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            >
+                {children}
+            </svg>
+        },
+        text,
+    )
+}
+
+fn filled_icon(children: impl IntoView, class: &'static str, text: &'static str) -> impl IntoView {
+    tooltip(
+        view! {
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class=class
+                viewBox="0 0 24 24"
+                fill="currentColor"
+            >
+                {children}
+            </svg>
+        },
+        text,
+    )
 }
 
 // ─── Optional: Keep your existing SearchIcon as an example ────────────────
@@ -34,6 +58,7 @@ pub fn SearchIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/> },
         "h-5 w-5",
+        "Search",
     )
 }
 
@@ -42,12 +67,17 @@ pub fn DownloadIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/> },
         "h-5 w-5",
+        "Download",
     )
 }
 
 #[component]
 pub fn PlayIcon() -> impl IntoView {
-    stroked_icon(view! { <polygon points="5,3 19,12 5,21"/> }, "h-6 w-6")
+    stroked_icon(
+        view! { <polygon points="5,3 19,12 5,21"/> },
+        "h-6 w-6",
+        "Play",
+    )
 }
 
 #[component]
@@ -55,6 +85,7 @@ pub fn PauseIcon() -> impl IntoView {
     stroked_icon(
         view! { <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/> },
         "h-6 w-6",
+        "Pause",
     )
 }
 
@@ -63,6 +94,7 @@ pub fn ClockIcon() -> impl IntoView {
     stroked_icon(
         view! { <circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/> },
         "h-4 w-4",
+        "Clock",
     )
 }
 
@@ -71,17 +103,26 @@ pub fn DeleteIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/> },
         "h-5 w-5",
+        "Delete",
     )
 }
 
 #[component]
 pub fn UpArrow() -> impl IntoView {
-    stroked_icon(view! { <polyline points="18,15 12,9 6,15"/> }, "h-4 w-4")
+    stroked_icon(
+        view! { <polyline points="18,15 12,9 6,15"/> },
+        "h-4 w-4",
+        "Go Up",
+    )
 }
 
 #[component]
 pub fn DownArrow() -> impl IntoView {
-    stroked_icon(view! { <polyline points="6,9 12,15 18,9"/> }, "h-4 w-4")
+    stroked_icon(
+        view! { <polyline points="6,9 12,15 18,9"/> },
+        "h-4 w-4",
+        "Go Down",
+    )
 }
 
 #[component]
@@ -89,6 +130,7 @@ pub fn SortIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4"/> },
         "h-5 w-5",
+        "Sort Items",
     )
 }
 
@@ -97,6 +139,7 @@ pub fn VolumeIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/> },
         "h-5 w-5",
+        "Volume",
     )
 }
 
@@ -105,6 +148,7 @@ pub fn MuteIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd"/><path d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/> },
         "h-5 w-5",
+        "Mute",
     )
 }
 
@@ -113,6 +157,7 @@ pub fn FullscreenIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/> },
         "h-5 w-5",
+        "Full Screen",
     )
 }
 
@@ -121,6 +166,7 @@ pub fn FullscreenExitIcon() -> impl IntoView {
     stroked_icon(
         view! { <path d="M9 9V4M9 4H4M9 4l5 5M15 15V20M15 20h5M15 20l-5-5M9 15v5M9 15H4M9 15l5 5M15 9V4M15 4h5M15 4l-5 5"/> },
         "h-5 w-5",
+        "Full Screen Exit",
     )
 }
 
@@ -307,6 +353,7 @@ pub fn XIcon() -> impl IntoView {
     stroked_icon(
         view! { <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /> },
         "h-5 w-5",
+        "Cancel",
     )
 }
 
@@ -322,6 +369,7 @@ pub fn MovieIcon() -> impl IntoView {
             <circle cx="6" cy="4" r="1.5" fill="#0c0b1a" />
         },
         "w-6 h-6 text-amber-400",
+        "Movie",
     )
 }
 
@@ -334,6 +382,7 @@ pub fn SeriesIcon() -> impl IntoView {
             <path d="M10 8.5v5l5-2.5z" fill="#0c0b1a" />
         },
         "w-6 h-6 text-purple-400",
+        "Series",
     )
 }
 
@@ -348,6 +397,7 @@ pub fn AudioIcon() -> impl IntoView {
             <circle cx="17.5" cy="17" r="0.8" fill="#0c0b1a" />
         },
         "w-6 h-6 text-cyan-400",
+        "Audio",
     )
 }
 
@@ -376,17 +426,26 @@ pub fn ViewAllIcon() -> impl IntoView {
             <rect x="14" y="14" width="7" height="7" rx="1" />
         },
         "w-5 h-5 text-gray-400 group-hover:text-white transition-colors",
+        "Show All",
     )
 }
 
 #[component]
 pub fn PrevPageIcon() -> impl IntoView {
-    stroked_icon(view! { <polyline points="9 6 15 12 9 18" /> }, "w-5 h-5")
+    stroked_icon(
+        view! { <polyline points="9 6 15 12 9 18" /> },
+        "w-5 h-5",
+        "Previous",
+    )
 }
 
 #[component]
 pub fn NextPageIcon() -> impl IntoView {
-    stroked_icon(view! { <polyline points="15 6 9 12 15 18" /> }, "w-5 h-5")
+    stroked_icon(
+        view! { <polyline points="15 6 9 12 15 18" /> },
+        "w-5 h-5",
+        "Next",
+    )
 }
 
 #[component]
@@ -403,6 +462,7 @@ pub fn LoadingIcon() -> impl IntoView {
             />
         },
         "h-8 w-8 animate-spin text-cyan-400",
+        "Loading",
     )
 }
 
@@ -413,6 +473,7 @@ pub fn RetryIcon() -> impl IntoView {
             <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9h-4m4 0v4" />
         },
         "h-6 w-6 text-gray-400 hover:text-white transition-colors",
+        "Retry",
     )
 }
 
@@ -425,6 +486,7 @@ pub fn ErrorIcon() -> impl IntoView {
             <circle cx="12" cy="16" r="0.5" fill="currentColor" />
         },
         "h-6 w-6 text-red-400",
+        "Something Went Wrong",
     )
 }
 
@@ -461,6 +523,7 @@ pub fn SettingsIcon() -> impl IntoView {
             </>
         },
         "h-5 w-5 text-gray-400 hover:text-white transition-colors",
+        "Settings",
     )
 }
 
@@ -473,5 +536,6 @@ pub fn UploadIcon() -> impl IntoView {
             <path d="M9 15l3-3 3 3" />
         },
         "h-5 w-5 text-gray-400 hover:text-white transition-colors",
+        "Upload",
     )
 }
