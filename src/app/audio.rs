@@ -1,6 +1,7 @@
 use crate::app::{
     common::{PosterImg, PosterImgProps},
     icons::{AudioIcon, MusicPosterSvg},
+    mockary::mock_audio_groups,
     model::{self, AudioGroup, MediaType},
     view_schema::{
         CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
@@ -92,11 +93,19 @@ impl InfoView for AudioGroup {
 pub async fn fetch_audio_groups(
     offset: usize,
     size: usize,
+    search_query: Option<String>,
 ) -> Result<Vec<model::AudioGroup>, ServerFnError> {
     use crate::app::delay;
-    use crate::app::mockary;
     delay(300).await;
-    let list = mockary::mock_audio_groups();
+
+    let list = match search_query {
+        None => mock_audio_groups(),
+        Some(pat) => mock_audio_groups()
+            .into_iter()
+            .filter(|x| x.title.contains(&pat))
+            .collect(),
+    };
+
     let size = size.clamp(0, list.len());
     let offset = offset.clamp(0, list.len() - size);
     let end = (offset + size).clamp(0, list.len());

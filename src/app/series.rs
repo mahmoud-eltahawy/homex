@@ -110,11 +110,21 @@ pub async fn fetch_season(series_id: i64, season_number: u32) -> Result<Season, 
 }
 
 #[server]
-pub async fn fetch_series(offset: usize, size: usize) -> Result<Vec<Series>, ServerFnError> {
+pub async fn fetch_series(
+    offset: usize,
+    size: usize,
+    search_query: Option<String>,
+) -> Result<Vec<Series>, ServerFnError> {
     use crate::app::mockary::mock_series;
     delay(300).await;
 
-    let list = mock_series();
+    let list = match search_query {
+        None => mock_series(),
+        Some(pat) => mock_series()
+            .into_iter()
+            .filter(|x| x.title.contains(&pat))
+            .collect(),
+    };
     let size = size.clamp(0, list.len());
     let offset = offset.clamp(0, list.len() - size);
     let end = (offset + size).clamp(0, list.len());

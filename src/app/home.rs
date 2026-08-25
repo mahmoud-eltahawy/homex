@@ -26,7 +26,7 @@ impl LazyRoute for HomePage {
         let offset = RwSignal::new(0usize);
         let resource = Resource::new(
             move || offset.get(),
-            async |offset| fetch_movies(offset, MEDIA_LIST_SIZE).await,
+            async |offset| fetch_movies(offset, MEDIA_LIST_SIZE, None).await,
         );
         let count = Resource::new(|| (), async |_| fetch_movies_count().await);
         let movies = MediaLoaderProps {
@@ -38,7 +38,7 @@ impl LazyRoute for HomePage {
         let offset = RwSignal::new(0);
         let resource = Resource::new(
             move || offset.get(),
-            async |offset| fetch_series(offset, MEDIA_LIST_SIZE).await,
+            async |offset| fetch_series(offset, MEDIA_LIST_SIZE, None).await,
         );
         let count = Resource::new(|| (), async |_| fetch_series_count().await);
         let series = MediaLoaderProps {
@@ -50,7 +50,7 @@ impl LazyRoute for HomePage {
         let offset = RwSignal::new(0);
         let resource = Resource::new(
             move || offset.get(),
-            async |offset| fetch_audio_groups(offset, MEDIA_LIST_SIZE).await,
+            async |offset| fetch_audio_groups(offset, MEDIA_LIST_SIZE, None).await,
         );
         let count = Resource::new(|| (), async |_| fetch_audio_groups_count().await);
         let audio = MediaLoaderProps {

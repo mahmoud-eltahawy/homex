@@ -2,6 +2,7 @@ use super::model::MediaType;
 use crate::app::{
     common::{PosterImg, PosterImgProps},
     icons::{ClockIcon, MovieIcon, MoviePosterSvg},
+    mockary::mock_movies,
     model::Movie,
     view_schema::{
         CardImageView, Href, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView,
@@ -98,11 +99,22 @@ impl InfoView for Movie {
 }
 
 #[server]
-pub async fn fetch_movies(offset: usize, size: usize) -> Result<Vec<Movie>, ServerFnError> {
+pub async fn fetch_movies(
+    offset: usize,
+    size: usize,
+    search_query: Option<String>,
+) -> Result<Vec<Movie>, ServerFnError> {
     use crate::app::delay;
-    use crate::app::mockary;
     delay(300).await;
-    let list = mockary::mock_movies();
+
+    let list = match search_query {
+        None => mock_movies(),
+        Some(pat) => mock_movies()
+            .into_iter()
+            .filter(|x| x.title.contains(&pat))
+            .collect(),
+    };
+
     let size = size.clamp(0, list.len());
     let offset = offset.clamp(0, list.len() - size);
     let end = (offset + size).clamp(0, list.len());
