@@ -88,22 +88,6 @@ impl LazyRoute for HomePage {
 }
 
 #[component]
-pub fn HomeHero() -> impl IntoView {
-    view! {
-        <div class="py-12 sm:py-16 md:py-20 lg:py-24 text-center">
-            <h1 class="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight leading-[1.1]">
-                <span class="bg-gradient-to-r from-cyan-200 via-blue-300 to-indigo-400 bg-clip-text text-transparent">"سينماك"</span>
-                <br class="sm:hidden"/>
-                <span class="text-white">" الشخصية"</span>
-            </h1>
-            <p class="text-gray-400 text-base sm:text-lg md:text-xl max-w-2xl mx-auto mt-4 leading-relaxed">
-                "شاهد وحمّل مجموعتك من الأفلام والمسلسلات والمجموعات الصوتية من أي مكان في منزلك."
-            </p>
-        </div>
-    }
-}
-
-#[component]
 fn MediaSection<C>(
     items: Vec<C>,
     items_offset: RwSignal<usize>,
