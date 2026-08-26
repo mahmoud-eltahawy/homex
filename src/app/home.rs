@@ -3,7 +3,6 @@ use std::future::Future;
 
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
-    common::CardsLoading,
     icons::{EmptyStateIcon, ViewAllIcon},
     model::{AudioGroup, Movie, Series},
     movies::{fetch_movies, fetch_movies_count},
@@ -16,7 +15,7 @@ use leptos::{either::Either, prelude::*};
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{de::DeserializeOwned, Serialize};
 
-impl<T> MediaLoaderProps<T>
+impl<T> MediaSectionProps<T>
 where
     T: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
@@ -39,7 +38,7 @@ where
             }
         };
 
-        let resource = Resource::new(
+        let items = Resource::new(
             resource_trigger,
             move |(folded, offset, search_query)| async move {
                 if !folded {
@@ -53,7 +52,7 @@ where
         Self {
             folded,
             offset,
-            resource,
+            items,
             count,
         }
     }
@@ -61,9 +60,9 @@ where
 
 pub struct HomePage {
     search_query: RwSignal<Option<String>>,
-    movies: MediaLoaderProps<Movie>,
-    series: MediaLoaderProps<Series>,
-    audio: MediaLoaderProps<AudioGroup>,
+    movies: MediaSectionProps<Movie>,
+    series: MediaSectionProps<Series>,
+    audio: MediaSectionProps<AudioGroup>,
 }
 
 const MEDIA_LIST_SIZE: usize = 6;
@@ -72,10 +71,10 @@ const MEDIA_LIST_SIZE: usize = 6;
 impl LazyRoute for HomePage {
     fn data() -> Self {
         let search_query = RwSignal::new(None);
-        let movies = MediaLoaderProps::new(search_query, fetch_movies, fetch_movies_count);
-        let series = MediaLoaderProps::new(search_query, fetch_series, fetch_series_count);
+        let movies = MediaSectionProps::new(search_query, fetch_movies, fetch_movies_count);
+        let series = MediaSectionProps::new(search_query, fetch_series, fetch_series_count);
         let audio =
-            MediaLoaderProps::new(search_query, fetch_audio_groups, fetch_audio_groups_count);
+            MediaSectionProps::new(search_query, fetch_audio_groups, fetch_audio_groups_count);
 
         Self {
             search_query,
@@ -105,11 +104,11 @@ impl LazyRoute for HomePage {
                         offset_reset
                     />
                     <hr class="border-t border-white/5 my-10 md:my-12" />
-                    {MediaLoader(movies)}
+                    {MediaSection(movies)}
                     <hr class="border-t border-white/5 my-10 md:my-12" />
-                    {MediaLoader(series)}
+                    {MediaSection(series)}
                     <hr class="border-t border-white/5 my-10 md:my-12" />
-                    {MediaLoader(audio)}
+                    {MediaSection(audio)}
                 </div>
             </div>
         }
@@ -120,12 +119,12 @@ impl LazyRoute for HomePage {
 #[component]
 fn MediaSection<C>(
     folded: RwSignal<bool>,
-    items: Vec<C>,
-    items_offset: RwSignal<usize>,
-    items_count: Resource<Result<usize, ServerFnError>>,
+    items: Resource<Result<Vec<C>, ServerFnError>>,
+    offset: RwSignal<usize>,
+    count: Resource<Result<usize, ServerFnError>>,
 ) -> impl IntoView
 where
-    C: Card + Send + Sync + Clone + 'static,
+    C: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     let media_type = C::media_type();
 
@@ -136,32 +135,31 @@ where
         href: media_type.listing_href(),
     };
     let pagination_adapter = move |count| PaginationControlsProps {
-        offset: items_offset,
+        offset,
         page_size: MEDIA_LIST_SIZE,
         count,
         window_size: 5,
     };
-    let foldable = {
-        let items = items.clone();
-        move || {
-            (!folded.get()).then_some(view! {
-                <SectionContent items=items.clone() />
-                <ResourceView
-                    resource=items_count
-                    view_fn=PaginationControls
-                    adapter=pagination_adapter
-                />
-            })
-        }
-    };
+    let content_adapter = move |items| SectionContentProps { items };
     view! {
         <section class="bg-white/5 rounded-2xl p-4 md:p-6">
             <ResourceView
-                resource=items_count
+                resource=count
                 view_fn=SectionHeader
                 adapter=header_adapter
             />
-            {foldable}
+            <Show when=move || !folded.get()>
+                <ResourceView
+                    resource=items
+                    view_fn=SectionContent
+                    adapter=content_adapter
+                />
+                <ResourceView
+                    resource=count
+                    view_fn=PaginationControls
+                    adapter=pagination_adapter
+                />
+            </Show>
         </section>
     }
 }
@@ -227,31 +225,4 @@ fn SectionContent<C: Card + 'static>(items: Vec<C>) -> impl IntoView {
             <span class="text-white/20 text-sm font-mono">0</span>
         </div>
     })
-}
-
-#[component]
-fn MediaLoader<T>(
-    resource: Resource<Result<Vec<T>, ServerFnError>>,
-    offset: RwSignal<usize>,
-    folded: RwSignal<bool>,
-    count: Resource<Result<usize, ServerFnError>>,
-) -> impl IntoView
-where
-    T: Card + Send + Sync + Serialize + DeserializeOwned + Clone + 'static,
-{
-    let adapter = move |items: Vec<T>| MediaSectionProps {
-        folded,
-        items,
-        items_offset: offset,
-        items_count: count,
-    };
-
-    view! {
-        <ResourceView
-            resource={resource}
-            view_fn={MediaSection}
-            adapter={adapter}
-            fallback={CardsLoading}
-        />
-    }
 }
