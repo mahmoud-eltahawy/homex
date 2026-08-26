@@ -25,9 +25,6 @@ impl MediaFile {
             format!("{} BYTE", bytes)
         }
     }
-}
-
-impl MediaFile {
     pub fn human_readable_duration(&self) -> String {
         let secs = self.duration;
         let hours = secs / 3600;
@@ -47,6 +44,16 @@ impl MediaFile {
 pub struct Movie {
     pub id: u64,
     pub title: String,
+    pub poster: Option<String>,
+    pub description: Option<String>,
+    pub chapters: Vec<MovieChapter>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MovieChapter {
+    pub id: u64,
+    pub number: u8,
+    pub title: Option<String>,
     pub poster: Option<String>,
     pub description: Option<String>,
     pub file: MediaFile,

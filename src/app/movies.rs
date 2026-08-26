@@ -1,7 +1,7 @@
 use super::model::MediaType;
 use crate::app::{
     common::{PosterImg, PosterImgProps},
-    icons::{ClockIcon, MovieIcon, MoviePosterSvg},
+    icons::{MovieIcon, MoviePosterSvg},
     model::Movie,
     view_schema::{
         CardImageView, IconView, InfoView, MediaTypeT, OverPosterView, PosterSvgView, PosterView,
@@ -43,14 +43,14 @@ impl PosterView for Movie {
 impl OverPosterView for Movie {
     fn over_poster(self) -> impl IntoView {
         let title = self.title.to_string();
-        let duration_display = self.file.human_readable_duration();
+        // let duration_display = self.file.human_readable_duration();
         view! {
             <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4">
                 <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
                     <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">{title}</h3>
-                    <div class="flex items-center gap-2 mt-1 text-gray-300 text-sm">
-                        <span class="flex items-center"><ClockIcon/>{duration_display}</span>
-                    </div>
+                    // <div class="flex items-center gap-2 mt-1 text-gray-300 text-sm">
+                    //     <span class="flex items-center"><ClockIcon/>{duration_display}</span>
+                    // </div>
                 </div>
             </div>
         }
@@ -74,11 +74,11 @@ impl CardImageView for Movie {
 impl InfoView for Movie {
     fn info_view(self) -> impl IntoView {
         let title = self.title.to_string();
-        let size = self.file.human_readable_size();
+        // let size = self.file.human_readable_size();
         view! {
             <div class="p-4 flex flex-col gap-1">
                 <h3 class="text-white font-semibold truncate text-sm">{title}</h3>
-                <h4 class="text-white font-semibold truncate text-sm">{size}</h4>
+                // <h4 class="text-white font-semibold truncate text-sm">{size}</h4>
             </div>
         }
     }

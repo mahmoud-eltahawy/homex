@@ -1,4 +1,6 @@
-use crate::app::model::{AudioGroup, Episode, MediaFile, Movie, Season, SeasonSummary, Series};
+use crate::app::model::{
+    AudioGroup, Episode, MediaFile, Movie, MovieChapter, Season, SeasonSummary, Series,
+};
 pub const TEST_VIDEO: &str = "https://www.w3schools.com/html/mov_bbb.mp4";
 
 const MOCK_SIZE: usize = 200;
@@ -106,56 +108,115 @@ pub fn fake_media_file() -> MediaFile {
     }
 }
 
-pub(crate) fn mock_movies() -> Vec<Movie> {
+pub fn mock_movies() -> Vec<Movie> {
     [
         Movie {
             id: 1,
             title: "Inception".into(),
             poster: Some("https://picsum.photos/seed/inception/300/450".into()),
             description: Some("لص يسرق أسرار الشركات من خلال تقنية مشاركة الأحلام.".into()),
-            file: fake_media_file(),
+            chapters: vec![
+                MovieChapter {
+                    id: 1,
+                    number: 0,
+                    title: None,
+                    poster: None,
+                    description: None,
+                    file: fake_media_file(),
+                },
+                MovieChapter {
+                    id: 2,
+                    number: 1,
+                    title: None,
+                    poster: None,
+                    description: None,
+                    file: fake_media_file(),
+                },
+            ],
         },
         Movie {
             id: 2,
             title: "The Matrix".into(),
             poster: Some("https://picsum.photos/seed/matrix/300/450".into()),
             description: Some("هاكر كمبيوتر يكتشف حقيقة الواقع.".into()),
-            file: fake_media_file(),
+            chapters: vec![MovieChapter {
+                id: 1,
+                number: 1,
+                title: None,
+                poster: None,
+                description: None,
+                file: fake_media_file(),
+            }],
         },
         Movie {
             id: 3,
             title: "Interstellar".into(),
             poster: Some("https://picsum.photos/seed/interstellar/300/450".into()),
             description: Some("فريق من المستكشفين يسافرون عبر ثقب دودي في الفضاء.".into()),
-            file: fake_media_file(),
+            chapters: vec![MovieChapter {
+                id: 1,
+                number: 1,
+                title: None,
+                poster: None,
+                description: None,
+                file: fake_media_file(),
+            }],
         },
         Movie {
             id: 4,
             title: "The Dark Knight".into(),
             poster: Some("https://picsum.photos/seed/darkknight/300/450".into()),
             description: Some("عندما يهدد الجوكر مدينة غوثام بالدمار.".into()),
-            file: fake_media_file(),
+            chapters: vec![MovieChapter {
+                id: 1,
+                number: 1,
+                title: None,
+                poster: None,
+                description: None,
+                file: fake_media_file(),
+            }],
         },
         Movie {
             id: 5,
             title: "Pulp Fiction".into(),
             poster: Some("https://picsum.photos/seed/pulpfiction/300/450".into()),
             description: Some("تتشابك حياة اثنين من القتلة وملاكم وزوجين من اللصوص.".into()),
-            file: fake_media_file(),
+            chapters: vec![MovieChapter {
+                id: 1,
+                number: 1,
+                title: None,
+                poster: None,
+                description: None,
+                file: fake_media_file(),
+            }],
         },
         Movie {
             id: 6,
             title: "Hateful eight".into(),
             poster: None,
             description: Some("some description".into()),
-            file: fake_media_file(),
+            chapters: vec![MovieChapter {
+                id: 1,
+                number: 1,
+                title: None,
+                poster: None,
+                description: None,
+                file: fake_media_file(),
+            }],
         },
         Movie {
             id: 7,
             title: "Kill Bill".into(),
             poster: None,
             description: Some("some description".into()),
-            file: fake_media_file(),
+            chapters: vec![MovieChapter {
+                id: 1,
+                number: 1,
+                title: None,
+                poster: None,
+                description: None,
+                file: fake_media_file(),
+            }],
         },
     ]
     .into_iter()
