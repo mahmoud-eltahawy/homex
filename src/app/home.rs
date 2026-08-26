@@ -1,4 +1,4 @@
-use crate::app::search::SearchBar;
+use crate::app::{common::CardsLoading, search::SearchBar};
 use std::future::Future;
 
 use crate::app::{
@@ -153,6 +153,7 @@ where
                         resource=items
                         view_fn=SectionContent
                         adapter=content_adapter
+                        fallback=CardsLoading
                     />
                     <ResourceView
                         resource=count
