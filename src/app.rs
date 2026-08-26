@@ -26,10 +26,12 @@ mod model;
 mod movies;
 mod pagination;
 mod resource_view;
+mod search;
 mod series;
 mod settings;
 mod upload;
 mod video_player;
+
 //TODO : DELETE this
 #[cfg(feature = "ssr")]
 mod mockary;

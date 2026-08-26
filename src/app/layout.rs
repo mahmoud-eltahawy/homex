@@ -1,12 +1,9 @@
 use crate::app::{
     icons::{AudioIcon, MediaCubeLogo, MovieIcon, SeriesIcon, SettingsIcon, UploadIcon},
-    layout::search::SearchBox,
     model::MediaType,
 };
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
-
-mod search;
 
 #[component]
 pub fn Layout() -> impl IntoView {
@@ -28,14 +25,12 @@ pub fn Layout() -> impl IntoView {
 
 #[component]
 fn Navbar() -> impl IntoView {
-    let search_term = RwSignal::new(String::new());
-    let search_open = RwSignal::new(false);
     view! {
         <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex items-center justify-between h-16 md:h-20">
                     <Brand/>
-                    <DesktopNavLinks search_term=search_term search_open=search_open/>
+                    <DesktopNavLinks/>
                 </div>
             </div>
         </nav>
@@ -52,10 +47,9 @@ fn Brand() -> impl IntoView {
 }
 
 #[component]
-fn DesktopNavLinks(search_term: RwSignal<String>, search_open: RwSignal<bool>) -> impl IntoView {
+fn DesktopNavLinks() -> impl IntoView {
     view! {
         <div class="hidden md:flex items-center gap-2">
-            <SearchBox search_term=search_term search_open=search_open/>
             <NavLink href=MediaType::Movie.listing_href() icon=MovieIcon />
             <NavLink href=MediaType::Series.listing_href() icon=SeriesIcon />
             <NavLink href=MediaType::AudioGroup.listing_href() icon=AudioIcon />

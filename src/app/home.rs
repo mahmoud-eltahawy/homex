@@ -1,3 +1,4 @@
+use crate::app::search::SearchBar;
 use std::future::Future;
 
 use crate::app::{
@@ -20,6 +21,7 @@ where
     T: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     fn new<Fut1, Fut2>(
+        search_query: RwSignal<Option<String>>,
         data_fn: impl Fn(usize, usize, Option<String>) -> Fut1 + Send + Sync + 'static,
         count_fn: impl Fn(Option<String>) -> Fut2 + Send + Sync + 'static,
     ) -> Self
@@ -29,8 +31,8 @@ where
     {
         let offset = RwSignal::new(0usize);
         let resource = Resource::new(
-            move || offset.get(),
-            move |offset| data_fn(offset, MEDIA_LIST_SIZE, None),
+            move || (offset.get(), search_query.get()),
+            move |(offset, search_query)| data_fn(offset, MEDIA_LIST_SIZE, search_query),
         );
         let count = Resource::new(|| None, count_fn);
         Self {
@@ -42,6 +44,7 @@ where
 }
 
 pub struct HomePage {
+    search_query: RwSignal<Option<String>>,
     movies: MediaLoaderProps<Movie>,
     series: MediaLoaderProps<Series>,
     audio: MediaLoaderProps<AudioGroup>,
@@ -52,11 +55,14 @@ const MEDIA_LIST_SIZE: usize = 6;
 #[lazy_route]
 impl LazyRoute for HomePage {
     fn data() -> Self {
-        let movies = MediaLoaderProps::new(fetch_movies, fetch_movies_count);
-        let series = MediaLoaderProps::new(fetch_series, fetch_series_count);
-        let audio = MediaLoaderProps::new(fetch_audio_groups, fetch_audio_groups_count);
+        let search_query = RwSignal::new(None);
+        let movies = MediaLoaderProps::new(search_query, fetch_movies, fetch_movies_count);
+        let series = MediaLoaderProps::new(search_query, fetch_series, fetch_series_count);
+        let audio =
+            MediaLoaderProps::new(search_query, fetch_audio_groups, fetch_audio_groups_count);
 
         Self {
+            search_query,
             movies,
             series,
             audio,
@@ -65,13 +71,24 @@ impl LazyRoute for HomePage {
 
     fn view(this: Self) -> AnyView {
         let HomePage {
+            search_query,
             movies,
             series,
             audio,
         } = this;
+        let offset_reset = move || {
+            movies.offset.set(0);
+            series.offset.set(0);
+            audio.offset.set(0);
+        };
         view! {
             <div class="min-h-screen bg-[#0c0b1a] text-white">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10">
+                    <SearchBar
+                        search_query
+                        offset_reset
+                    />
+                    <hr class="border-t border-white/5 my-10 md:my-12" />
                     {MediaLoader(movies)}
                     <hr class="border-t border-white/5 my-10 md:my-12" />
                     {MediaLoader(series)}
