@@ -32,23 +32,32 @@ where
     C: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     fn view(self) -> impl IntoView {
+        let ListingPage {
+            offset,
+            search_query,
+            data,
+            count,
+        } = self;
         let adapter = move |count| PaginationControlsProps {
-            offset: self.offset,
+            offset,
             count,
             window_size: 8,
             page_size: LISTING_PAGE_SIZE,
         };
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <SearchBar search_query=self.search_query offset_reset=move || self.offset.set(0)/>
+                <SearchBar
+                    search_query
+                    offset_reset=move || offset.set(0)
+                />
                 <ResourceView
-                    resource=self.data
+                    resource=data
                     view_fn=CardsList::cards_list
                     fallback=CardsLoading
                     adapter=|x| x
                 />
                 <ResourceView
-                    resource=self.count
+                    resource=count
                     view_fn=PaginationControls
                     adapter=adapter
                 />
