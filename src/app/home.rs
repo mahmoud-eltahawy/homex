@@ -98,16 +98,13 @@ impl LazyRoute for HomePage {
         };
         view! {
             <div class="min-h-screen bg-[#0c0b1a] text-white">
-                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10 flex flex-col">
                     <SearchBar
                         search_query
                         offset_reset
                     />
-                    <hr class="border-t border-white/5 my-10 md:my-12" />
                     {MediaSection(movies)}
-                    <hr class="border-t border-white/5 my-10 md:my-12" />
                     {MediaSection(series)}
-                    <hr class="border-t border-white/5 my-10 md:my-12" />
                     {MediaSection(audio)}
                 </div>
             </div>
@@ -141,26 +138,30 @@ where
         window_size: 5,
     };
     let content_adapter = move |items| SectionContentProps { items };
+    let order = move || if folded.get() { "1" } else { "0" };
     view! {
-        <section class="bg-white/5 rounded-2xl p-4 md:p-6">
-            <ResourceView
-                resource=count
-                view_fn=SectionHeader
-                adapter=header_adapter
-            />
-            <Show when=move || !folded.get()>
-                <ResourceView
-                    resource=items
-                    view_fn=SectionContent
-                    adapter=content_adapter
-                />
+        <div style:order=order >
+            <hr class="border-t border-white/5 my-10 md:my-12" />
+            <section class="bg-white/5 rounded-2xl p-4 md:p-6">
                 <ResourceView
                     resource=count
-                    view_fn=PaginationControls
-                    adapter=pagination_adapter
+                    view_fn=SectionHeader
+                    adapter=header_adapter
                 />
-            </Show>
-        </section>
+                <Show when=move || !folded.get()>
+                    <ResourceView
+                        resource=items
+                        view_fn=SectionContent
+                        adapter=content_adapter
+                    />
+                    <ResourceView
+                        resource=count
+                        view_fn=PaginationControls
+                        adapter=pagination_adapter
+                    />
+                </Show>
+            </section>
+        </div>
     }
 }
 
