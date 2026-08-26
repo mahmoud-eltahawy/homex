@@ -29,13 +29,21 @@ where
         Fut1: Future<Output = Result<Vec<T>, ServerFnError>> + Send + 'static,
         Fut2: Future<Output = Result<usize, ServerFnError>> + Send + 'static,
     {
+        let folded = RwSignal::new(false);
         let offset = RwSignal::new(0usize);
-        let resource = Resource::new(
-            move || (offset.get(), search_query.get()),
-            move |(offset, search_query)| data_fn(offset, MEDIA_LIST_SIZE, search_query),
-        );
+        let resource_trigger = move || {
+            if !folded.get() {
+                (offset.get(), search_query.get())
+            } else {
+                (0, None)
+            }
+        };
+        let resource = Resource::new(resource_trigger, move |(offset, search_query)| {
+            data_fn(offset, MEDIA_LIST_SIZE, search_query)
+        });
         let count = Resource::new(|| None, count_fn);
         Self {
+            folded,
             offset,
             resource,
             count,
@@ -103,16 +111,18 @@ impl LazyRoute for HomePage {
 
 #[component]
 fn MediaSection<C>(
+    folded: RwSignal<bool>,
     items: Vec<C>,
     items_offset: RwSignal<usize>,
     items_count: Resource<Result<usize, ServerFnError>>,
 ) -> impl IntoView
 where
-    C: Card + 'static,
+    C: Card + Send + Sync + Clone + 'static,
 {
     let media_type = C::media_type();
 
     let header_adapter = move |count| SectionHeaderProps {
+        folded,
         icon: C::icon(),
         count,
         href: media_type.listing_href(),
@@ -123,6 +133,19 @@ where
         count,
         window_size: 5,
     };
+    let foldable = {
+        let items = items.clone();
+        move || {
+            (!folded.get()).then_some(view! {
+                <SectionContent items=items.clone() />
+                <ResourceView
+                    resource=items_count
+                    view_fn=PaginationControls
+                    adapter=pagination_adapter
+                />
+            })
+        }
+    };
     view! {
         <section class="bg-white/5 rounded-2xl p-4 md:p-6">
             <ResourceView
@@ -130,18 +153,18 @@ where
                 view_fn=SectionHeader
                 adapter=header_adapter
             />
-            <SectionContent items />
-            <ResourceView
-                resource=items_count
-                view_fn=PaginationControls
-                adapter=pagination_adapter
-            />
+            {foldable}
         </section>
     }
 }
 
 #[component]
-fn SectionHeader(icon: impl IntoView + 'static, count: usize, href: String) -> impl IntoView {
+fn SectionHeader(
+    icon: impl IntoView + 'static,
+    count: usize,
+    href: String,
+    folded: RwSignal<bool>,
+) -> impl IntoView {
     view! {
         <div class="flex items-center justify-between mb-6">
             <div class="flex items-center gap-3">
@@ -150,6 +173,7 @@ fn SectionHeader(icon: impl IntoView + 'static, count: usize, href: String) -> i
                     {count}
                 </span>
             </div>
+            <FoldButton folded/>
             <a
                 href=href
                 class="group p-1 rounded hover:bg-white/10 transition-colors"
@@ -158,6 +182,29 @@ fn SectionHeader(icon: impl IntoView + 'static, count: usize, href: String) -> i
                 <ViewAllIcon />
             </a>
         </div>
+    }
+}
+
+#[component]
+fn FoldButton(folded: RwSignal<bool>) -> impl IntoView {
+    let on_click = move |_| folded.update(|x| *x = !*x);
+    view! {
+        <button
+            on:click=on_click
+            class="p-1 rounded hover:bg-white/10 transition-colors"
+            aria-label="Toggle section"
+        >
+            <svg
+                class="w-5 h-5 transition-transform duration-200"
+                style=move || format!("transform: rotate({}deg)", if folded.get() { 180 } else { 0 })
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+        </button>
     }
 }
 
@@ -178,12 +225,14 @@ fn SectionContent<C: Card + 'static>(items: Vec<C>) -> impl IntoView {
 fn MediaLoader<T>(
     resource: Resource<Result<Vec<T>, ServerFnError>>,
     offset: RwSignal<usize>,
+    folded: RwSignal<bool>,
     count: Resource<Result<usize, ServerFnError>>,
 ) -> impl IntoView
 where
     T: Card + Send + Sync + Serialize + DeserializeOwned + Clone + 'static,
 {
     let adapter = move |items: Vec<T>| MediaSectionProps {
+        folded,
         items,
         items_offset: offset,
         items_count: count,
