@@ -1,7 +1,4 @@
-use crate::app::model::{
-    AudioGroup, DurationSeconds, Episode, FileSize, MediaFile, MediaId, Movie, Season,
-    SeasonSummary, Series,
-};
+use crate::app::model::{AudioGroup, Episode, MediaFile, Movie, Season, SeasonSummary, Series};
 pub const TEST_VIDEO: &str = "https://www.w3schools.com/html/mov_bbb.mp4";
 
 const MOCK_SIZE: usize = 200;
@@ -9,7 +6,7 @@ const MOCK_SIZE: usize = 200;
 pub fn mock_series() -> Vec<Series> {
     [
         Series {
-            id: MediaId(101),
+            id: 101,
             title: "Breaking Bad".into(),
             poster: Some("https://picsum.photos/seed/breakingbad/300/450".into()),
             description: Some("مدرس كيمياء يتحول إلى تاجر مخدرات.".into()),
@@ -26,7 +23,7 @@ pub fn mock_series() -> Vec<Series> {
             ],
         },
         Series {
-            id: MediaId(102),
+            id: 102,
             title: "Stranger Things".into(),
             poster: Some("https://picsum.photos/seed/strangerthings/300/450".into()),
             description: Some("مجموعة من الأطفال يكشفون أسرارًا خارقة في بلدتهم.".into()),
@@ -37,7 +34,7 @@ pub fn mock_series() -> Vec<Series> {
             }],
         },
         Series {
-            id: MediaId(103),
+            id: 103,
             title: "The Crown".into(),
             poster: Some("https://picsum.photos/seed/thecrown/300/450".into()),
             description: Some("عهد الملكة إليزابيث الثانية.".into()),
@@ -48,7 +45,7 @@ pub fn mock_series() -> Vec<Series> {
             }],
         },
         Series {
-            id: MediaId(104),
+            id: 104,
             title: "Game of Thrones".into(),
             poster: Some("https://picsum.photos/seed/got/300/450".into()),
             description: Some("عائلات نبيلة تتصارع على السيطرة على ويستروس.".into()),
@@ -59,7 +56,7 @@ pub fn mock_series() -> Vec<Series> {
             }],
         },
         Series {
-            id: MediaId(105),
+            id: 105,
             title: "Prison Break".into(),
             poster: None,
             description: None,
@@ -76,7 +73,7 @@ pub fn mock_series() -> Vec<Series> {
     .collect()
 }
 
-pub fn mock_season(series_id: usize, season_number: u32) -> Option<Season> {
+pub fn mock_season(series_id: u64, season_number: u32) -> Option<Season> {
     let episodes = match (series_id, season_number) {
         (101, 1) => vec![ep(1011, 1, 1), ep(1012, 1, 2), ep(1013, 1, 3)],
         (101, 2) => vec![ep(1014, 2, 1), ep(1015, 2, 2)],
@@ -97,78 +94,68 @@ pub fn ep(id: i64, season: u32, episode: u32) -> Episode {
         season,
         episode,
         file: fake_media_file(),
-        duration: fake_duration(3600), // 1 hour per episode
     }
 }
 
-pub(crate) fn fake_media_file() -> MediaFile {
+pub fn fake_media_file() -> MediaFile {
     MediaFile {
+        id: 0,
         path: TEST_VIDEO.into(),
-        size: FileSize(2_100_000_000), // ~2.1 GB
+        size: 2_100_000_000,
+        duration: 8880,
     }
-}
-
-pub(crate) fn fake_duration(seconds: u64) -> DurationSeconds {
-    DurationSeconds(seconds)
 }
 
 pub(crate) fn mock_movies() -> Vec<Movie> {
     [
         Movie {
-            id: MediaId(1),
+            id: 1,
             title: "Inception".into(),
             poster: Some("https://picsum.photos/seed/inception/300/450".into()),
             description: Some("لص يسرق أسرار الشركات من خلال تقنية مشاركة الأحلام.".into()),
             file: fake_media_file(),
-            duration: fake_duration(8880), // 2h28m
         },
         Movie {
-            id: MediaId(2),
+            id: 2,
             title: "The Matrix".into(),
             poster: Some("https://picsum.photos/seed/matrix/300/450".into()),
             description: Some("هاكر كمبيوتر يكتشف حقيقة الواقع.".into()),
             file: fake_media_file(),
-            duration: fake_duration(8160),
         },
         Movie {
-            id: MediaId(3),
+            id: 3,
             title: "Interstellar".into(),
             poster: Some("https://picsum.photos/seed/interstellar/300/450".into()),
             description: Some("فريق من المستكشفين يسافرون عبر ثقب دودي في الفضاء.".into()),
             file: fake_media_file(),
-            duration: fake_duration(10140),
         },
         Movie {
-            id: MediaId(4),
+            id: 4,
             title: "The Dark Knight".into(),
             poster: Some("https://picsum.photos/seed/darkknight/300/450".into()),
             description: Some("عندما يهدد الجوكر مدينة غوثام بالدمار.".into()),
             file: fake_media_file(),
-            duration: fake_duration(9120),
         },
         Movie {
-            id: MediaId(5),
+            id: 5,
             title: "Pulp Fiction".into(),
             poster: Some("https://picsum.photos/seed/pulpfiction/300/450".into()),
             description: Some("تتشابك حياة اثنين من القتلة وملاكم وزوجين من اللصوص.".into()),
             file: fake_media_file(),
-            duration: fake_duration(9240),
         },
         Movie {
-            id: MediaId(6),
+            id: 6,
             title: "Hateful eight".into(),
             poster: None,
             description: Some("some description".into()),
             file: fake_media_file(),
-            duration: fake_duration(9240),
         },
         Movie {
-            id: MediaId(7),
+            id: 7,
             title: "Kill Bill".into(),
             poster: None,
             description: Some("some description".into()),
             file: fake_media_file(),
-            duration: fake_duration(9240),
         },
     ]
     .into_iter()
@@ -180,21 +167,21 @@ pub(crate) fn mock_movies() -> Vec<Movie> {
 pub fn mock_audio_groups() -> Vec<AudioGroup> {
     [
         AudioGroup {
-            id: MediaId(401),
+            id: 401,
             title: "shakria songs".to_string(),
             poster: None,
             description: None,
             audios_count: 3,
         },
         AudioGroup {
-            id: MediaId(402),
+            id: 402,
             title: "rihhana songs".to_string(),
             poster: None,
             description: None,
             audios_count: 4,
         },
         AudioGroup {
-            id: MediaId(403),
+            id: 403,
             title: "amr diab songs".to_string(),
             poster: None,
             description: None,

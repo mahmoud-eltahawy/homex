@@ -3,7 +3,6 @@ use crate::app::{
     icons::{
         AudioIcon, DeleteIcon, DownArrow, MovieIcon, SeriesIcon, SortIcon, UpArrow, UploadIcon,
     },
-    model::MediaId,
     resource_view::ResourceView,
 };
 use leptos::{either::Either, prelude::*};
@@ -22,7 +21,7 @@ const ICON_BTN_CLASS: &str = "text-gray-400 hover:text-white transition disabled
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SeriesTitle {
-    pub id: MediaId,
+    pub id: u64,
     pub title: String,
 }
 
@@ -307,7 +306,7 @@ fn ExistingSeriesSelect(
                     >
                         <option value="" class="bg-gray-800">"-- اختر --"</option>
                         {series_list.iter().map(|series| view! {
-                            <option value={series.id.0.to_string()} class="bg-gray-800">{series.title.clone()}</option>
+                            <option value={series.id.to_string()} class="bg-gray-800">{series.title.clone()}</option>
                         }).collect_view()}
                     </select>
                 </div>

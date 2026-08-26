@@ -21,13 +21,8 @@ pub struct SeriesDetailPage {
 impl LazyRoute for SeriesDetailPage {
     fn data() -> Self {
         let params = use_params_map();
-        let id = move || {
-            params.with(|p| {
-                p.get("id")
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(0)
-            })
-        };
+        let id =
+            move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
 
         let selected_season = RwSignal::new(1);
 

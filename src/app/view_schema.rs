@@ -30,7 +30,7 @@ pub trait InfoView {
 }
 
 pub trait IdT {
-    fn id(&self) -> usize;
+    fn id(&self) -> u64;
 }
 
 pub trait Card: CardImageView + InfoView + MediaTypeT + IdT {

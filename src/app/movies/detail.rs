@@ -9,13 +9,13 @@ use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
 
 #[server]
-pub async fn fetch_movie_detail(id: usize) -> Result<model::Movie, ServerFnError> {
+pub async fn fetch_movie_detail(id: u64) -> Result<model::Movie, ServerFnError> {
     use crate::app::delay;
     use crate::app::mockary;
     delay(200).await;
     let list = mockary::mock_movies();
     list.into_iter()
-        .find(|m| m.id.0 == id)
+        .find(|m| m.id == id)
         .ok_or(ServerFnError::new("not found"))
 }
 
@@ -27,13 +27,8 @@ pub struct MovieDetailPage {
 impl LazyRoute for MovieDetailPage {
     fn data() -> Self {
         let params = use_params_map();
-        let id = move || {
-            params.with(|p| {
-                p.get("id")
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(0)
-            })
-        };
+        let id =
+            move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
 
         let movie = Resource::new(id, fetch_movie_detail);
         Self { movie }
@@ -108,8 +103,8 @@ fn DetailMetaBadge() -> impl IntoView {
 #[component]
 fn DetailInfo(data: Movie) -> impl IntoView {
     let title = data.title.to_string();
-    let duration = data.duration.human_readable();
-    let size = data.file.size.human_readable();
+    let duration = data.file.human_readable_duration();
+    let size = data.file.human_readable_size();
     let description = data.description.unwrap_or("لا يوجد وصف متاح.".to_string());
     let download = view! {
         <a

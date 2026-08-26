@@ -80,17 +80,17 @@ impl CardImageView for Series {
 }
 
 #[server]
-async fn fetch_series_detail(id: usize) -> Result<Series, ServerFnError> {
+async fn fetch_series_detail(id: u64) -> Result<Series, ServerFnError> {
     use crate::app::mockary::mock_series;
     delay(200).await;
     let list = mock_series();
     list.into_iter()
-        .find(|m| m.id.0 == id)
+        .find(|m| m.id == id)
         .ok_or(ServerFnError::new("not found"))
 }
 
 #[server]
-pub async fn fetch_season(series_id: usize, season_number: u32) -> Result<Season, ServerFnError> {
+pub async fn fetch_season(series_id: u64, season_number: u32) -> Result<Season, ServerFnError> {
     use crate::app::mockary::mock_season;
     delay(200).await;
     mock_season(series_id, season_number).ok_or(ServerFnError::new("season not found"))

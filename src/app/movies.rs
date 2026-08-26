@@ -43,7 +43,7 @@ impl PosterView for Movie {
 impl OverPosterView for Movie {
     fn over_poster(self) -> impl IntoView {
         let title = self.title.to_string();
-        let duration_display = self.duration.human_readable();
+        let duration_display = self.file.human_readable_duration();
         view! {
             <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4">
                 <div class="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
@@ -74,7 +74,7 @@ impl CardImageView for Movie {
 impl InfoView for Movie {
     fn info_view(self) -> impl IntoView {
         let title = self.title.to_string();
-        let size = self.file.size.human_readable();
+        let size = self.file.human_readable_size();
         view! {
             <div class="p-4 flex flex-col gap-1">
                 <h3 class="text-white font-semibold truncate text-sm">{title}</h3>

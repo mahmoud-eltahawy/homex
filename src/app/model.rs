@@ -1,72 +1,66 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 use crate::app::view_schema::IdT;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct MediaId(pub usize);
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MediaFile {
+    pub id: u64,
+    pub path: String,
+    pub size: u64,
+    pub duration: u64,
+}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FileSize(pub u64);
-
-impl FileSize {
-    pub fn human_readable(&self) -> String {
-        let bytes = self.0 as f64;
+impl MediaFile {
+    pub fn human_readable_size(&self) -> String {
+        let bytes = self.size as f64;
         if bytes >= 1_000_000_000.0 {
-            format!("{:.1} جيجابايت", bytes / 1_000_000_000.0)
+            format!("{:.1} GB", bytes / 1_000_000_000.0)
         } else if bytes >= 1_000_000.0 {
-            format!("{:.1} ميجابايت", bytes / 1_000_000.0)
+            format!("{:.1} MG", bytes / 1_000_000.0)
         } else if bytes >= 1_000.0 {
-            format!("{:.1} كيلوبايت", bytes / 1_000.0)
+            format!("{:.1} KB", bytes / 1_000.0)
         } else {
-            format!("{} بايت", bytes)
+            format!("{} BYTE", bytes)
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DurationSeconds(pub u64);
-
-impl DurationSeconds {
-    pub fn human_readable(&self) -> String {
-        let secs = self.0;
+impl MediaFile {
+    pub fn human_readable_duration(&self) -> String {
+        let secs = self.duration;
         let hours = secs / 3600;
         let minutes = (secs % 3600) / 60;
         let seconds = secs % 60;
         if hours > 0 {
-            format!("{} ساعة و{} دقيقة", hours, minutes)
+            format!("{} Hour And {} Minute", hours, minutes)
         } else if minutes > 0 {
-            format!("{} دقيقة", minutes)
+            format!("{} Minute", minutes)
         } else {
-            format!("{} ثانية", seconds)
+            format!("{} Second", seconds)
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MediaFile {
-    pub path: String,
-    pub size: FileSize,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Movie {
-    pub id: MediaId,
+    pub id: u64,
     pub title: String,
     pub poster: Option<String>,
     pub description: Option<String>,
     pub file: MediaFile,
-    pub duration: DurationSeconds,
 }
 
 impl IdT for Movie {
-    fn id(&self) -> usize {
-        self.id.0
+    fn id(&self) -> u64 {
+        self.id
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioGroup {
-    pub id: MediaId,
+    pub id: u64,
     pub title: String,
     pub poster: Option<String>,
     pub description: Option<String>,
@@ -74,8 +68,8 @@ pub struct AudioGroup {
 }
 
 impl IdT for AudioGroup {
-    fn id(&self) -> usize {
-        self.id.0
+    fn id(&self) -> u64 {
+        self.id
     }
 }
 
@@ -95,12 +89,12 @@ impl MediaType {
         }
         .to_string()
     }
-    pub fn detail_href(&self, id: usize) -> String {
+    pub fn detail_href(&self, id: u64) -> String {
         format!("{}/detail/{}", self.listing_href(), id)
     }
 }
 
-impl std::fmt::Display for MediaType {
+impl Display for MediaType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MediaType::Movie => write!(f, "movie"),
@@ -116,6 +110,7 @@ impl TryFrom<&str> for MediaType {
         match value.to_lowercase().as_str() {
             "movie" => Ok(MediaType::Movie),
             "series" => Ok(MediaType::Series),
+            "audio" => Ok(MediaType::AudioGroup),
             _ => Err("Media type must be 'movie' or 'series'"),
         }
     }
@@ -127,12 +122,11 @@ pub struct Episode {
     pub season: u32,
     pub episode: u32,
     pub file: MediaFile,
-    pub duration: DurationSeconds,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Series {
-    pub id: MediaId,
+    pub id: u64,
     pub title: String,
     pub poster: Option<String>,
     pub description: Option<String>,
@@ -141,8 +135,8 @@ pub struct Series {
 }
 
 impl IdT for Series {
-    fn id(&self) -> usize {
-        self.id.0
+    fn id(&self) -> u64 {
+        self.id
     }
 }
 
