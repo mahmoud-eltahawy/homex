@@ -119,7 +119,7 @@ pub async fn fetch_movies_count(search_query: Option<String>) -> Result<usize, S
         None => mock_movies(),
         Some(pat) => mock_movies()
             .into_iter()
-            .filter(|x| x.title.contains(&pat))
+            .filter(|x| x.title.to_lowercase().contains(&pat.to_lowercase()))
             .collect(),
     };
 

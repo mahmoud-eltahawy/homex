@@ -22,7 +22,7 @@ where
 {
     fn new<Fut1, Fut2>(
         search_query: RwSignal<Option<String>>,
-        data_fn: impl Fn(usize, usize, Option<String>) -> Fut1 + Send + Sync + 'static,
+        data_fn: impl Fn(usize, usize, Option<String>) -> Fut1 + Send + Sync + Copy + 'static,
         count_fn: impl Fn(Option<String>) -> Fut2 + Send + Sync + 'static,
     ) -> Self
     where
@@ -33,15 +33,23 @@ where
         let offset = RwSignal::new(0usize);
         let resource_trigger = move || {
             if !folded.get() {
-                (offset.get(), search_query.get())
+                (false, offset.get(), search_query.get())
             } else {
-                (0, None)
+                (true, 0, None)
             }
         };
-        let resource = Resource::new(resource_trigger, move |(offset, search_query)| {
-            data_fn(offset, MEDIA_LIST_SIZE, search_query)
-        });
-        let count = Resource::new(|| None, count_fn);
+
+        let resource = Resource::new(
+            resource_trigger,
+            move |(folded, offset, search_query)| async move {
+                if !folded {
+                    data_fn(offset, MEDIA_LIST_SIZE, search_query).await
+                } else {
+                    Ok(Vec::new())
+                }
+            },
+        );
+        let count = Resource::new(move || search_query.get(), count_fn);
         Self {
             folded,
             offset,

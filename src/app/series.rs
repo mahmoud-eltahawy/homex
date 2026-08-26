@@ -127,7 +127,7 @@ pub async fn fetch_series_count(search_query: Option<String>) -> Result<usize, S
         None => mock_series(),
         Some(pat) => mock_series()
             .into_iter()
-            .filter(|x| x.title.contains(&pat))
+            .filter(|x| x.title.to_lowercase().contains(&pat.to_lowercase()))
             .collect(),
     };
 

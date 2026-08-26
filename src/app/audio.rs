@@ -112,7 +112,7 @@ pub async fn fetch_audio_groups_count(
         None => mock_audio_groups(),
         Some(pat) => mock_audio_groups()
             .into_iter()
-            .filter(|x| x.title.contains(&pat))
+            .filter(|x| x.title.to_lowercase().contains(&pat.to_lowercase()))
             .collect(),
     };
 
