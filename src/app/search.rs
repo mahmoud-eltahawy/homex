@@ -52,23 +52,8 @@ where
         }
     };
 
-    let clear_button = move || {
-        (!input_value.get().is_empty())
-        .then_some(
-            view! {
-                <button
-                    on:click=clear_search
-                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                    aria-label="Clear search"
-                >
-                    <XIcon/>
-                </button>
-            }
-        )
-    };
-
     view! {
-        <div class="mb-6  md:mb-8 relative w-full max-w-md self-start">
+        <div class="mb-2 md:mb-4 relative w-full max-w-md mx-auto">
             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
                 <SearchIcon/>
             </span>
@@ -81,7 +66,15 @@ where
                 on:input=on_input
             />
 
-            {clear_button}
+            <Show when=move || !input_value.get().is_empty()>
+                <button
+                    on:click=clear_search
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                    aria-label="Clear search"
+                >
+                    <XIcon/>
+                </button>
+            </Show>
         </div>
     }
 }

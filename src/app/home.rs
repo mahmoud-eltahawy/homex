@@ -98,7 +98,7 @@ impl LazyRoute for HomePage {
         };
         view! {
             <div class="min-h-screen bg-[#0c0b1a] text-white">
-                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10 flex flex-col">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-6 flex flex-col">
                     <SearchBar
                         search_query
                         offset_reset
