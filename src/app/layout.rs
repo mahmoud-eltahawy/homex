@@ -5,7 +5,7 @@ use crate::app::{
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
-#[component]
+#[component(transparent)]
 pub fn Layout() -> impl IntoView {
     view! {
         <div
