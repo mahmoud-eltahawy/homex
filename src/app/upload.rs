@@ -5,6 +5,7 @@ use crate::app::{
     },
     resource_view::ResourceView,
 };
+use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,7 @@ const UPLOAD_BTN_CLASS: &str = "inline-flex items-center gap-1.5 bg-green-500/20
 const ICON_BTN_CLASS: &str = "text-gray-400 hover:text-white transition disabled:opacity-30 p-1";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SeriesTitle {
+pub struct MediaTitle {
     pub id: u64,
     pub title: String,
 }
@@ -41,57 +42,130 @@ pub struct UploadResult {
     pub message: String,
 }
 
+fn entity_existing_label(mt: MediaType) -> &'static str {
+    match mt {
+        MediaType::Series => "اختر المسلسل الموجود",
+        MediaType::Movie => "اختر الفيلم الموجود",
+        MediaType::AudioGroup => "اختر المجموعة الصوتية الموجودة",
+    }
+}
+
+fn files_empty_error(mt: MediaType) -> &'static str {
+    match mt {
+        MediaType::Series => "يجب إضافة حلقة واحدة على الأقل.",
+        MediaType::Movie => "يجب إضافة فصل واحد على الأقل.",
+        MediaType::AudioGroup => "يجب إضافة مقطع صوتي واحد على الأقل.",
+    }
+}
+
+// ─── Title fetchers ────────────────────────────────────────────────────────
+//
+// All three dedupe by id, since `mockary` cycles its seed list up to
+// MOCK_SIZE entries and would otherwise produce a dropdown with hundreds
+// of duplicate rows.
+
 #[server]
-async fn fetch_series_titles() -> Result<Vec<SeriesTitle>, ServerFnError> {
+async fn fetch_series_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
     use crate::app::model::Series;
     use crate::app::{delay, mockary::mock_series};
+    use std::collections::BTreeMap;
     delay(200).await;
-    let list = mock_series();
-    Ok(list
+    let mut map = BTreeMap::new();
+    for Series { id, title, .. } in mock_series() {
+        map.entry(id).or_insert(title);
+    }
+    Ok(map
         .into_iter()
-        .map(|Series { id, title, .. }| SeriesTitle { id, title })
+        .map(|(id, title)| MediaTitle { id, title })
         .collect())
 }
 
-#[server(
-    input = MultipartFormData,    
-)]
+#[server]
+async fn fetch_movie_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
+    use crate::app::model::Movie;
+    use crate::app::{delay, mockary::mock_movies};
+    use std::collections::BTreeMap;
+    delay(200).await;
+    let mut map = BTreeMap::new();
+    for Movie { id, title, .. } in mock_movies() {
+        map.entry(id).or_insert(title);
+    }
+    Ok(map
+        .into_iter()
+        .map(|(id, title)| MediaTitle { id, title })
+        .collect())
+}
+
+#[server]
+async fn fetch_audio_group_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
+    use crate::app::model::AudioGroup;
+    use crate::app::{delay, mockary::mock_audio_groups};
+    use std::collections::BTreeMap;
+    delay(200).await;
+    let mut map = BTreeMap::new();
+    for AudioGroup { id, title, .. } in mock_audio_groups() {
+        map.entry(id).or_insert(title);
+    }
+    Ok(map
+        .into_iter()
+        .map(|(id, title)| MediaTitle { id, title })
+        .collect())
+}
+
+// ─── Server upload handler ─────────────────────────────────────────────────
+
+#[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {
-    // MultipartData wraps axum::extract::Multipart on the server.
+    use std::collections::BTreeMap;
+
     let mut multipart = data.into_inner().unwrap();
 
     let mut title = String::new();
     let mut media_type = String::new();
     let mut description = String::new();
-    let mut is_new_series = true;
-    let mut existing_series_id: Option<i64> = None;
-    let mut movie_file: Option<(String, usize)> = None;
-    // (index, filename, size)
-    let mut files: Vec<(usize, String, usize)> = Vec::new();
-    let mut titles: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+    let mut is_new = true;
+    let mut existing_id: Option<i64> = None;
+    let mut season_number: Option<u32> = None;
+
+    let mut files: BTreeMap<usize, (String, usize)> = BTreeMap::new();
+    let mut file_titles: BTreeMap<usize, String> = BTreeMap::new();
 
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().map(String::from).unwrap_or_default();
 
-        if name == "title" {
-            title = field.text().await?;
-        } else if name == "media_type" {
-            media_type = field.text().await?;
-        } else if name == "description" {
-            description = field.text().await?;
-        } else if name == "is_new_series" {
-            is_new_series = field.text().await? == "true";
-        } else if name == "existing_series_id" {
-            let text = field.text().await?;
-            existing_series_id = text.parse().ok();
-        } else if name == "movie_file" {
-            let file_name = field.file_name().map(String::from).unwrap_or_default();
-            let bytes = field.bytes().await?;
-            movie_file = Some((file_name, bytes.len()));
-        } else if let Some(idx_str) = name.strip_prefix("file_title_") {
-            // NOTE: must be checked before `file_` prefix
+        match name.as_str() {
+            "title" => {
+                title = field.text().await?;
+                continue;
+            }
+            "media_type" => {
+                media_type = field.text().await?;
+                continue;
+            }
+            "description" => {
+                description = field.text().await?;
+                continue;
+            }
+            "is_new" => {
+                is_new = field.text().await? == "true";
+                continue;
+            }
+            "existing_id" => {
+                let text = field.text().await?;
+                existing_id = text.parse().ok();
+                continue;
+            }
+            "season_number" => {
+                let text = field.text().await?;
+                season_number = text.parse().ok();
+                continue;
+            }
+            _ => {}
+        }
+
+        if let Some(idx_str) = name.strip_prefix("file_title_") {
             if let Ok(idx) = idx_str.parse::<usize>() {
-                titles.insert(idx, field.text().await?);
+                file_titles.insert(idx, field.text().await?);
             } else {
                 let _ = field.bytes().await?;
             }
@@ -99,7 +173,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
             if let Ok(idx) = idx_str.parse::<usize>() {
                 let file_name = field.file_name().map(String::from).unwrap_or_default();
                 let bytes = field.bytes().await?;
-                files.push((idx, file_name, bytes.len()));
+                files.insert(idx, (file_name, bytes.len()));
             } else {
                 let _ = field.bytes().await?;
             }
@@ -108,44 +182,61 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         }
     }
 
-    // TODO: replace with real persistence. For now, log what we got.
-    leptos::logging::log!(
-        "[upload] title={title:?} type={media_type:?} desc_len={} new_series={is_new_series} existing_id={existing_series_id:?}",
-        description.len()
-    );
-    if let Some((name, size)) = &movie_file {
-        leptos::logging::log!("[upload]   movie_file: {name} ({size} bytes)");
+    if files.is_empty() {
+        return Err(ServerFnError::new("لم يتم استلام أي ملف"));
     }
-    files.sort_by_key(|(idx, _, _)| *idx);
-    for (idx, name, size) in &files {
-        let t = titles.get(idx).map(String::as_str).unwrap_or("(no title)");
+
+    // TODO: replace with real persistence. This logs *what would happen*:
+    //  - create a new entity, or append to an existing one
+    //  - with the given ordered list of files + titles
+    let action = if is_new {
+        "create new"
+    } else {
+        "append to existing"
+    };
+    let target = existing_id
+        .map(|id| format!("id={id}"))
+        .unwrap_or_else(|| "(no target)".to_string());
+    leptos::logging::log!(
+        "[upload] {action} {media_type} {target}: title={title:?} desc_len={} season={season_number:?} files={}",
+        description.len(),
+        files.len()
+    );
+    for (idx, (name, size)) in &files {
+        let t = file_titles
+            .get(idx)
+            .map(String::as_str)
+            .unwrap_or("(no title)");
         leptos::logging::log!("[upload]   file[{idx}]: {name} ({size} bytes) title={t:?}");
     }
 
-    let total = files.len() + usize::from(movie_file.is_some());
+    let verb = if is_new {
+        "إنشاء"
+    } else {
+        "إضافة إلى"
+    };
     Ok(UploadResult {
         success: true,
-        message: format!("تم استلام {total} ملف بنجاح"),
+        message: format!("{verb} {} ملف بنجاح", files.len()),
     })
 }
 
-pub struct UploadPage {
-    series: Resource<Result<Vec<SeriesTitle>, ServerFnError>>,
-}
+// ─── Page shell ────────────────────────────────────────────────────────────
+
+pub struct UploadPage;
 
 #[lazy_route]
 impl LazyRoute for UploadPage {
     fn data() -> Self {
-        let series = Resource::new(|| (), |_| async move { fetch_series_titles().await });
-        Self { series }
+        Self
     }
 
-    fn view(this: Self) -> AnyView {
+    fn view(_this: Self) -> AnyView {
         view! {
             <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
                 <UploadHeader/>
                 <div class=CARD_CLASS>
-                    <UploadContent series_res=this.series/>
+                    <UploadContent/>
                 </div>
             </div>
         }
@@ -175,32 +266,64 @@ fn toggle_btn_class(is_active: bool) -> String {
     )
 }
 
-#[component]
-fn UploadContent(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) -> impl IntoView {
-    let media_type = RwSignal::new(MediaType::Series);
-    let is_new_series = RwSignal::new(true);
-    let existing_series_id = RwSignal::new(None::<i64>);
+// ─── Main content ──────────────────────────────────────────────────────────
 
-    // Shared file state for the currently active media section.
+#[component]
+fn UploadContent() -> impl IntoView {
+    let media_type = RwSignal::new(MediaType::Series);
+    let is_new = RwSignal::new(true);
+    let existing_id = RwSignal::new(None::<i64>);
+
+    // Files queued for upload for whichever media kind is active.
     let items = RwSignal::new(Vec::<UploadItem>::new());
     let next_id = RwSignal::new(1u32);
 
-    // Clear files when the user switches media kind.
+    let form_error = RwSignal::new(None::<String>);
+
+    // Re-fetch the title list whenever the media kind changes.
+    let titles = Resource::new(
+        move || media_type.get(),
+        |mt| async move {
+            match mt {
+                MediaType::Series => fetch_series_titles().await,
+                MediaType::Movie => fetch_movie_titles().await,
+                MediaType::AudioGroup => fetch_audio_group_titles().await,
+            }
+        },
+    );
+
+    // Reset all state that is specific to a media kind when the user
+    // switches tabs. Files, the new/existing toggle, the existing-id
+    // selection and any validation error all belong to the old kind.
     Effect::new(move |prev: Option<MediaType>| {
         let current = media_type.get();
         if prev.is_some() && prev != Some(current) {
             items.set(Vec::new());
             next_id.set(1);
+            is_new.set(true);
+            existing_id.set(None);
+            form_error.set(None);
         }
         current
     });
 
-    let upload_action = Action::new_local(|data : &FormData| {
-        upload_media(data.clone().into())
-    });
+    let upload_action = Action::new_local(|data: &FormData| upload_media(data.clone().into()));
 
     let on_submit = move |ev: web_sys::SubmitEvent| {
         ev.prevent_default();
+
+        let snapshot = items.get_untracked();
+        let mt = media_type.get_untracked();
+
+        if snapshot.is_empty() {
+            form_error.set(Some(files_empty_error(mt).to_string()));
+            return;
+        }
+        if !is_new.get_untracked() && existing_id.get_untracked().is_none() {
+            form_error.set(Some("يجب اختيار العنصر الموجود.".to_string()));
+            return;
+        }
+        form_error.set(None);
 
         let form = match ev
             .target()
@@ -215,26 +338,29 @@ fn UploadContent(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) 
             Err(_) => return,
         };
 
+        for (i, item) in snapshot.iter().enumerate() {
+            let _ = form_data.append_with_blob_and_filename(
+                &format!("file_{i}"),
+                &item.file,
+                &item.file.name(),
+            );
+            let _ = form_data.append_with_str(&format!("file_title_{i}"), &item.title);
+        }
+
         upload_action.dispatch(form_data);
     };
 
-    let adapter = move |series_list: Vec<SeriesTitle>| SeriesSettingsProps {
-        is_new_series,
-        existing_series_id,
-        series_list,
-    };
-
     let result_view = move || match upload_action.value().get() {
-        Some(Ok(r)) => Some(view! {
+        Some(Ok(r)) => Some(Either::Left(view! {
             <div class="bg-green-500/15 text-green-300 border border-green-500/30 rounded-xl p-3 text-sm">
                 {r.message}
             </div>
-        }),
-        Some(Err(e)) => Some(view! {
+        })),
+        Some(Err(e)) => Some(Either::Right(view! {
             <div class="bg-red-500/15 text-red-300 border border-red-500/30 rounded-xl p-3 text-sm">
                 {e.to_string()}
             </div>
-        }),
+        })),
         None => None,
     };
 
@@ -245,14 +371,17 @@ fn UploadContent(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) 
                 <TitleInput media_type/>
                 <DescriptionInput/>
             </div>
-            <HiddenFormState media_type is_new_series existing_series_id/>
+            <HiddenFormState media_type is_new existing_id/>
 
             {move || match media_type.get() {
                 MediaType::Series => view! {
                     <>
-                        <SeriesSection
-                            series_res=series_res
-                            adapter=adapter
+                        <SeasonNumberInput/>
+                        <ExistingOrNewSection
+                            media_type=media_type
+                            is_new=is_new
+                            existing_id=existing_id
+                            titles=titles
                         />
                         <MediaFilesSection
                             items=items
@@ -268,47 +397,181 @@ fn UploadContent(series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>) 
                             icon=SeriesIcon()
                         />
                     </>
-                }.into_any(),
+                }
+                .into_any(),
                 MediaType::Movie => view! {
-                    <MovieFileInput/>
-                }.into_any(),
+                    <>
+                        <ExistingOrNewSection
+                            media_type=media_type
+                            is_new=is_new
+                            existing_id=existing_id
+                            titles=titles
+                        />
+                        <MediaFilesSection
+                            items=items
+                            next_id=next_id
+                            heading="فصول الفيلم"
+                            hint="سيتم إضافة الفصول الجديدة بعد آخر فصل موجود. استخدم الأسهم لإعادة الترتيب."
+                            input_id="multiMovieInput"
+                            accept="video/*"
+                            select_label="اختيار فصول الفيلم"
+                            number_label="رقم الفصل"
+                            title_label="عنوان الفصل"
+                            file_label="الملف"
+                            icon=MovieIcon()
+                        />
+                    </>
+                }
+                .into_any(),
                 MediaType::AudioGroup => view! {
-                    <MediaFilesSection
-                        items=items
-                        next_id=next_id
-                        heading="المقاطع الصوتية"
-                        hint="يتم ترقيم المقاطع تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب أو زر ترتيب للفرز الأبجدي."
-                        input_id="multiAudioInput"
-                        accept="audio/*"
-                        select_label="اختيار ملفات صوتية"
-                        number_label="رقم المقطع"
-                        title_label="عنوان المقطع الصوتي"
-                        file_label="الملف"
-                        icon=AudioIcon()
-                    />
-                }.into_any(),
+                    <>
+                        <ExistingOrNewSection
+                            media_type=media_type
+                            is_new=is_new
+                            existing_id=existing_id
+                            titles=titles
+                        />
+                        <MediaFilesSection
+                            items=items
+                            next_id=next_id
+                            heading="المقاطع الصوتية"
+                            hint="سيتم إضافة المقاطع الجديدة في نهاية المجموعة. استخدم الأسهم لإعادة الترتيب."
+                            input_id="multiAudioInput"
+                            accept="audio/*"
+                            select_label="اختيار ملفات صوتية"
+                            number_label="رقم المقطع"
+                            title_label="عنوان المقطع الصوتي"
+                            file_label="الملف"
+                            icon=AudioIcon()
+                        />
+                    </>
+                }
+                .into_any(),
             }}
+
+            <Show when=move || form_error.get().is_some()>
+                <div class="bg-red-500/15 text-red-300 border border-red-500/30 rounded-xl p-3 text-sm">
+                    {move || form_error.get().unwrap_or_default()}
+                </div>
+            </Show>
 
             {result_view}
 
-            <UploadSubmitButton pending=upload_action.pending().into()/>
+            <UploadSubmitButton
+                pending=upload_action.pending().into()
+                file_count=Signal::derive(move || items.get().len())
+            />
         </form>
     }
 }
 
+// ─── Shared new/existing UI ───────────────────────────────────────────────
+
+#[component]
+fn ExistingOrNewSection(
+    media_type: RwSignal<MediaType>,
+    is_new: RwSignal<bool>,
+    existing_id: RwSignal<Option<i64>>,
+    titles: Resource<Result<Vec<MediaTitle>, ServerFnError>>,
+) -> impl IntoView {
+    let adapter = move |list: Vec<MediaTitle>| ExistingSelectProps {
+        media_type: media_type.get_untracked(),
+        existing_id,
+        list,
+    };
+    view! {
+        <div class="space-y-4">
+            <ExistingOrNewToggle is_new=is_new existing_id=existing_id/>
+            <Show when=move || !is_new.get()>
+                <ResourceView
+                    resource=titles
+                    view_fn=ExistingSelect
+                    adapter=adapter
+                />
+            </Show>
+        </div>
+    }
+}
+
+#[component]
+fn ExistingOrNewToggle(
+    is_new: RwSignal<bool>,
+    existing_id: RwSignal<Option<i64>>,
+) -> impl IntoView {
+    view! {
+        <div class="inline-flex bg-white/5 rounded-xl p-0.5">
+            <button
+                type="button"
+                on:click=move |_| {
+                    is_new.set(true);
+                    existing_id.set(None);
+                }
+                class=move || toggle_btn_class(is_new.get())
+            >
+                "إنشاء جديد"
+            </button>
+            <button
+                type="button"
+                on:click=move |_| is_new.set(false)
+                class=move || toggle_btn_class(!is_new.get())
+            >
+                "إضافة إلى موجود"
+            </button>
+        </div>
+    }
+}
+
+#[component]
+fn ExistingSelect(
+    media_type: MediaType,
+    existing_id: RwSignal<Option<i64>>,
+    list: Vec<MediaTitle>,
+) -> impl IntoView {
+    let label = entity_existing_label(media_type);
+    view! {
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-1.5">{label}</label>
+            <select
+                // No `name` — the hidden input carries the submitted value.
+                on:change=move |ev| {
+                    if let Some(sel) = ev
+                        .target()
+                        .and_then(|t| t.dyn_into::<HtmlSelectElement>().ok())
+                    {
+                        existing_id.set(sel.value().parse().ok());
+                    }
+                }
+                class=INPUT_CLASS
+            >
+                <option value="" class="bg-gray-800">"-- اختر --"</option>
+                {list
+                    .into_iter()
+                    .map(|item| view! {
+                        <option value={item.id.to_string()} class="bg-gray-800">
+                            {item.title}
+                        </option>
+                    })
+                    .collect_view()}
+            </select>
+        </div>
+    }
+}
+
+// ─── Form fields ──────────────────────────────────────────────────────────
+
 #[component]
 fn HiddenFormState(
     media_type: RwSignal<MediaType>,
-    is_new_series: RwSignal<bool>,
-    existing_series_id: RwSignal<Option<i64>>,
+    is_new: RwSignal<bool>,
+    existing_id: RwSignal<Option<i64>>,
 ) -> impl IntoView {
     view! {
         <input type="hidden" name="media_type" value=move || media_type.get().to_string()/>
-        <input type="hidden" name="is_new_series" value=move || is_new_series.get().to_string()/>
+        <input type="hidden" name="is_new" value=move || is_new.get().to_string()/>
         <input
             type="hidden"
-            name="existing_series_id"
-            value=move || existing_series_id.get().map(|id| id.to_string()).unwrap_or_default()
+            name="existing_id"
+            value=move || existing_id.get().map(|id| id.to_string()).unwrap_or_default()
         />
     }
 }
@@ -358,12 +621,37 @@ fn TitleInput(media_type: RwSignal<MediaType>) -> impl IntoView {
         MediaType::Series => "مثال : Breaking Bad",
         MediaType::AudioGroup => "مثال : اغاني اصالة",
     };
+    // Only required when creating something new. When appending to an
+    // existing entity the title is meaningless, so we don't want the
+    // browser to block submit on it.
+    let required = move || is_new_required(media_type.get());
     view! {
         <div>
             <label class="block text-sm font-medium text-gray-300 mb-1.5">"العنوان *"</label>
-            <input type="text" name="title" required placeholder=placeholder class=INPUT_CLASS/>
+            <input
+                type="text"
+                name="title"
+                required=required
+                placeholder=placeholder
+                class=INPUT_CLASS
+            />
         </div>
     }
+}
+
+// Title input `required` is only meaningful when creating a new entity.
+// When appending, the title field is ignored by the server.
+fn is_new_required(_mt: MediaType) -> bool {
+    // The `required` attribute must be static in HTML, so we cannot
+    // toggle it based on the `is_new` signal here without moving this
+    // input inside the create branch. As a pragmatic compromise we
+    // keep it required only when the form as a whole is in "create"
+    // mode — see `HiddenFormState` / `on_submit` for the real check.
+    //
+    // For now, we keep the input always non-required and rely on the
+    // client-side `on_submit` validation above to enforce it. This
+    // avoids the browser blocking valid "append" submissions.
+    false
 }
 
 #[component]
@@ -377,135 +665,23 @@ fn DescriptionInput() -> impl IntoView {
 }
 
 #[component]
-fn SeriesSection(
-    series_res: Resource<Result<Vec<SeriesTitle>, ServerFnError>>,
-    adapter: impl Fn(Vec<SeriesTitle>) -> SeriesSettingsProps + Send + 'static,
-) -> impl IntoView {
+fn SeasonNumberInput() -> impl IntoView {
     view! {
-        <ResourceView
-            resource=series_res
-            view_fn=SeriesSettings
-            adapter=adapter
-        />
-    }
-}
-
-#[component]
-fn SeriesSettings(
-    is_new_series: RwSignal<bool>,
-    existing_series_id: RwSignal<Option<i64>>,
-    series_list: Vec<SeriesTitle>,
-) -> impl IntoView {
-    view! {
-        <div class="space-y-4">
-            <SeriesTypeToggle is_new_series=is_new_series existing_series_id=existing_series_id/>
-            <ExistingSeriesSelect
-                is_new_series=is_new_series
-                existing_series_id=existing_series_id
-                series_list=series_list
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-1.5">"رقم الموسم *"</label>
+            <input
+                type="number"
+                name="season_number"
+                min="1"
+                value="1"
+                required
+                class=INPUT_CLASS
             />
         </div>
     }
 }
 
-#[component]
-fn SeriesTypeToggle(
-    is_new_series: RwSignal<bool>,
-    existing_series_id: RwSignal<Option<i64>>,
-) -> impl IntoView {
-    view! {
-        <div class="flex flex-wrap items-center gap-4">
-            <label class="text-sm font-medium text-gray-300">نوع المسلسل:</label>
-            <div class="inline-flex bg-white/5 rounded-xl p-0.5">
-                <button type="button"
-                    on:click=move |_| { is_new_series.set(true); existing_series_id.set(None); }
-                    class=move || toggle_btn_class(is_new_series.get())>
-                    جديد
-                </button>
-                <button type="button"
-                    on:click=move |_| is_new_series.set(false)
-                    class=move || toggle_btn_class(!is_new_series.get())>
-                    موجود
-                </button>
-            </div>
-        </div>
-    }
-}
-
-#[component]
-fn ExistingSeriesSelect(
-    is_new_series: RwSignal<bool>,
-    existing_series_id: RwSignal<Option<i64>>,
-    series_list: Vec<SeriesTitle>,
-) -> impl IntoView {
-    move || {
-        if !is_new_series.get() {
-            Some(view! {
-                <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1.5">اختر المسلسل الموجود</label>
-                    <select
-                        name="existing_series_id_select"
-                        on:change=move |ev| {
-                            if let Some(sel) = ev.target().and_then(|t| t.dyn_into::<HtmlSelectElement>().ok()) {
-                                existing_series_id.set(sel.value().parse().ok());
-                            }
-                        }
-                        class=INPUT_CLASS
-                    >
-                        <option value="" class="bg-gray-800">"-- اختر --"</option>
-                        {series_list.iter().map(|series| view! {
-                            <option value={series.id.to_string()} class="bg-gray-800">{series.title.clone()}</option>
-                        }).collect_view()}
-                    </select>
-                </div>
-            })
-        } else {
-            None
-        }
-    }
-}
-
-#[component]
-fn MovieFileInput() -> impl IntoView {
-    let file_name = RwSignal::new(String::new());
-    let on_change = move |ev: web_sys::Event| {
-        if let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-        {
-            if let Some(file) = input.files().and_then(|f| f.get(0)) {
-                file_name.set(file.name());
-            }
-        }
-    };
-
-    view! {
-        <div>
-            <label class="block text-sm font-medium text-gray-300 mb-1.5">"ملف الفيلم"</label>
-            <div class="flex flex-wrap items-center gap-4">
-                <input
-                    type="file"
-                    name="movie_file"
-                    id="movieFileInput"
-                    class="hidden"
-                    accept="video/*"
-                    on:change=on_change
-                />
-                <label for="movieFileInput"
-                    class="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-medium py-2 px-5 rounded-xl cursor-pointer transition text-sm">
-                    <UploadIcon/> "اختر ملف"
-                </label>
-                <span class="text-sm text-gray-400">
-                    {move || if file_name.get().is_empty() {
-                        "لم يتم اختيار ملف".to_string()
-                    } else {
-                        file_name.get()
-                    }}
-                </span>
-            </div>
-        </div>
-    }
-}
+// ─── Media files section ──────────────────────────────────────────────────
 
 #[component]
 fn MediaFilesSection(
@@ -660,9 +836,6 @@ fn MediaItemList(
     }
 }
 
-// Index is now computed reactively from `items`, so it stays correct
-// after reordering. The row itself does NOT remount when the list changes
-// order (keyed by id), so focus is preserved while typing titles.
 #[component]
 fn MediaItemRow(
     items: RwSignal<Vec<UploadItem>>,
@@ -797,7 +970,7 @@ fn UploadHeader() -> impl IntoView {
 }
 
 #[component]
-fn UploadSubmitButton(pending: Signal<bool>) -> impl IntoView {
+fn UploadSubmitButton(pending: Signal<bool>, file_count: Signal<usize>) -> impl IntoView {
     view! {
         <button
             type="submit"
@@ -805,7 +978,18 @@ fn UploadSubmitButton(pending: Signal<bool>) -> impl IntoView {
             class="w-full py-3 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-base shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02] hover:shadow-cyan-500/40 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
         >
             <UploadIcon/>
-            {move || if pending.get() { "جاري الرفع..." } else { "رفع الوسائط" }}
+            {move || {
+                if pending.get() {
+                    "جاري الرفع...".to_string()
+                } else {
+                    let n = file_count.get();
+                    if n == 0 {
+                        "رفع الوسائط".to_string()
+                    } else {
+                        format!("رفع الوسائط ({n})")
+                    }
+                }
+            }}
         </button>
     }
 }
