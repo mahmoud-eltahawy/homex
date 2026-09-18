@@ -1,5 +1,5 @@
 use crate::app::model::{
-    AudioGroup, Episode, MediaFile, Movie, MovieChapter, Season, SeasonSummary, Series,
+    Audio, AudioGroup, Episode, MediaFile, Movie, MovieChapter, Season, SeasonSummary, Series,
 };
 pub const TEST_VIDEO: &str = "https://www.w3schools.com/html/mov_bbb.mp4";
 
@@ -253,4 +253,39 @@ pub fn mock_audio_groups() -> Vec<AudioGroup> {
     .cycle()
     .take(MOCK_SIZE)
     .collect()
+}
+
+pub const TEST_AUDIO: &str = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+
+pub fn fake_audio_file() -> MediaFile {
+    MediaFile {
+        id: 0,
+        path: TEST_AUDIO.into(),
+        size: 5_200_000,
+        duration: 372,
+    }
+}
+
+pub fn mock_audios(group_id: u64) -> Vec<Audio> {
+    let titles: &[&str] = match group_id {
+        401 => &["Ana Gheir", "Sabri Aalil", "Ya Bent El Sultan"],
+        402 => &["Umbrella", "Diamonds", "Work", "Stay"],
+        403 => &[
+            "Nour El Ein",
+            "Habibi",
+            "Tamally Maak",
+            "Awedouny",
+            "Bahebbik",
+        ],
+        _ => &[],
+    };
+    titles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| Audio {
+            id: group_id * 100 + i as u64,
+            title: (*t).to_string(),
+            file: fake_audio_file(),
+        })
+        .collect()
 }

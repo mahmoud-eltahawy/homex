@@ -1,15 +1,20 @@
 use crate::app::icons::{
     FullscreenExitIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, VolumeIcon,
 };
-use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos::{either::Either, ev::fullscreenchange};
+use leptos::{html, prelude::*};
 use leptos_use::{use_document, use_event_listener, use_timeout_fn, UseTimeoutFnReturn};
 use web_sys::{HtmlInputElement, MouseEvent};
 
 #[component]
-pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>) -> impl IntoView {
-    let video_ref = NodeRef::<leptos::html::Video>::new();
+pub fn VideoPlayer(
+    src: Signal<String>,
+    #[prop(optional, into)] title: MaybeProp<String>,
+    #[prop(default = false)] audio: bool,
+    #[prop(optional, into)] artwork: Option<String>,
+) -> impl IntoView {
+    let video_ref = NodeRef::<html::Video>::new();
     let playing = RwSignal::new(false);
     let current_time = RwSignal::new(0.0);
     let duration = RwSignal::new(0.0);
@@ -130,6 +135,7 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
             }
         }
     };
+
     Effect::new(move || {
         if let Some(video) = video_ref.get() {
             video.set_src(&src.get());
@@ -140,59 +146,75 @@ pub fn VideoPlayer(src: Signal<String>, #[prop(optional)] title: Option<String>)
         }
     });
 
-    view! {
-    <div
-        on:mousemove={let show = show_controls.clone(); move |_| show()}
-        dir="ltr"
-        class="relative bg-black rounded-2xl overflow-hidden shadow-2xl shadow-black/50 group"
-    >
-        <VideoElement
-            video_ref=video_ref
-            title=title
-            playing=playing
-            handle_loaded_metadata=handle_loaded_metadata
-            handle_time_update=handle_time_update
-            toggle_controls=toggle_controls
-        />
-        <VideoControls
-            controls_visible=controls_visible
-            show_controls=show_controls.clone()
-            current_time=current_time
-            duration=duration
-            playing=playing
-            muted=muted
-            volume=volume
-            fullscreen=fullscreen
-            toggle_play=toggle_play
-            toggle_mute=toggle_mute
-            toggle_fullscreen=toggle_fullscreen
-            handle_seek=handle_seek
-            handle_volume=handle_volume
-            start_hide_timer=start_hide_timer
-        />
-    </div>
-    }
-}
+    let video_class = if audio {
+        "w-full h-0 pointer-events-none"
+    } else {
+        "w-full h-auto max-h-[60vh] md:max-h-[70vh] object-contain cursor-pointer"
+    };
 
-#[component]
-fn VideoElement(
-    video_ref: NodeRef<leptos::html::Video>,
-    title: Option<String>,
-    playing: RwSignal<bool>,
-    handle_loaded_metadata: impl Fn(web_sys::Event) + 'static,
-    handle_time_update: impl Fn(web_sys::Event) + 'static,
-    toggle_controls: impl Fn() + Clone + 'static,
-) -> impl IntoView {
+    let artwork_view = if audio {
+        let artwork = artwork.clone();
+        let toggle_controls = toggle_controls.clone();
+        Some(view! {
+            <div
+                class="relative w-full aspect-video flex items-center justify-center bg-gradient-to-br from-[#1e1e2e] via-[#14141e] to-[#0a0a0f] cursor-pointer overflow-hidden"
+                on:click=move |_| toggle_controls()
+            >
+                {artwork.map(|url| view! {
+                    <div
+                        class="absolute inset-0 opacity-50"
+                        style=format!("background-image: url('{url}'); background-size: cover; background-position: center; filter: blur(50px) saturate(1.4); transform: scale(1.3);")
+                    ></div>
+                    <img
+                        src=url
+                        class="relative max-h-[70%] max-w-[70%] object-contain rounded-2xl shadow-2xl shadow-black/70 border border-white/10"
+                        alt=""
+                    />
+                })}
+            </div>
+        })
+    } else {
+        None
+    };
+
     view! {
-    <video
-        node_ref=video_ref
-        title=title
-        class="w-full h-auto max-h-[60vh] md:max-h-[70vh] object-contain cursor-pointer"
-        on:loadedmetadata=handle_loaded_metadata
-        on:timeupdate=handle_time_update
-        on:play=move |_| playing.set(true) on:pause=move |_| playing.set(false)
-        on:ended=move |_| playing.set(false) on:click=move |_| toggle_controls() playsinline
-    /> }
+        <div
+            on:mousemove={let show = show_controls.clone(); move |_| show()}
+            dir="ltr"
+            class="relative bg-black rounded-2xl overflow-hidden shadow-2xl shadow-black/50 group"
+        >
+            <video
+                node_ref=video_ref
+                title=move || title.get().unwrap_or_default()
+                class=video_class
+                on:loadedmetadata=handle_loaded_metadata
+                on:timeupdate=handle_time_update
+                on:play=move |_| playing.set(true)
+                on:pause=move |_| playing.set(false)
+                on:ended=move |_| playing.set(false)
+                on:click={let tc = toggle_controls.clone(); move |_| tc()}
+                playsinline
+            />
+            {artwork_view}
+            <VideoControls
+                controls_visible=controls_visible
+                show_controls=show_controls.clone()
+                current_time=current_time
+                duration=duration
+                playing=playing
+                muted=muted
+                volume=volume
+                fullscreen=fullscreen
+                toggle_play=toggle_play
+                toggle_mute=toggle_mute
+                toggle_fullscreen=toggle_fullscreen
+                handle_seek=handle_seek
+                handle_volume=handle_volume
+                start_hide_timer=start_hide_timer
+                show_fullscreen=!audio
+            />
+        </div>
+    }
 }
 
 #[component]
@@ -211,32 +233,45 @@ pub fn VideoControls(
     handle_seek: impl Fn(web_sys::Event) + 'static,
     handle_volume: impl Fn(web_sys::Event) + 'static,
     start_hide_timer: impl Fn() + 'static + Clone,
+    #[prop(default = true)] show_fullscreen: bool,
 ) -> impl IntoView {
     let class = move || {
-        format!("absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-5 transition-opacity duration-300 {}", if controls_visible.get() { "opacity-100" } else { "opacity-0" })
+        format!(
+            "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-5 transition-opacity duration-300 {}",
+            if controls_visible.get() { "opacity-100" } else { "opacity-0" }
+        )
     };
     let on_mouse_leave = {
         let start = start_hide_timer.clone();
-        move |_| {
-            start();
-        }
+        move |_| start()
     };
     view! {
-    <div
-        class=class
-        on:mouseenter={let show = show_controls.clone(); move |_| show()}
-        on:mouseleave={on_mouse_leave}
-        on:touchstart={let show = show_controls.clone(); move |_| show()}>
-        <div class="flex flex-col gap-2">
-            <SeekBar
-                current_time=current_time
-                duration=duration
-                handle_seek=handle_seek
-            />
-            <ControlButtons playing=playing muted=muted volume=volume fullscreen=fullscreen
-                toggle_play=toggle_play toggle_mute=toggle_mute toggle_fullscreen=toggle_fullscreen handle_volume=handle_volume/>
+        <div
+            class=class
+            on:mouseenter={let show = show_controls.clone(); move |_| show()}
+            on:mouseleave=on_mouse_leave
+            on:touchstart={let show = show_controls.clone(); move |_| show()}
+        >
+            <div class="flex flex-col gap-2">
+                <SeekBar
+                    current_time=current_time
+                    duration=duration
+                    handle_seek=handle_seek
+                />
+                <ControlButtons
+                    playing=playing
+                    muted=muted
+                    volume=volume
+                    fullscreen=fullscreen
+                    toggle_play=toggle_play
+                    toggle_mute=toggle_mute
+                    toggle_fullscreen=toggle_fullscreen
+                    handle_volume=handle_volume
+                    show_fullscreen=show_fullscreen
+                />
+            </div>
         </div>
-    </div> }
+    }
 }
 
 #[component]
@@ -273,6 +308,7 @@ pub fn ControlButtons(
     toggle_mute: impl Fn(MouseEvent) + 'static,
     toggle_fullscreen: impl Fn(MouseEvent) + 'static,
     handle_volume: impl Fn(web_sys::Event) + 'static,
+    #[prop(default = true)] show_fullscreen: bool,
 ) -> impl IntoView {
     let play_icon = move || {
         if playing.get() {
@@ -296,39 +332,46 @@ pub fn ControlButtons(
             Either::Right(FullscreenIcon())
         }
     };
-    view! {
-    <div class="flex items-center gap-4 text-white">
-        <button
-            on:click=toggle_play
-            class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
-        >
-            {play_icon}
-        </button>
-        <div class="flex items-center gap-2">
+    let fullscreen_btn = show_fullscreen.then(move || {
+        view! {
             <button
-                on:click=toggle_mute
+                on:click=toggle_fullscreen
                 class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
             >
-                {mute_icon}
+                {full_screen}
             </button>
-            <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                prop:value={vol_value}
-                on:input=handle_volume
-                class="w-16 sm:w-20 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"
-            />
+        }
+    });
+
+    view! {
+        <div class="flex items-center gap-4 text-white">
+            <button
+                on:click=toggle_play
+                class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
+            >
+                {play_icon}
+            </button>
+            <div class="flex items-center gap-2">
+                <button
+                    on:click=toggle_mute
+                    class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
+                >
+                    {mute_icon}
+                </button>
+                <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    prop:value={vol_value}
+                    on:input=handle_volume
+                    class="w-16 sm:w-20 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"
+                />
+            </div>
+            <div class="flex-1"></div>
+            {fullscreen_btn}
         </div>
-        <div class="flex-1"></div>
-        <button
-            on:click=toggle_fullscreen
-            class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
-        >
-            {full_screen}
-        </button>
-    </div> }
+    }
 }
 
 fn format_time(time: f64) -> String {

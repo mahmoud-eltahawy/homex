@@ -1,4 +1,5 @@
 use crate::app::{
+    audio::{detail::AudioGroupDetailPage, song::AudioSongDetailPage},
     home::HomePage,
     layout::Layout,
     listing::{AudioGroupListingPage, MovieListingPage, SeriesListingPage},
@@ -77,6 +78,15 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/audio") view={Lazy::<AudioGroupListingPage>::new()}/>
                     <Route path=path!("/upload") view={Lazy::<UploadPage>::new()}/>
                     <Route path=path!("/settings") view={Lazy::<SettingsPage>::new()}/>
+                    <Route
+                        path=path!("/audio/detail/:id")
+                        view={Lazy::<AudioGroupDetailPage>::new()}
+                    />
+                    <Route
+                        path=path!("/audio/detail/:id/song/:song_id")
+                        view={Lazy::<AudioSongDetailPage>::new()}
+                    />
+
                 </ParentRoute>
             </Routes>
         </Router>

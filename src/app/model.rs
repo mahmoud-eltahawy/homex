@@ -138,3 +138,16 @@ pub struct Season {
     pub season_number: u32,
     pub episodes: Vec<Episode>,
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Audio {
+    pub id: u64,
+    pub title: String,
+    pub file: MediaFile,
+}
+
+impl Audio {
+    pub fn href(&self, group_id: u64) -> String {
+        format!("/audio/detail/{}/song/{}", group_id, self.id)
+    }
+}
