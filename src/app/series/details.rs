@@ -1,10 +1,10 @@
 use super::{fetch_season, fetch_series_detail};
 use crate::app::{
+    detail::DetailShell,
     icons::{ClockIcon, SeriesIcon},
     model::{Episode, Season, SeasonSummary, Series},
     resource_view::ResourceView,
     video_player::VideoPlayer,
-    view_schema::CardData,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
@@ -101,28 +101,22 @@ fn SeriesView(
     };
 
     view! {
-        <div class="relative min-h-screen bg-black text-white overflow-hidden">
-            <div class="absolute inset-0">
-                {series.clone().poster()}
-                <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
-            </div>
-            <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
-                <Info
-                    poster
-                    title
-                    season_count=series.season_count
-                    description
-                />
-                {video_player}
+        <DetailShell poster=poster.clone()>
+            <Info
+                poster
+                title
+                season_count=series.season_count
+                description
+            />
+            {video_player}
 
-                <Selectors
-                    selected_season
-                    episodes
-                    selected_episode
-                    summaries
-                />
-            </div>
-        </div>
+            <Selectors
+                selected_season
+                episodes
+                selected_episode
+                summaries
+            />
+        </DetailShell>
     }
 }
 

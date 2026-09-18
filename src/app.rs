@@ -14,12 +14,11 @@ use leptos_router::{
     path, Lazy,
 };
 
-mod view_schema;
-
 mod audio;
 mod common;
+pub mod detail;
 mod home;
-mod icons;
+pub mod icons;
 mod layout;
 mod listing;
 mod model;
@@ -31,6 +30,7 @@ mod series;
 mod settings;
 mod upload;
 mod video_player;
+mod view_schema;
 
 //TODO : DELETE this
 #[cfg(feature = "ssr")]

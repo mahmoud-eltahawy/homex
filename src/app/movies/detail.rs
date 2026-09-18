@@ -1,4 +1,5 @@
 use crate::app::{
+    detail::DetailShell,
     icons::{ClockIcon, DownloadIcon, MovieIcon},
     model::{self, Movie, MovieChapter},
     resource_view::ResourceView,
@@ -72,20 +73,14 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     });
 
     view! {
-        <div class="relative min-h-screen bg-black text-white overflow-hidden">
-            <div class="absolute inset-0">
-                {movie.clone().poster_url().map(|x|x.to_string())}
-                <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
-            </div>
-            <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
-                <DetailBody
-                    movie=movie.clone()
-                    selected_chapter=selected_chapter
-                    video_src=video_src
-                />
-                {selector}
-            </div>
-        </div>
+        <DetailShell poster=movie.poster.clone()>
+            <DetailBody
+                movie=movie.clone()
+                selected_chapter=selected_chapter
+                video_src=video_src
+            />
+            {selector}
+        </DetailShell>
     }
 }
 
