@@ -3,7 +3,7 @@ use crate::app::{
     model::{self, Movie, MovieChapter},
     resource_view::ResourceView,
     video_player::VideoPlayer,
-    view_schema::PosterView,
+    view_schema::CardData,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
@@ -74,7 +74,7 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
             <div class="absolute inset-0">
-                {movie.clone().poster()}
+                {movie.clone().poster_url().map(|x|x.to_string())}
                 <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
             </div>
             <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
@@ -95,7 +95,6 @@ fn DetailBody(
     selected_chapter: Memo<Option<MovieChapter>>,
     video_src: Memo<String>,
 ) -> impl IntoView {
-    // Clone for closure use in video player
     let movie_title = movie.title.clone();
 
     view! {

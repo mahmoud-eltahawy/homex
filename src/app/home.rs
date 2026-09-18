@@ -1,4 +1,4 @@
-use crate::app::{common::CardsLoading, search::SearchBar};
+use crate::app::{common::CardsLoading, search::SearchBar, view_schema::CardData};
 use std::future::Future;
 
 use crate::app::{
@@ -9,7 +9,7 @@ use crate::app::{
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
     series::{fetch_series, fetch_series_count},
-    view_schema::{Card, CardsList},
+    view_schema::CardsList,
 };
 use leptos::{either::Either, prelude::*};
 use leptos_router::{lazy_route, LazyRoute};
@@ -17,7 +17,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 impl<T> MediaSectionProps<T>
 where
-    T: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
+    T: CardData + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     fn new<Fut1, Fut2>(
         search_query: RwSignal<Option<String>>,
@@ -121,13 +121,13 @@ fn MediaSection<C>(
     count: Resource<Result<usize, ServerFnError>>,
 ) -> impl IntoView
 where
-    C: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
+    C: CardData + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     let media_type = C::media_type();
 
     let header_adapter = move |count| SectionHeaderProps {
         folded,
-        icon: C::icon(),
+        icon: C::badge_icon(),
         count,
         href: media_type.listing_href(),
     };
@@ -217,7 +217,7 @@ fn FoldButton(folded: RwSignal<bool>) -> impl IntoView {
 }
 
 #[component]
-fn SectionContent<C: Card + 'static>(items: Vec<C>) -> impl IntoView {
+fn SectionContent<C: CardData + 'static>(items: Vec<C>) -> impl IntoView {
     if !items.is_empty() {
         return Either::Right(items.cards_list());
     };

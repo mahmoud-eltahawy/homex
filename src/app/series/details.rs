@@ -4,7 +4,7 @@ use crate::app::{
     model::{Episode, Season, SeasonSummary, Series},
     resource_view::ResourceView,
     video_player::VideoPlayer,
-    view_schema::PosterView,
+    view_schema::CardData,
 };
 use leptos::prelude::*;
 use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};

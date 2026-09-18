@@ -1,6 +1,7 @@
 use crate::app::pagination::{PaginationControls, PaginationControlsProps};
 use crate::app::search::SearchBar;
 use crate::app::series::fetch_series;
+use crate::app::view_schema::CardData;
 use crate::app::{
     audio::{fetch_audio_groups, fetch_audio_groups_count},
     common::CardsLoading,
@@ -8,7 +9,7 @@ use crate::app::{
     movies::{fetch_movies, fetch_movies_count},
     resource_view::ResourceView,
     series::fetch_series_count,
-    view_schema::{Card, CardsList},
+    view_schema::CardsList,
 };
 use leptos::prelude::*;
 use leptos_router::{lazy_route, LazyRoute};
@@ -19,7 +20,7 @@ const LISTING_PAGE_SIZE: usize = 18;
 
 pub struct ListingPage<C>
 where
-    C: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
+    C: CardData + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     pub offset: RwSignal<usize>,
     pub search_query: RwSignal<Option<String>>,
@@ -29,7 +30,7 @@ where
 
 impl<C> ListingPage<C>
 where
-    C: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
+    C: CardData + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     fn view(self) -> impl IntoView {
         let ListingPage {
@@ -68,7 +69,7 @@ where
 
 impl<T> ListingPage<T>
 where
-    T: Card + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
+    T: CardData + Send + Sync + Clone + Serialize + DeserializeOwned + 'static,
 {
     fn new<Fut1, Fut2>(
         data_fn: impl Fn(usize, usize, Option<String>) -> Fut1 + Send + Sync + 'static,

@@ -2,8 +2,6 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::app::view_schema::IdT;
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaFile {
     pub id: u64,
@@ -59,12 +57,6 @@ pub struct MovieChapter {
     pub file: MediaFile,
 }
 
-impl IdT for Movie {
-    fn id(&self) -> u64 {
-        self.id
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioGroup {
     pub id: u64,
@@ -72,12 +64,6 @@ pub struct AudioGroup {
     pub poster: Option<String>,
     pub description: Option<String>,
     pub audios_count: u32,
-}
-
-impl IdT for AudioGroup {
-    fn id(&self) -> u64 {
-        self.id
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -139,12 +125,6 @@ pub struct Series {
     pub description: Option<String>,
     pub season_count: u32,
     pub season_summaries: Vec<SeasonSummary>,
-}
-
-impl IdT for Series {
-    fn id(&self) -> u64 {
-        self.id
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
