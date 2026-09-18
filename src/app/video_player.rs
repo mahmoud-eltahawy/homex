@@ -12,7 +12,7 @@ pub fn VideoPlayer(
     src: Signal<String>,
     #[prop(optional, into)] title: MaybeProp<String>,
     #[prop(default = false)] audio: bool,
-    #[prop(optional, into)] artwork: Option<String>,
+    #[prop(default = None)] artwork: Option<String>,
 ) -> impl IntoView {
     let video_ref = NodeRef::<html::Video>::new();
     let playing = RwSignal::new(false);

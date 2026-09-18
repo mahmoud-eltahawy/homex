@@ -1,7 +1,10 @@
 use crate::app::{
-    icons::{AudioIcon, MediaCubeLogo, MovieIcon, SeriesIcon, SettingsIcon, UploadIcon},
+    icons::{
+        AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, SeriesIcon, SettingsIcon, UploadIcon, XIcon,
+    },
     model::MediaType,
 };
+use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
@@ -25,14 +28,18 @@ pub fn Layout() -> impl IntoView {
 
 #[component]
 fn Navbar() -> impl IntoView {
+    let mobile_open = RwSignal::new(false);
+
     view! {
         <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex items-center justify-between h-16 md:h-20">
                     <Brand/>
                     <DesktopNavLinks/>
+                    <MobileMenuButton open=mobile_open/>
                 </div>
             </div>
+            <MobileMenu open=mobile_open/>
         </nav>
     }
 }
@@ -97,5 +104,92 @@ fn FooterGrid() -> impl IntoView {
                 <span class="text-gray-500 text-xs font-mono">v1.0.0</span>
             </div>
         </div>
+    }
+}
+
+#[component]
+fn MobileMenuButton(open: RwSignal<bool>) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="md:hidden p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 transition"
+            on:click=move |_| open.update(|o| *o = !*o)
+            aria-label=move || if open.get() { "إغلاق القائمة" } else { "فتح القائمة" }
+            aria-expanded=move || if open.get() { "true" } else { "false" }
+        >
+            {move || if open.get() {
+                Either::Left(XIcon())
+            } else {
+                Either::Right(MenuIcon())
+            }}
+        </button>
+    }
+}
+
+#[component]
+fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
+    view! {
+        <Show when=move || open.get()>
+            <div
+                class="md:hidden fixed inset-0 top-16 z-40 bg-black/85 backdrop-blur-xl"
+                on:click=move |_| open.set(false)
+            >
+                <div
+                    class="flex flex-col p-4 gap-1"
+                    on:click=|ev| ev.stop_propagation()
+                >
+                    <MobileMenuLink
+                        href=MediaType::Movie.listing_href()
+                        icon=MovieIcon()
+                        label="أفلام"
+                        open=open
+                    />
+                    <MobileMenuLink
+                        href=MediaType::Series.listing_href()
+                        icon=SeriesIcon()
+                        label="مسلسلات"
+                        open=open
+                    />
+                    <MobileMenuLink
+                        href=MediaType::AudioGroup.listing_href()
+                        icon=AudioIcon()
+                        label="صوتيات"
+                        open=open
+                    />
+                    <div class="border-t border-white/10 my-3"></div>
+                    <MobileMenuLink
+                        href="/upload".to_string()
+                        icon=UploadIcon()
+                        label="رفع وسائط"
+                        open=open
+                    />
+                    <MobileMenuLink
+                        href="/settings".to_string()
+                        icon=SettingsIcon()
+                        label="الإعدادات"
+                        open=open
+                    />
+                </div>
+            </div>
+        </Show>
+    }
+}
+
+#[component]
+fn MobileMenuLink(
+    href: String,
+    icon: impl IntoView + 'static,
+    label: &'static str,
+    open: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <a
+            href=href
+            on:click=move |_| open.set(false)
+            class="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 transition"
+        >
+            {icon}
+            <span class="font-medium text-base">{label}</span>
+        </a>
     }
 }

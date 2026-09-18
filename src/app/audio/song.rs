@@ -78,7 +78,7 @@ fn AudioSongDetail(song: Audio, group: AudioGroup) -> impl IntoView {
     let duration = song.file.human_readable_duration();
     let size = song.file.human_readable_size();
 
-    let poster = group.poster;
+    let poster = group.poster.clone();
     let group_name = group.title;
     let group_href = format!("/audio/detail/{}", group.id);
 
@@ -89,7 +89,7 @@ fn AudioSongDetail(song: Audio, group: AudioGroup) -> impl IntoView {
 
                 <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
                     <div class="flex-shrink-0 w-48 sm:w-56 md:w-64 mx-auto lg:mx-0">
-                        <AudioArtwork poster=poster title=title.clone()/>
+                        <AudioArtwork poster=poster.clone() title=title.clone()/>
                     </div>
                     <div class="flex-1 w-full">
                         <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
@@ -121,7 +121,7 @@ fn AudioSongDetail(song: Audio, group: AudioGroup) -> impl IntoView {
                         src=src
                         title=title
                         audio=true
-                        // artwork=poster
+                        artwork=poster
                     />
                 </div>
             </div>

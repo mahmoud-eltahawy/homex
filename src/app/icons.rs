@@ -549,3 +549,14 @@ pub fn MusicPosterSvg() -> impl IntoView {
         </svg>
     }
 }
+
+#[component]
+pub fn MenuIcon() -> impl IntoView {
+    view! {
+        <Icon class="h-6 w-6" label="القائمة" tooltip="القائمة">
+            <line x1="4" y1="6" x2="20" y2="6" />
+            <line x1="4" y1="12" x2="20" y2="12" />
+            <line x1="4" y1="18" x2="20" y2="18" />
+        </Icon>
+    }
+}
