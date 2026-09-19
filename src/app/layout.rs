@@ -1,7 +1,5 @@
 use crate::app::{
-    icons::{
-        AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, SeriesIcon, SettingsIcon, UploadIcon, XIcon,
-    },
+    icons::{AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, SeriesIcon, SettingsIcon, XIcon},
     model::MediaType,
 };
 use leptos::either::Either;
@@ -99,7 +97,6 @@ fn FooterGrid() -> impl IntoView {
                 <NavLink href=MediaType::AudioGroup.listing_href() icon={AudioIcon()} />
             </div>
             <div class="flex items-center gap-6">
-                <NavLink href="/upload".to_string() icon={UploadIcon()} />
                 <NavLink href="/settings".to_string() icon={SettingsIcon()} />
                 <span class="text-gray-500 text-xs font-mono">v1.0.0</span>
             </div>
@@ -157,12 +154,6 @@ fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
                         open=open
                     />
                     <div class="border-t border-white/10 my-3"></div>
-                    <MobileMenuLink
-                        href="/upload".to_string()
-                        icon=UploadIcon()
-                        label="رفع وسائط"
-                        open=open
-                    />
                     <MobileMenuLink
                         href="/settings".to_string()
                         icon=SettingsIcon()

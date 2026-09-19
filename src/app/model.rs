@@ -128,6 +128,34 @@ impl MediaType {
             MediaType::AudioGroup => "إضافة مجموعة صوتية جديدة",
         }
     }
+
+    pub fn edit_chooser_href(&self, id: u64) -> String {
+        self.edit_href(id)
+    }
+
+    pub fn edit_metadata_href(&self, id: u64) -> String {
+        format!("{}/metadata", self.edit_href(id))
+    }
+
+    pub fn append_href(&self, id: u64) -> String {
+        format!("{}/append", self.edit_href(id))
+    }
+
+    pub fn append_label(&self) -> &'static str {
+        match self {
+            MediaType::Movie => "إضافة فصول",
+            MediaType::Series => "إضافة حلقات",
+            MediaType::AudioGroup => "إضافة مقاطع",
+        }
+    }
+
+    pub fn append_description(&self) -> &'static str {
+        match self {
+            MediaType::Movie => "أضف فصولاً جديدة إلى هذا الفيلم",
+            MediaType::Series => "أضف حلقات جديدة إلى موسم",
+            MediaType::AudioGroup => "أضف مقاطع صوتية إلى هذه المجموعة",
+        }
+    }
 }
 
 impl Display for MediaType {

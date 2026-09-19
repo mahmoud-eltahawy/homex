@@ -514,6 +514,6 @@ macro_rules! edit_page {
     };
 }
 
-edit_page!(MovieEditPage, MediaType::Movie);
-edit_page!(SeriesEditPage, MediaType::Series);
-edit_page!(AudioGroupEditPage, MediaType::AudioGroup);
+edit_page!(MovieMetadataEditPage, MediaType::Movie);
+edit_page!(SeriesMetadataEditPage, MediaType::Series);
+edit_page!(AudioGroupMetadataEditPage, MediaType::AudioGroup);
