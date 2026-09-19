@@ -1,15 +1,13 @@
 use crate::app::{
     detail::DetailShell,
     icons::{ClockIcon, DownloadIcon, MovieIcon},
+    media_player::{MediaItem, MediaPlayer},
     model::{Movie, MovieChapter},
     resource_view::ResourceView,
-    video_player::VideoPlayer,
     view_schema::CardData,
 };
 use leptos::prelude::*;
 use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
-use web_sys::HtmlSelectElement;
-use web_sys::wasm_bindgen::JsCast;
 
 #[server]
 pub async fn fetch_movie_detail(id: u64) -> Result<crate::app::model::Movie, ServerFnError> {
@@ -46,7 +44,8 @@ pub async fn fetch_movie_detail(id: u64) -> Result<crate::app::model::Movie, Ser
     }
     let chapters: Vec<ChRow> = sqlx::query_as(
         "SELECT mc.id, mc.number, mc.title, mc.poster, mc.description, \
-                f.id AS file_id, f.size_bytes AS size, f.duration_secs AS dur \
+                f.id AS file_id, f.size_bytes AS size, \
+                CAST(f.duration_secs AS INTEGER) AS dur \
          FROM movie_chapters mc JOIN files f ON f.id = mc.file_id \
          WHERE mc.movie_id = ? ORDER BY mc.number",
     )
@@ -89,7 +88,6 @@ impl LazyRoute for MovieDetailPage {
         let params = use_params_map();
         let id =
             move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
-
         let movie = Resource::new(id, fetch_movie_detail);
         Self { movie }
     }
@@ -97,11 +95,7 @@ impl LazyRoute for MovieDetailPage {
     fn view(this: Self) -> AnyView {
         let adapter = |movie| MovieDetailProps { movie };
         view! {
-            <ResourceView
-                resource=this.movie
-                view_fn=MovieDetail
-                adapter=adapter
-            />
+            <ResourceView resource=this.movie view_fn=MovieDetail adapter=adapter />
         }
         .into_any()
     }
@@ -109,46 +103,45 @@ impl LazyRoute for MovieDetailPage {
 
 #[component]
 fn MovieDetail(movie: Movie) -> impl IntoView {
-    let selected_chapter_idx = RwSignal::new(0usize);
-    let chapters = movie.chapters.clone();
+    let items: Vec<MediaItem> = movie
+        .chapters
+        .iter()
+        .map(|ch| {
+            let title = ch
+                .title
+                .clone()
+                .unwrap_or_else(|| format!("الفصل {}", ch.number + 1));
+            let mut item = MediaItem::new(ch.id, title, ch.file.path.clone());
+            if let Some(d) = ch.description.clone() {
+                item = item.with_subtitle(d);
+            }
+            item
+        })
+        .collect();
 
-    let selector = (chapters.len() > 1).then_some(view! {
-        <ChapterSelector
-            chapters=movie.chapters.clone()
-            selected_idx=selected_chapter_idx
-        />
-    });
-
-    let selected_chapter = Memo::new(move |_| chapters.get(selected_chapter_idx.get()).cloned());
-
-    // Memo for the video source path of the selected chapter
-    let video_src = Memo::new(move |_| {
-        selected_chapter
-            .get()
-            .map(|ch| ch.file.path.clone())
-            .unwrap_or_default()
-    });
+    let has_items = !items.is_empty();
+    let first_chapter = movie.chapters.first().cloned();
+    let poster = movie.poster.clone();
 
     view! {
-        <DetailShell poster=movie.poster.clone()>
-            <DetailBody
-                movie=movie.clone()
-                selected_chapter=selected_chapter
-                video_src=video_src
-            />
-            {selector}
+        <DetailShell poster=poster.clone()>
+            <DetailBody movie=movie.clone() chapter=first_chapter />
+            {has_items.then(move || {
+                view! {
+                    <div class="mt-10">
+                        <MediaPlayer
+                            items=items
+                            playlist_title="فصول الفيلم".to_string()
+                        />
+                    </div>
+                }
+            })}
         </DetailShell>
     }
 }
 
 #[component]
-fn DetailBody(
-    movie: Movie,
-    selected_chapter: Memo<Option<MovieChapter>>,
-    video_src: Memo<String>,
-) -> impl IntoView {
-    let movie_title = movie.title.clone();
-
+fn DetailBody(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
     view! {
         <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
             <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
@@ -156,95 +149,46 @@ fn DetailBody(
             </div>
             <div class="flex-1 w-full">
                 <DetailMetaBadge/>
-                <DetailInfo movie=movie.clone() selected_chapter=selected_chapter />
+                <DetailInfo movie=movie.clone() chapter=chapter/>
             </div>
-        </div>
-
-        <Show when=move || !video_src.get().is_empty()>
-            <div class="mt-10">
-                <VideoPlayer
-                    src=Signal::derive(move || video_src.get())
-                    title=movie_title.clone()
-                />
-            </div>
-        </Show>
-    }
-}
-
-#[component]
-fn ChapterSelector(chapters: Vec<MovieChapter>, selected_idx: RwSignal<usize>) -> impl IntoView {
-    view! {
-        <div class="flex items-center gap-2 mt-6 mb-4">
-            <span class="text-gray-300 text-sm">اختر الجزء:</span>
-            <select
-                class="bg-white/10 backdrop-blur-md text-white rounded-xl py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                prop:value=move || selected_idx.get().to_string()
-                on:change=move |ev| {
-                    if let Some(sel) = ev.target()
-                        .and_then(|t| t.dyn_into::<HtmlSelectElement>().ok())
-                        && let Ok(num) = sel.value().parse::<usize>() {
-                            selected_idx.set(num);
-                        }
-                }
-            >
-                <For
-                    each={move || chapters.clone()}
-                    key=|ch| ch.id
-                    let:chapter
-                >
-                    <option
-                        value={chapter.number.to_string()}
-                        selected={chapter.number as usize == selected_idx.get()}
-                    >
-                        {chapter.title.clone().unwrap_or_else(|| format!("Chapter {}", chapter.number + 1))}
-                    </option>
-                </For>
-            </select>
         </div>
     }
 }
 
 #[component]
 fn DetailMetaBadge() -> impl IntoView {
-    let media_icon = MovieIcon();
-    let name = "فيلم";
     view! {
         <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
-            {media_icon}
-            {name}
+            <MovieIcon/>
+            "فيلم"
         </div>
     }
 }
 
 #[component]
-fn DetailInfo(movie: Movie, selected_chapter: Memo<Option<MovieChapter>>) -> impl IntoView {
+fn DetailInfo(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
     let title = movie.title.to_string();
     let description = movie
         .description
         .unwrap_or_else(|| "لا يوجد وصف متاح.".to_string());
 
-    // Closure to get download link and file info from selected chapter
-    let download_link = move || {
-        selected_chapter
-            .get()
-            .map(|ch| ch.file.path.clone())
-            .unwrap_or_default()
-    };
-    let duration = move || {
-        selected_chapter
-            .get()
-            .map(|ch| ch.file.human_readable_duration())
-            .unwrap_or_default()
-    };
-    let size = move || {
-        selected_chapter
-            .get()
-            .map(|ch| ch.file.human_readable_size())
-            .unwrap_or_default()
-    };
+    let download_link = chapter
+        .as_ref()
+        .map(|ch| ch.file.path.clone())
+        .unwrap_or_default();
+    let duration = chapter
+        .as_ref()
+        .map(|ch| ch.file.human_readable_duration())
+        .unwrap_or_default();
+    let size = chapter
+        .as_ref()
+        .map(|ch| ch.file.human_readable_size())
+        .unwrap_or_default();
 
     view! {
-        <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">{title}</h1>
+        <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
+            {title}
+        </h1>
         <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
             <span class="flex items-center gap-1"><ClockIcon/>{duration}</span>
             <span>{size}</span>

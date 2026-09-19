@@ -9,10 +9,11 @@ use crate::app::{
     upload::UploadPage,
 };
 use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
+use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
+    Lazy,
     components::{ParentRoute, Route, Router, Routes},
-    path, Lazy,
+    path,
 };
 
 #[cfg(feature = "ssr")]
@@ -25,6 +26,7 @@ mod home;
 pub mod icons;
 mod layout;
 mod listing;
+mod media_player;
 mod model;
 mod movies;
 mod pagination;
@@ -33,7 +35,6 @@ mod search;
 mod series;
 mod settings;
 mod upload;
-mod video_player;
 mod view_schema;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {

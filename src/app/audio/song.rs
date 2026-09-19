@@ -1,18 +1,19 @@
-use super::{fetch_audio, fetch_audio_group_detail};
+use super::{fetch_audio, fetch_audio_group_detail, fetch_audios};
 use crate::app::{
     detail::DetailShell,
     icons::{AudioIcon, ClockIcon, DownloadIcon},
+    media_player::{MediaItem, MediaPlayer},
     model::{Audio, AudioGroup},
     resource_view::ResourceView,
-    video_player::VideoPlayer,
 };
 use leptos::either::Either;
 use leptos::prelude::*;
-use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
+use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
 
 pub struct AudioSongDetailPage {
     pub song: Resource<Result<Audio, ServerFnError>>,
     pub group: Resource<Result<AudioGroup, ServerFnError>>,
+    pub audios: Resource<Result<Vec<Audio>, ServerFnError>>,
 }
 
 #[lazy_route]
@@ -32,18 +33,20 @@ impl LazyRoute for AudioSongDetailPage {
         Self {
             song: Resource::new(move || (group_id(), song_id()), |(g, s)| fetch_audio(g, s)),
             group: Resource::new(group_id, fetch_audio_group_detail),
+            audios: Resource::new(group_id, fetch_audios),
         }
     }
 
     fn view(this: Self) -> AnyView {
         let group = this.group;
-        let adapter = move |song: Audio| AudioSongHelperProps { song, group };
+        let audios = this.audios;
+        let adapter = move |song: Audio| AudioSongHelperProps {
+            song,
+            group,
+            audios,
+        };
         view! {
-            <ResourceView
-                resource=this.song
-                view_fn=AudioSongHelper
-                adapter=adapter
-            />
+            <ResourceView resource=this.song view_fn=AudioSongHelper adapter=adapter />
         }
         .into_any()
     }
@@ -53,34 +56,52 @@ impl LazyRoute for AudioSongDetailPage {
 fn AudioSongHelper(
     song: Audio,
     group: Resource<Result<AudioGroup, ServerFnError>>,
+    audios: Resource<Result<Vec<Audio>, ServerFnError>>,
 ) -> impl IntoView {
-    let adapter = move |group: AudioGroup| AudioSongDetailProps {
+    let adapter = move |group: AudioGroup| AudioSongWithGroupProps {
         song: song.clone(),
         group,
+        audios,
     };
     view! {
-        <ResourceView
-            resource=group
-            view_fn=AudioSongDetail
-            adapter=adapter
-        />
+        <ResourceView resource=group view_fn=AudioSongWithGroup adapter=adapter />
     }
 }
 
 #[component]
-fn AudioSongDetail(song: Audio, group: AudioGroup) -> impl IntoView {
+fn AudioSongWithGroup(
+    song: Audio,
+    group: AudioGroup,
+    audios: Resource<Result<Vec<Audio>, ServerFnError>>,
+) -> impl IntoView {
+    let adapter = move |list: Vec<Audio>| AudioSongDetailProps {
+        song: song.clone(),
+        group: group.clone(),
+        audios: list,
+    };
+    view! {
+        <ResourceView resource=audios view_fn=AudioSongDetail adapter=adapter />
+    }
+}
+
+#[component]
+fn AudioSongDetail(song: Audio, group: AudioGroup, audios: Vec<Audio>) -> impl IntoView {
     let title = song.title.clone();
-    let src = Signal::derive({
-        let path = song.file.path.clone();
-        move || path.clone()
-    });
     let download = song.file.path.clone();
     let duration = song.file.human_readable_duration();
     let size = song.file.human_readable_size();
 
     let poster = group.poster.clone();
-    let group_name = group.title;
+    let group_name = group.title.clone();
     let group_href = format!("/audio/detail/{}", group.id);
+
+    let items: Vec<MediaItem> = audios
+        .iter()
+        .map(|a| MediaItem::new(a.id, a.title.clone(), a.file.path.clone()))
+        .collect();
+    let initial_index = audios.iter().position(|a| a.id == song.id).unwrap_or(0);
+    let playlist_title = format!("مقاطع {}", group.title);
+    let group_artwork = group.poster.clone();
 
     view! {
         <DetailShell poster=poster.clone()>
@@ -117,11 +138,12 @@ fn AudioSongDetail(song: Audio, group: AudioGroup) -> impl IntoView {
                 </div>
 
                 <div class="mt-4">
-                    <VideoPlayer
-                        src=src
-                        title=title
+                    <MediaPlayer
+                        items=items
+                        initial_index=initial_index
                         audio=true
-                        artwork=poster
+                        artwork=group_artwork
+                        playlist_title=playlist_title
                     />
                 </div>
             </div>
@@ -136,7 +158,7 @@ fn AudioArtwork(poster: Option<String>, title: String) -> impl IntoView {
             <img
                 src=src
                 class="w-full aspect-square object-cover rounded-2xl shadow-2xl border border-white/10"
-                alt=title.clone()
+                alt=title
             />
         }),
         None => Either::Right(view! {
