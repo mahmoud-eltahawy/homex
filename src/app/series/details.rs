@@ -7,9 +7,9 @@ use crate::app::{
     video_player::VideoPlayer,
 };
 use leptos::prelude::*;
-use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
-use web_sys::wasm_bindgen::JsCast;
+use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
 use web_sys::HtmlSelectElement;
+use web_sys::wasm_bindgen::JsCast;
 
 pub struct SeriesDetailPage {
     pub series: Resource<Result<Series, ServerFnError>>,
@@ -208,11 +208,10 @@ pub fn SeasonSelector(
                 class="bg-white/10 backdrop-blur-md text-white rounded-xl py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-cyan-400"
                 prop:value=move || selected_season.get().to_string()
                 on:change=move |ev| {
-                    if let Some(sel) = ev.target().and_then(|t| t.dyn_into::<HtmlSelectElement>().ok()) {
-                        if let Ok(num) = sel.value().parse::<u32>() {
+                    if let Some(sel) = ev.target().and_then(|t| t.dyn_into::<HtmlSelectElement>().ok())
+                        && let Ok(num) = sel.value().parse::<u32>() {
                             selected_season.set(num);
                         }
-                    }
                 }
             >
                 <For each={move || summaries.clone()} key=|s| s.season_number let:sum>

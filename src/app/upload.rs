@@ -7,14 +7,14 @@ use crate::app::{
 };
 use leptos::html;
 use leptos::prelude::*;
-use leptos_router::{lazy_route, LazyRoute};
+use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 use std::rc::Rc;
 use std::time::Duration;
 use web_sys::{
-    wasm_bindgen::JsCast, FormData, HtmlFormElement, HtmlInputElement, HtmlSelectElement,
-    MouseEvent,
+    FormData, HtmlFormElement, HtmlInputElement, HtmlSelectElement, MouseEvent,
+    wasm_bindgen::JsCast,
 };
 
 const INPUT_CLASS: &str = "w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition";
@@ -1011,11 +1011,10 @@ fn SeasonNumberField(season_number: RwSignal<u32>) -> impl IntoView {
                 min="1"
                 prop:value=move || season_number.get().to_string()
                 on:input=move |ev| {
-                    if let Ok(n) = event_target_value(&ev).parse::<u32>() {
-                        if n >= 1 {
+                    if let Ok(n) = event_target_value(&ev).parse::<u32>()
+                        && n >= 1 {
                             season_number.set(n);
                         }
-                    }
                 }
                 class=INPUT_CLASS
             />
@@ -1156,27 +1155,26 @@ fn MediaFilesInput(
         if let Some(input) = ev
             .target()
             .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+            && let Some(files) = input.files()
         {
-            if let Some(files) = input.files() {
-                let mut new_items: Vec<UploadItem> = (0..files.length())
-                    .filter_map(|i| files.get(i))
-                    .map(|file| {
-                        let name = file.name();
-                        let title = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-                        UploadItem {
-                            id: next_id.get(),
-                            file,
-                            title,
-                        }
-                    })
-                    .collect();
+            let mut new_items: Vec<UploadItem> = (0..files.length())
+                .filter_map(|i| files.get(i))
+                .map(|file| {
+                    let name = file.name();
+                    let title = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+                    UploadItem {
+                        id: next_id.get(),
+                        file,
+                        title,
+                    }
+                })
+                .collect();
 
-                new_items.sort_by_key(|x| x.file.name());
-                let added = new_items.len() as u32;
-                items.update(|list| list.extend(new_items));
-                next_id.update(|id| *id += added);
-                input.set_value("");
-            }
+            new_items.sort_by_key(|x| x.file.name());
+            let added = new_items.len() as u32;
+            items.update(|list| list.extend(new_items));
+            next_id.update(|id| *id += added);
+            input.set_value("");
         }
     };
 
@@ -1257,19 +1255,19 @@ fn MediaItemRow(
     let remove = move |_| items.update(|list| list.retain(|e| e.id != item_id));
     let move_up = move |_| {
         items.update(|list| {
-            if let Some(pos) = list.iter().position(|e| e.id == item_id) {
-                if pos > 0 {
-                    list.swap(pos, pos - 1);
-                }
+            if let Some(pos) = list.iter().position(|e| e.id == item_id)
+                && pos > 0
+            {
+                list.swap(pos, pos - 1);
             }
         })
     };
     let move_down = move |_| {
         items.update(|list| {
-            if let Some(pos) = list.iter().position(|e| e.id == item_id) {
-                if pos + 1 < list.len() {
-                    list.swap(pos, pos + 1);
-                }
+            if let Some(pos) = list.iter().position(|e| e.id == item_id)
+                && pos + 1 < list.len()
+            {
+                list.swap(pos, pos + 1);
             }
         })
     };

@@ -1,7 +1,5 @@
 #![recursion_limit = "256"]
 
-use std::sync::Arc;
-
 use homex::app::server::{AppState, Config};
 
 #[cfg(feature = "ssr")]
@@ -20,10 +18,7 @@ async fn main() {
         .await
         .expect("failed to init database");
 
-    let state = AppState {
-        db,
-        config: Arc::new(config),
-    };
+    let state = AppState { db, config };
 
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;

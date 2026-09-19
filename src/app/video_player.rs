@@ -4,7 +4,7 @@ use crate::app::icons::{
 use leptos::wasm_bindgen::JsCast;
 use leptos::{either::Either, ev::fullscreenchange};
 use leptos::{html, prelude::*};
-use leptos_use::{use_document, use_event_listener, use_timeout_fn, UseTimeoutFnReturn};
+use leptos_use::{UseTimeoutFnReturn, use_document, use_event_listener, use_timeout_fn};
 use web_sys::{HtmlInputElement, MouseEvent};
 
 #[component]
@@ -84,30 +84,26 @@ pub fn VideoPlayer(
         if let Some(input) = ev
             .target()
             .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+            && let Ok(val) = input.value().parse::<f64>()
+            && let Some(video) = video_ref.get()
         {
-            if let Ok(val) = input.value().parse::<f64>() {
-                if let Some(video) = video_ref.get() {
-                    video.set_current_time(val);
-                    current_time.set(val);
-                }
-            }
+            video.set_current_time(val);
+            current_time.set(val);
         }
     };
     let handle_volume = move |ev: web_sys::Event| {
         if let Some(input) = ev
             .target()
             .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+            && let Ok(val) = input.value().parse::<f64>()
+            && let Some(video) = video_ref.get()
         {
-            if let Ok(val) = input.value().parse::<f64>() {
-                if let Some(video) = video_ref.get() {
-                    video.set_volume(val);
-                    video.set_muted(val == 0.0);
-                    volume.set(val);
-                    muted.set(val == 0.0);
-                    if val > 0.0 {
-                        last_volume.set(val);
-                    }
-                }
+            video.set_volume(val);
+            video.set_muted(val == 0.0);
+            volume.set(val);
+            muted.set(val == 0.0);
+            if val > 0.0 {
+                last_volume.set(val);
             }
         }
     };
@@ -238,7 +234,11 @@ pub fn VideoControls(
     let class = move || {
         format!(
             "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-5 transition-opacity duration-300 {}",
-            if controls_visible.get() { "opacity-100" } else { "opacity-0" }
+            if controls_visible.get() {
+                "opacity-100"
+            } else {
+                "opacity-0"
+            }
         )
     };
     let on_mouse_leave = {

@@ -7,9 +7,9 @@ use crate::app::{
     view_schema::CardData,
 };
 use leptos::prelude::*;
-use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
-use web_sys::wasm_bindgen::JsCast;
+use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
 use web_sys::HtmlSelectElement;
+use web_sys::wasm_bindgen::JsCast;
 
 #[server]
 pub async fn fetch_movie_detail(id: u64) -> Result<crate::app::model::Movie, ServerFnError> {
@@ -182,11 +182,9 @@ fn ChapterSelector(chapters: Vec<MovieChapter>, selected_idx: RwSignal<usize>) -
                 on:change=move |ev| {
                     if let Some(sel) = ev.target()
                         .and_then(|t| t.dyn_into::<HtmlSelectElement>().ok())
-                    {
-                        if let Ok(num) = sel.value().parse::<usize>() {
+                        && let Ok(num) = sel.value().parse::<usize>() {
                             selected_idx.set(num);
                         }
-                    }
                 }
             >
                 <For
