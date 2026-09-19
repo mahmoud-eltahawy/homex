@@ -1,7 +1,7 @@
 [package]
-name = "my_disc"
+name = "homex"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -30,8 +30,8 @@ web-sys = { version = "0.3.103", features = [
     "MouseEvent",
     "SubmitEvent",
 ]}
-gloo = { version = "0.12.0"}
-gloo-timers = { version = "0.4.0",features = ["futures"]}
+# gloo = { version = "0.12.0"}
+# gloo-timers = { version = "0.4.0",features = ["futures"]}
 serde = { version = "1.0.229", features = ["derive"] }
 tower-http = { version = "0.6.0",features = ["fs"], optional = true }
 leptos-use = "0.19"

@@ -2,16 +2,16 @@
 
 use std::sync::Arc;
 
-use my_disc::app::server::{AppState, Config};
+use homex::app::server::{AppState, Config};
 
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
-    use axum::{routing::get, Extension, Router};
+    use axum::{Extension, Router, routing::get};
+    use homex::app::{server::routes::stream_media, *};
     use leptos::logging::log;
     use leptos::prelude::*;
-    use leptos_axum::{generate_route_list, LeptosRoutes};
-    use my_disc::app::{server::routes::stream_media, *};
+    use leptos_axum::{LeptosRoutes, generate_route_list};
 
     let config = Config::load().expect("failed to load homex.toml");
     let server_addr = config.server.addr;
