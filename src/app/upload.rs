@@ -5,6 +5,7 @@ use crate::app::{
     },
     resource_view::ResourceView,
 };
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::{either::Either, html};
 use leptos_router::{LazyRoute, lazy_route};
@@ -17,6 +18,8 @@ use web_sys::{
     wasm_bindgen::JsCast,
 };
 
+// ─── Classes ──────────────────────────────────────────────────────────────
+
 const INPUT_CLASS: &str = "w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition";
 const TEXTAREA_CLASS: &str = "w-full bg-white/10 backdrop-blur-md text-white placeholder-gray-500 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:bg-white/20 transition resize-none";
 const CARD_CLASS: &str =
@@ -26,7 +29,19 @@ const TOOLBAR_BTN_CLASS: &str = "inline-flex items-center gap-1.5 bg-white/10 ho
 const UPLOAD_BTN_CLASS: &str = "inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm";
 const ICON_BTN_CLASS: &str = "text-gray-400 hover:text-white transition disabled:opacity-30 p-1";
 
-// ─── Data types ───────────────────────────────────────────────────────────
+// File-picker hints. Browsers treat these as suggestions — the server
+// still validates the actual extension before doing anything.
+const VIDEO_ACCEPT: &str = "video/mp4,video/webm,video/x-matroska,video/quicktime,\
+video/x-msvideo,video/x-ms-wmv,video/x-flv,video/mp2t,\
+.mp4,.m4v,.webm,.mkv,.mov,.avi,.wmv,.flv,.ts";
+
+const AUDIO_ACCEPT: &str = "audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/x-wav,\
+audio/ogg,audio/opus,audio/flac,audio/x-flac,audio/x-ms-wma,audio/aiff,\
+.mp3,.m4a,.aac,.wav,.ogg,.oga,.opus,.flac,.wma,.aiff,.aif";
+
+const IMAGE_ACCEPT: &str = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
+
+// ─── DTOs ─────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaTitle {
@@ -45,7 +60,46 @@ pub struct UploadItem {
 pub struct UploadResult {
     pub success: bool,
     pub message: String,
+    pub job_id: Option<String>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ConversionStatus {
+    Writing,
+    Converting {
+        conversion_index: usize,
+        conversion_count: usize,
+        current_file: String,
+        progress: f32,
+    },
+    Finalizing,
+    Done,
+    Failed(String),
+}
+
+// ─── Internal (server-side) types ─────────────────────────────────────────
+
+#[cfg(feature = "ssr")]
+struct UploadPayload {
+    title: String,
+    description: String,
+    media_type: MediaType,
+    is_new: bool,
+    existing_id: Option<i64>,
+    season_number: Option<i64>,
+    files: Vec<UploadFile>,
+    /// `Some((extension, bytes))` if the user attached a poster.
+    poster: Option<(String, Vec<u8>)>,
+}
+
+#[cfg(feature = "ssr")]
+struct UploadFile {
+    filename: String,
+    title: String,
+    bytes: Vec<u8>,
+}
+
+// ─── Server functions ─────────────────────────────────────────────────────
 
 #[server]
 async fn fetch_series_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
@@ -57,6 +111,7 @@ async fn fetch_series_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
         id: i64,
         title: String,
     }
+
     let rows: Vec<Row> = sqlx::query_as("SELECT id, title FROM series ORDER BY title")
         .fetch_all(&state.db)
         .await
@@ -80,6 +135,7 @@ async fn fetch_movie_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
         id: i64,
         title: String,
     }
+
     let rows: Vec<Row> = sqlx::query_as("SELECT id, title FROM movies ORDER BY title")
         .fetch_all(&state.db)
         .await
@@ -103,6 +159,7 @@ async fn fetch_audio_group_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
         id: i64,
         title: String,
     }
+
     let rows: Vec<Row> = sqlx::query_as("SELECT id, title FROM audio_groups ORDER BY title")
         .fetch_all(&state.db)
         .await
@@ -119,13 +176,16 @@ async fn fetch_audio_group_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
 #[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {
     use crate::app::server::AppState;
-    use sqlx::AssertSqlSafe;
+    use crate::app::server::convert::{
+        Job, JobPhase, is_audio_container_supported, is_convertible_audio, is_convertible_video,
+        is_video_container_supported,
+    };
     use std::collections::BTreeMap;
 
     let state: AppState = expect_context();
     let mut multipart = data.into_inner().unwrap();
 
-    // ── parse fields ─────────────────────────────────────────────────
+    // ── Parse multipart ──────────────────────────────────────────────
     let mut title = String::new();
     let mut media_type_str = String::new();
     let mut description = String::new();
@@ -135,20 +195,16 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
 
     let mut files: BTreeMap<usize, (String, Vec<u8>)> = BTreeMap::new();
     let mut file_titles: BTreeMap<usize, String> = BTreeMap::new();
-
-    // Poster bytes + extension, if the user uploaded one.
     let mut poster: Option<(String, Vec<u8>)> = None;
 
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().map(String::from).unwrap_or_default();
 
-        // Poster first — it's a single field, not indexed.
         if name == "poster_file" {
             let fname = field.file_name().map(String::from).unwrap_or_default();
             let bytes = field.bytes().await?.to_vec();
             if !bytes.is_empty() {
-                let ext = extension_of(&fname);
-                poster = Some((ext, bytes));
+                poster = Some((extension_of(&fname), bytes));
             }
             continue;
         }
@@ -209,9 +265,153 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         .try_into()
         .map_err(|e: &str| ServerFnError::new(e))?;
 
-    // ── write media files to disk + insert `files` rows ──────────────
-    let slug = slugify(&title);
-    let base_subdir = match media_type {
+    // ── Validate extensions ──────────────────────────────────────────
+    // `accept` on the file input is advisory. A user can pick "All files",
+    // drag-and-drop, or curl the endpoint directly. Reject mismatches here
+    // so ffmpeg never has to guess at a random blob.
+    for (filename, _) in files.values() {
+        let ext = filename
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let ok = match media_type {
+            MediaType::Movie | MediaType::Series => {
+                is_video_container_supported(&ext) || is_convertible_video(&ext)
+            }
+            MediaType::AudioGroup => {
+                is_audio_container_supported(&ext) || is_convertible_audio(&ext)
+            }
+        };
+        if !ok {
+            return Err(ServerFnError::new(format!("صيغة غير مدعومة: {filename}")));
+        }
+    }
+
+    // ── Decide fast vs slow path ─────────────────────────────────────
+    let needs_conversion = files.iter().any(|(_, (filename, _))| {
+        let ext = filename.rsplit('.').next().unwrap_or("");
+        match media_type {
+            MediaType::Movie | MediaType::Series => !is_video_container_supported(ext),
+            MediaType::AudioGroup => !is_audio_container_supported(ext),
+        }
+    });
+
+    let payload = UploadPayload {
+        title,
+        description,
+        media_type,
+        is_new,
+        existing_id,
+        season_number,
+        files: files
+            .into_iter()
+            .map(|(idx, (name, bytes))| {
+                let t = file_titles
+                    .get(&idx)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone());
+                UploadFile {
+                    filename: name,
+                    title: t,
+                    bytes,
+                }
+            })
+            .collect(),
+        poster,
+    };
+
+    if !needs_conversion {
+        // Fast path: everything inline, no job, no polling.
+        let msg = process_upload(payload, &state, None).await?;
+        return Ok(UploadResult {
+            success: true,
+            message: msg,
+            job_id: None,
+        });
+    }
+
+    // Slow path: spawn a background task and return immediately.
+    let job_id = new_job_id();
+    {
+        let mut jobs = state.jobs.write().await;
+        jobs.insert(
+            job_id.clone(),
+            Job {
+                phase: JobPhase::Writing,
+                started_at: std::time::Instant::now(),
+            },
+        );
+    }
+
+    let state_bg = state.clone();
+    let job_id_bg = job_id.clone();
+    tokio::spawn(async move {
+        if let Err(e) = process_upload(payload, &state_bg, Some(&job_id_bg)).await {
+            crate::app::server::convert::job_set_phase(
+                &state_bg.jobs,
+                Some(&job_id_bg),
+                JobPhase::Failed(e.to_string()),
+            )
+            .await;
+        }
+    });
+
+    Ok(UploadResult {
+        success: true,
+        message: "بدأ رفع الملفات وتحويلها في الخلفية".into(),
+        job_id: Some(job_id),
+    })
+}
+
+#[server]
+pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, ServerFnError> {
+    use crate::app::server::AppState;
+    use crate::app::server::convert::JobPhase;
+
+    let state: AppState = expect_context();
+    let jobs = state.jobs.read().await;
+    let job = jobs
+        .get(&job_id)
+        .ok_or_else(|| ServerFnError::new("job not found"))?;
+
+    Ok(match &job.phase {
+        JobPhase::Writing => ConversionStatus::Writing,
+        JobPhase::Converting {
+            conversion_index,
+            conversion_count,
+            current_file,
+            progress,
+        } => ConversionStatus::Converting {
+            conversion_index: *conversion_index,
+            conversion_count: *conversion_count,
+            current_file: current_file.clone(),
+            progress: *progress,
+        },
+        JobPhase::Finalizing => ConversionStatus::Finalizing,
+        JobPhase::Done => ConversionStatus::Done,
+        JobPhase::Failed(e) => ConversionStatus::Failed(e.clone()),
+    })
+}
+
+// ─── Worker (server-side) ─────────────────────────────────────────────────
+
+#[cfg(feature = "ssr")]
+async fn process_upload(
+    payload: UploadPayload,
+    state: &crate::app::server::AppState,
+    job_id: Option<&str>,
+) -> Result<String, ServerFnError> {
+    use crate::app::server::convert::{
+        JobPhase, TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
+        is_video_container_supported, job_set_phase,
+    };
+    use sqlx::AssertSqlSafe;
+
+    job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
+
+    let slug = slugify(&payload.title);
+    let base_subdir = match payload.media_type {
         MediaType::Movie => "movies",
         MediaType::Series => "series",
         MediaType::AudioGroup => "audio",
@@ -227,202 +427,264 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         .await
         .map_err(|e| ServerFnError::new(format!("mkdir: {e}")))?;
 
-    let mut written: Vec<(i64, String, usize, String)> = Vec::new();
-    for (idx, (filename, bytes)) in &files {
-        let safe_name = sanitize_filename(filename);
-        let rel = format!("{base_subdir}/{slug}/{safe_name}");
-        let abs = state.config.storage.media_root.join(&rel);
+    // Decide per-file: convert to what, or leave alone?
+    let targets: Vec<Option<TargetFormat>> = payload
+        .files
+        .iter()
+        .map(|f| {
+            let ext = f.filename.rsplit('.').next().unwrap_or("");
+            match payload.media_type {
+                MediaType::Movie | MediaType::Series => {
+                    if is_video_container_supported(ext) {
+                        None
+                    } else {
+                        Some(TargetFormat::Mp4)
+                    }
+                }
+                MediaType::AudioGroup => {
+                    if is_audio_container_supported(ext) {
+                        None
+                    } else {
+                        Some(TargetFormat::Mp3)
+                    }
+                }
+            }
+        })
+        .collect();
 
-        tokio::fs::write(&abs, bytes)
+    let conversion_count = targets.iter().filter(|t| t.is_some()).count();
+
+    // ── Write + convert each file ────────────────────────────────────
+    let mut staged: Vec<(String, i64, u64, String)> = Vec::new();
+
+    for (i, file) in payload.files.iter().enumerate() {
+        let ext = file.filename.rsplit('.').next().unwrap_or("").to_string();
+        let stem = file
+            .filename
+            .rsplitn(2, '.')
+            .nth(1)
+            .unwrap_or(&file.filename)
+            .to_string();
+        let safe_stem = sanitize_filename(&stem);
+
+        let raw_rel = format!("{base_subdir}/{slug}/{safe_stem}.{ext}");
+        let raw_abs = state.config.storage.media_root.join(&raw_rel);
+
+        tokio::fs::write(&raw_abs, &file.bytes)
             .await
-            .map_err(|e| ServerFnError::new(format!("write {}: {e}", abs.display())))?;
+            .map_err(|e| ServerFnError::new(format!("write {}: {e}", raw_abs.display())))?;
 
-        let out = tokio::process::Command::new("ffprobe")
-            .args([
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                &abs.to_string_lossy(),
-            ])
-            .output()
-            .await?;
-        let dur: f64 = String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .parse()
-            .unwrap_or(0.0);
-        let dur = dur.round() as i64;
+        let Some(target) = targets[i] else {
+            // Container is already playable.
+            let dur = ffprobe_duration(&raw_abs).await.round() as i64;
+            staged.push((raw_rel, dur, file.bytes.len() as u64, file.title.clone()));
+            continue;
+        };
 
+        let out_rel = format!("{base_subdir}/{slug}/{safe_stem}.{}", target.extension());
+        let out_abs = state.config.storage.media_root.join(&out_rel);
+
+        let conversion_pos = targets[..i].iter().filter(|t| t.is_some()).count();
+        let total_secs = ffprobe_duration(&raw_abs).await;
+
+        convert_file(
+            &raw_abs,
+            &out_abs,
+            target,
+            total_secs,
+            conversion_pos,
+            conversion_count,
+            &file.filename,
+            &state.jobs,
+            job_id,
+        )
+        .await
+        .map_err(ServerFnError::new)?;
+
+        let _ = tokio::fs::remove_file(&raw_abs).await;
+
+        let size = tokio::fs::metadata(&out_abs)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
+        staged.push((out_rel, total_secs.round() as i64, size, file.title.clone()));
+    }
+
+    // ── DB inserts ───────────────────────────────────────────────────
+    job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
+
+    let mut file_rows: Vec<(i64, String)> = Vec::new();
+    for (rel, dur, size, title) in &staged {
         let file_id: i64 = sqlx::query_scalar(
             "INSERT INTO files (relative_path, size_bytes, duration_secs) \
              VALUES (?, ?, ?) RETURNING id",
         )
-        .bind(&rel)
-        .bind(bytes.len() as i64)
-        .bind(dur)
+        .bind(rel)
+        .bind(*size as i64)
+        .bind(*dur)
         .fetch_one(&state.db)
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-        let t = file_titles
-            .get(idx)
-            .cloned()
-            .unwrap_or_else(|| filename.clone());
-        written.push((file_id, filename.clone(), bytes.len(), t));
+        file_rows.push((file_id, title.clone()));
     }
-    written.sort_by_key(|(id, _, _, _)| *id);
 
-    // ── entity + child rows, all in one transaction ──────────────────
     let mut tx = state
         .db
         .begin()
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    // Match arm returns (table_name, entity_id) so poster handling can
-    // run once afterwards regardless of media type.
-    let (table, entity_id): (&str, i64) =
-        match media_type {
-            MediaType::Movie => {
-                let movie_id: i64 = if is_new {
-                    sqlx::query_scalar(
-                        "INSERT INTO movies (title, description) VALUES (?, ?) RETURNING id",
-                    )
-                    .bind(&title)
-                    .bind(if description.is_empty() {
-                        None
-                    } else {
-                        Some(&description)
-                    })
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| ServerFnError::new(e.to_string()))?
+    // The match returns (table_name, entity_id) so poster handling can
+    // run once afterwards, regardless of media type.
+    let (table, entity_id): (&str, i64) = match payload.media_type {
+        MediaType::Movie => {
+            let movie_id: i64 = if payload.is_new {
+                sqlx::query_scalar(
+                    "INSERT INTO movies (title, description) VALUES (?, ?) RETURNING id",
+                )
+                .bind(&payload.title)
+                .bind(if payload.description.is_empty() {
+                    None
                 } else {
-                    existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
-                };
-
-                let start: i64 = sqlx::query_scalar(
-                    "SELECT COALESCE(MAX(number) + 1, 0) FROM movie_chapters WHERE movie_id = ?",
-                )
-                .bind(movie_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-                for (i, (fid, _, _, ch_title)) in written.iter().enumerate() {
-                    sqlx::query(
-                        "INSERT INTO movie_chapters (movie_id, number, title, file_id) \
-                     VALUES (?, ?, ?, ?)",
-                    )
-                    .bind(movie_id)
-                    .bind(start + i as i64)
-                    .bind(ch_title)
-                    .bind(fid)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| ServerFnError::new(e.to_string()))?;
-                }
-                ("movies", movie_id)
-            }
-            MediaType::Series => {
-                let series_id: i64 = if is_new {
-                    sqlx::query_scalar(
-                        "INSERT INTO series (title, description) VALUES (?, ?) RETURNING id",
-                    )
-                    .bind(&title)
-                    .bind(if description.is_empty() {
-                        None
-                    } else {
-                        Some(&description)
-                    })
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| ServerFnError::new(e.to_string()))?
-                } else {
-                    existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
-                };
-
-                let sn = season_number.unwrap_or(1);
-                let season_id: i64 = sqlx::query_scalar(
-                    "INSERT INTO seasons (series_id, number) VALUES (?, ?) \
-                 ON CONFLICT(series_id, number) DO UPDATE SET number = number \
-                 RETURNING id",
-                )
-                .bind(series_id)
-                .bind(sn)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-                let start: i64 = sqlx::query_scalar(
-                    "SELECT COALESCE(MAX(number) + 1, 1) FROM episodes WHERE season_id = ?",
-                )
-                .bind(season_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-                for (i, (fid, _, _, ep_title)) in written.iter().enumerate() {
-                    sqlx::query(
-                        "INSERT INTO episodes (season_id, number, title, file_id) \
-                     VALUES (?, ?, ?, ?)",
-                    )
-                    .bind(season_id)
-                    .bind(start + i as i64)
-                    .bind(ep_title)
-                    .bind(fid)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| ServerFnError::new(e.to_string()))?;
-                }
-                ("series", series_id)
-            }
-            MediaType::AudioGroup => {
-                let group_id: i64 =
-                    if is_new {
-                        sqlx::query_scalar(
-                    "INSERT INTO audio_groups (title, description) VALUES (?, ?) RETURNING id",
-                )
-                .bind(&title)
-                .bind(if description.is_empty() { None } else { Some(&description) })
+                    Some(&payload.description)
+                })
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| ServerFnError::new(e.to_string()))?
-                    } else {
-                        existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
-                    };
+            } else {
+                payload
+                    .existing_id
+                    .ok_or_else(|| ServerFnError::new("existing_id required"))?
+            };
 
-                let start: i64 = sqlx::query_scalar(
-                    "SELECT COALESCE(MAX(number) + 1, 0) FROM audios WHERE group_id = ?",
+            let start: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(number) + 1, 0) FROM movie_chapters WHERE movie_id = ?",
+            )
+            .bind(movie_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            for (i, (fid, title)) in file_rows.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO movie_chapters (movie_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
                 )
-                .bind(group_id)
-                .fetch_one(&mut *tx)
+                .bind(movie_id)
+                .bind(start + i as i64)
+                .bind(title)
+                .bind(fid)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-                for (i, (fid, _, _, song_title)) in written.iter().enumerate() {
-                    sqlx::query(
-                        "INSERT INTO audios (group_id, number, title, file_id) \
-                     VALUES (?, ?, ?, ?)",
-                    )
-                    .bind(group_id)
-                    .bind(start + i as i64)
-                    .bind(song_title)
-                    .bind(fid)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| ServerFnError::new(e.to_string()))?;
-                }
-                ("audio_groups", group_id)
             }
-        };
+            ("movies", movie_id)
+        }
+        MediaType::Series => {
+            let series_id: i64 = if payload.is_new {
+                sqlx::query_scalar(
+                    "INSERT INTO series (title, description) VALUES (?, ?) RETURNING id",
+                )
+                .bind(&payload.title)
+                .bind(if payload.description.is_empty() {
+                    None
+                } else {
+                    Some(&payload.description)
+                })
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?
+            } else {
+                payload
+                    .existing_id
+                    .ok_or_else(|| ServerFnError::new("existing_id required"))?
+            };
 
-    // ── poster, if any ───────────────────────────────────────────────
-    // Written with the entity id in the filename so two uploads with
-    // the same title (slug) can't collide.
-    if let Some((ext, bytes)) = poster.as_ref() {
+            let sn = payload.season_number.unwrap_or(1);
+            let season_id: i64 = sqlx::query_scalar(
+                "INSERT INTO seasons (series_id, number) VALUES (?, ?) \
+                 ON CONFLICT(series_id, number) DO UPDATE SET number = number \
+                 RETURNING id",
+            )
+            .bind(series_id)
+            .bind(sn)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            let start: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(number) + 1, 1) FROM episodes WHERE season_id = ?",
+            )
+            .bind(season_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            for (i, (fid, title)) in file_rows.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO episodes (season_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(season_id)
+                .bind(start + i as i64)
+                .bind(title)
+                .bind(fid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            }
+            ("series", series_id)
+        }
+        MediaType::AudioGroup => {
+            let group_id: i64 = if payload.is_new {
+                sqlx::query_scalar(
+                    "INSERT INTO audio_groups (title, description) VALUES (?, ?) RETURNING id",
+                )
+                .bind(&payload.title)
+                .bind(if payload.description.is_empty() {
+                    None
+                } else {
+                    Some(&payload.description)
+                })
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?
+            } else {
+                payload
+                    .existing_id
+                    .ok_or_else(|| ServerFnError::new("existing_id required"))?
+            };
+
+            let start: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(number) + 1, 0) FROM audios WHERE group_id = ?",
+            )
+            .bind(group_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            for (i, (fid, title)) in file_rows.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO audios (group_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(group_id)
+                .bind(start + i as i64)
+                .bind(title)
+                .bind(fid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            }
+            ("audio_groups", group_id)
+        }
+    };
+
+    // ── Poster (optional) ────────────────────────────────────────────
+    // Written with the entity id in the filename so two uploads with the
+    // same title (slug) can't fight over the same file.
+    if let Some((ext, bytes)) = payload.poster.as_ref() {
         let filename = format!("{entity_id}.{ext}");
         let rel_dir = base_subdir.to_string();
         let abs_dir = state.config.storage.data_dir.join("posters").join(&rel_dir);
@@ -449,11 +711,12 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    Ok(UploadResult {
-        success: true,
-        message: format!("تم رفع {} ملف بنجاح", written.len()),
-    })
+    job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
+
+    Ok(format!("تم رفع {} ملف بنجاح", file_rows.len()))
 }
+
+// ─── Server-only helpers ──────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 fn slugify(s: &str) -> String {
@@ -492,6 +755,16 @@ fn extension_of(filename: &str) -> String {
     }
 }
 
+#[cfg(feature = "ssr")]
+fn new_job_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{ns:x}")
+}
+
 // ─── Page shell ───────────────────────────────────────────────────────────
 
 pub struct UploadPage;
@@ -523,17 +796,18 @@ fn UploadContent() -> impl IntoView {
     let is_new = RwSignal::new(None::<bool>);
     let existing_id = RwSignal::new(None::<i64>);
 
-    // Details signals — lifted out of the form so they survive toggling.
     let title = RwSignal::new(String::new());
     let description = RwSignal::new(String::new());
     let season_number = RwSignal::new(1u32);
-    let poster_file = RwSignal::new(None::<web_sys::File>); // ← new
+    let poster_file = RwSignal::new(None::<web_sys::File>);
 
-    // Files queued for the current operation.
     let items = RwSignal::new(Vec::<UploadItem>::new());
     let next_id = RwSignal::new(1u32);
 
-    // Titles for the currently-selected media kind. Refetches on change.
+    // Background job tracking.
+    let active_job = RwSignal::new(None::<String>);
+    let job_status = RwSignal::new(None::<ConversionStatus>);
+
     let titles = Resource::new(
         move || media_type.get(),
         |mt| async move {
@@ -546,7 +820,6 @@ fn UploadContent() -> impl IntoView {
         },
     );
 
-    // Auto-scroll anchors.
     let s2_ref = NodeRef::<html::Div>::new();
     let s3_ref = NodeRef::<html::Div>::new();
 
@@ -582,7 +855,36 @@ fn UploadContent() -> impl IntoView {
         curr
     });
 
-    // Client-side validation. Returns the first unmet requirement, or None.
+    // Poll the background job until it reports Done or Failed.
+    Effect::new(move |_| {
+        let Some(my_id) = active_job.get() else {
+            return;
+        };
+        job_status.set(None);
+
+        leptos::task::spawn_local(async move {
+            loop {
+                match poll_conversion(my_id.clone()).await {
+                    Ok(status) => {
+                        let done =
+                            matches!(status, ConversionStatus::Done | ConversionStatus::Failed(_));
+                        job_status.set(Some(status));
+                        if done {
+                            break;
+                        }
+                    }
+                    Err(_) => { /* transient; keep trying */ }
+                }
+                TimeoutFuture::new(700).await;
+            }
+
+            if active_job.get_untracked().as_deref() == Some(my_id.as_str()) {
+                active_job.set(None);
+            }
+        });
+    });
+
+    // Client-side validation.
     let validation_hint = Signal::derive(move || -> Option<String> {
         let mt = match media_type.get() {
             Some(m) => m,
@@ -612,6 +914,15 @@ fn UploadContent() -> impl IntoView {
     });
 
     let upload_action = Action::new_local(|data: &FormData| upload_media(data.clone().into()));
+
+    // When the server hands back a job_id, start polling.
+    Effect::new(move |_| {
+        if let Some(Ok(result)) = upload_action.value().get()
+            && let Some(id) = result.job_id
+        {
+            active_job.set(Some(id));
+        }
+    });
 
     let on_submit = move |ev: web_sys::SubmitEvent| {
         ev.prevent_default();
@@ -645,6 +956,7 @@ fn UploadContent() -> impl IntoView {
             let _ = form_data.append_with_str(&format!("file_title_{i}"), &item.title);
         }
 
+        // Poster (optional)
         if let Some(poster) = poster_file.get_untracked() {
             let _ = form_data.append_with_blob_and_filename("poster_file", &poster, &poster.name());
         }
@@ -653,11 +965,12 @@ fn UploadContent() -> impl IntoView {
     };
 
     let result_view = move || match upload_action.value().get() {
-        Some(Ok(r)) => Some(view! {
+        Some(Ok(r)) if r.job_id.is_none() => Some(view! {
             <div class="bg-green-500/15 text-green-300 border border-green-500/30 rounded-xl p-3 text-sm">
                 {r.message}
             </div>
         }),
+        Some(Ok(_)) => None, // will be shown as ConversionProgress
         Some(Err(e)) => Some(view! {
             <div class="bg-red-500/15 text-red-300 border border-red-500/30 rounded-xl p-3 text-sm">
                 {e.to_string()}
@@ -668,7 +981,7 @@ fn UploadContent() -> impl IntoView {
 
     view! {
         <form on:submit=on_submit class="space-y-4 md:space-y-5">
-            // ── ① Media type ──────────────────────────────────────────
+            // ① Media type
             <FormSection
                 number=1
                 title="ما نوع الوسائط؟"
@@ -687,7 +1000,7 @@ fn UploadContent() -> impl IntoView {
                 />
             </FormSection>
 
-            // ── ② New vs existing ─────────────────────────────────────
+            // ② New vs existing
             <Show when=move || media_type.get().is_some()>
                 <div node_ref=s2_ref class="scroll-mt-24 md:scroll-mt-28">
                     <FormSection
@@ -700,7 +1013,7 @@ fn UploadContent() -> impl IntoView {
                 </div>
             </Show>
 
-            // ── ③ Details ─────────────────────────────────────────────
+            // ③ Details
             <Show when=move || is_new.get().is_some()>
                 <div node_ref=s3_ref class="scroll-mt-24 md:scroll-mt-28">
                     <FormSection
@@ -731,7 +1044,7 @@ fn UploadContent() -> impl IntoView {
                 </div>
             </Show>
 
-            // ── ④ Files ───────────────────────────────────────────────
+            // ④ Files
             <Show when=move || is_new.get().is_some()>
                 <FormSection
                     number=4
@@ -744,49 +1057,46 @@ fn UploadContent() -> impl IntoView {
                                 items
                                 next_id
                                 heading="فصول الفيلم"
-                                hint="سيتم إضافة الفصول الجديدة بعد آخر فصل موجود. استخدم الأسهم لإعادة الترتيب."
+                                hint="الفيديوهات بصيغة غير مدعومة (مثل MKV) سيتم تحويلها إلى MP4 تلقائياً."
                                 input_id="multiMovieInput"
-                                accept="video/*"
+                                accept=VIDEO_ACCEPT
                                 select_label="اختيار فصول الفيلم"
                                 number_label="رقم الفصل"
                                 title_label="عنوان الفصل"
                                 file_label="الملف"
                                 icon=MovieIcon()
                             />
-                        }
-                        .into_any(),
+                        }.into_any(),
                         Some(MediaType::Series) => view! {
                             <MediaFilesSection
                                 items
                                 next_id
                                 heading="الحلقات"
-                                hint="سيتم ترقيم الحلقات تلقائياً حسب الترتيب. استخدم الأسهم لإعادة الترتيب."
+                                hint="الفيديوهات بصيغة غير مدعومة (مثل MKV) سيتم تحويلها إلى MP4 تلقائياً."
                                 input_id="multiEpisodeInput"
-                                accept="video/*"
+                                accept=VIDEO_ACCEPT
                                 select_label="اختيار الحلقات"
                                 number_label="رقم الحلقة"
                                 title_label="عنوان الحلقة"
                                 file_label="الملف"
                                 icon=SeriesIcon()
                             />
-                        }
-                        .into_any(),
+                        }.into_any(),
                         Some(MediaType::AudioGroup) => view! {
                             <MediaFilesSection
                                 items
                                 next_id
                                 heading="المقاطع الصوتية"
-                                hint="سيتم إضافة المقاطع الجديدة في نهاية المجموعة. استخدم الأسهم لإعادة الترتيب."
+                                hint="الملفات الصوتية بصيغة غير مدعومة (مثل FLAC) سيتم تحويلها إلى MP3 تلقائياً."
                                 input_id="multiAudioInput"
-                                accept="audio/*"
+                                accept=AUDIO_ACCEPT
                                 select_label="اختيار ملفات صوتية"
                                 number_label="رقم المقطع"
                                 title_label="عنوان المقطع الصوتي"
                                 file_label="الملف"
                                 icon=AudioIcon()
                             />
-                        }
-                        .into_any(),
+                        }.into_any(),
                         None => ().into_any(),
                     }}
                 </FormSection>
@@ -796,8 +1106,14 @@ fn UploadContent() -> impl IntoView {
 
             {result_view}
 
+            <Show when=move || job_status.get().is_some()>
+                {move || job_status.get().map(|s| view! { <ConversionProgress status=s/> })}
+            </Show>
+
             <UploadSubmitButton
-                pending=upload_action.pending().into()
+                pending=Signal::derive(move || {
+                    upload_action.pending().get() || active_job.get().is_some()
+                })
                 valid=Signal::derive(move || validation_hint.get().is_none())
                 hint=Signal::derive(move || validation_hint.get().unwrap_or_default())
                 file_count=Signal::derive(move || items.get().len())
@@ -838,7 +1154,7 @@ fn FormSection(
     }
 }
 
-// ─── Section ① — media kind ───────────────────────────────────────────────
+// ─── Section ① ────────────────────────────────────────────────────────────
 
 #[component]
 #[allow(clippy::too_many_arguments)]
@@ -853,12 +1169,10 @@ fn MediaKindCards(
     items: RwSignal<Vec<UploadItem>>,
     next_id: RwSignal<u32>,
 ) -> impl IntoView {
-    // Single shared callback so all three cards get identical reset logic.
     let on_select: Rc<dyn Fn(MediaType)> = Rc::new(move |mt: MediaType| {
         if media_type.get_untracked() == Some(mt) {
             return;
         }
-        // Guard against destroying queued work by accident.
         if !items.get_untracked().is_empty() {
             let confirmed = web_sys::window()
                 .and_then(|w| {
@@ -885,27 +1199,12 @@ fn MediaKindCards(
 
     view! {
         <div class="grid grid-cols-3 gap-3">
-            <MediaKindCard
-                value=MediaType::Movie
-                label="فيلم"
-                icon=MovieIcon()
-                media_type
-                on_select=Rc::clone(&on_select)
-            />
-            <MediaKindCard
-                value=MediaType::Series
-                label="مسلسل"
-                icon=SeriesIcon()
-                media_type
-                on_select=Rc::clone(&on_select)
-            />
-            <MediaKindCard
-                value=MediaType::AudioGroup
-                label="صوتيات"
-                icon=AudioIcon()
-                media_type
-                on_select=on_select
-            />
+            <MediaKindCard value=MediaType::Movie label="فيلم" icon=MovieIcon()
+                media_type on_select=Rc::clone(&on_select)/>
+            <MediaKindCard value=MediaType::Series label="مسلسل" icon=SeriesIcon()
+                media_type on_select=Rc::clone(&on_select)/>
+            <MediaKindCard value=MediaType::AudioGroup label="صوتيات" icon=AudioIcon()
+                media_type on_select=on_select/>
         </div>
     }
 }
@@ -941,7 +1240,7 @@ fn MediaKindCard(
     }
 }
 
-// ─── Section ② — new vs existing ──────────────────────────────────────────
+// ─── Section ② ────────────────────────────────────────────────────────────
 
 #[component]
 fn NewOrExistingCards(
@@ -952,8 +1251,7 @@ fn NewOrExistingCards(
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <ChoiceCard
                 active=Signal::derive(move || is_new.get() == Some(true))
-                label="إنشاء جديد"
-                sub="ابدأ من الصفر"
+                label="إنشاء جديد" sub="ابدأ من الصفر"
                 on_click=move |_: MouseEvent| {
                     is_new.set(Some(true));
                     existing_id.set(None);
@@ -961,8 +1259,7 @@ fn NewOrExistingCards(
             />
             <ChoiceCard
                 active=Signal::derive(move || is_new.get() == Some(false))
-                label="إضافة إلى موجود"
-                sub="أضف إلى عنصر موجود في المكتبة"
+                label="إضافة إلى موجود" sub="أضف إلى عنصر موجود في المكتبة"
                 on_click=move |_: MouseEvent| is_new.set(Some(false))
             />
         </div>
@@ -997,7 +1294,7 @@ where
     }
 }
 
-// ─── Section ③ — details ──────────────────────────────────────────────────
+// ─── Section ③ ────────────────────────────────────────────────────────────
 
 #[component]
 fn DetailsSection(
@@ -1022,13 +1319,11 @@ fn DetailsSection(
             </Show>
 
             <Show when=move || is_new_false.get()>
-                <ExistingSelectField
-                    media_type=media_type.get()
-                    existing_id
-                    titles
-                />
+                <ExistingSelectField media_type=media_type.get() existing_id titles/>
             </Show>
+
             <PosterUploadField poster_file/>
+
             <Show when=move || is_series.get()>
                 <SeasonNumberField season_number/>
             </Show>
@@ -1041,14 +1336,10 @@ fn TitleField(title: RwSignal<String>) -> impl IntoView {
     view! {
         <div>
             <label class="block text-sm font-medium text-gray-300 mb-1.5">"العنوان *"</label>
-            <input
-                type="text"
-                name="title"
+            <input type="text" name="title"
                 prop:value=title
                 on:input=move |ev| title.set(event_target_value(&ev))
-                placeholder="أدخل العنوان..."
-                class=INPUT_CLASS
-            />
+                placeholder="أدخل العنوان..." class=INPUT_CLASS/>
         </div>
     }
 }
@@ -1060,14 +1351,28 @@ fn DescriptionField(description: RwSignal<String>) -> impl IntoView {
             <label class="block text-sm font-medium text-gray-300 mb-1.5">
                 "الوصف (اختياري)"
             </label>
-            <textarea
-                name="description"
-                rows=3
+            <textarea name="description" rows=3
                 prop:value=description
                 on:input=move |ev| description.set(event_target_value(&ev))
-                placeholder="وصف مختصر (اختياري)..."
-                class=TEXTAREA_CLASS
+                placeholder="وصف مختصر (اختياري)..." class=TEXTAREA_CLASS
             ></textarea>
+        </div>
+    }
+}
+
+#[component]
+fn SeasonNumberField(season_number: RwSignal<u32>) -> impl IntoView {
+    view! {
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-1.5">"رقم الموسم *"</label>
+            <input type="number" name="season_number" min="1"
+                prop:value=move || season_number.get().to_string()
+                on:input=move |ev| {
+                    if let Ok(n) = event_target_value(&ev).parse::<u32>() && n >= 1 {
+                        season_number.set(n);
+                    }
+                }
+                class=INPUT_CLASS/>
         </div>
     }
 }
@@ -1088,10 +1393,9 @@ fn PosterUploadField(poster_file: RwSignal<Option<web_sys::File>>) -> impl IntoV
         let Some(files) = input.files() else { return };
         let Some(file) = files.get(0) else { return };
 
-        // Revoke the previous preview URL before replacing it.
-        if let Some(prev) = preview_url.get_untracked()
-            && let Ok(_) = Url::revoke_object_url(&prev)
-        {}
+        if let Some(prev) = preview_url.get_untracked() {
+            let _ = Url::revoke_object_url(&prev);
+        }
 
         file_name.set(file.name());
         if let Ok(url) = Url::create_object_url_with_blob(&file) {
@@ -1111,7 +1415,6 @@ fn PosterUploadField(poster_file: RwSignal<Option<web_sys::File>>) -> impl IntoV
         poster_file.set(None);
     };
 
-    // Make sure the browser doesn't leak the last blob URL.
     on_cleanup(move || {
         if let Some(prev) = preview_url.get_untracked() {
             let _ = Url::revoke_object_url(&prev);
@@ -1137,25 +1440,17 @@ fn PosterUploadField(poster_file: RwSignal<Option<web_sys::File>>) -> impl IntoV
                     }}
                 </div>
                 <div class="flex-1 flex flex-col gap-2 min-w-0">
-                    <input
-                        type="file"
-                        id=input_id
-                        class="hidden"
-                        accept="image/*"
-                        on:change=on_change
-                    />
+                    <input type="file" id=input_id class="hidden"
+                        accept=IMAGE_ACCEPT on:change=on_change/>
                     <label for=input_id class=UPLOAD_BTN_CLASS>
                         <UploadIcon/> "اختيار صورة"
                     </label>
                     <Show when=move || !file_name.get().is_empty()>
                         <div class="flex items-center gap-2 text-xs text-gray-400">
                             <span class="truncate">{move || file_name.get()}</span>
-                            <button
-                                type="button"
-                                on:click=clear
+                            <button type="button" on:click=clear
                                 class="text-red-400 hover:text-red-300 transition shrink-0"
-                                aria-label="إزالة الصورة"
-                            >
+                                aria-label="إزالة الصورة">
                                 <DeleteIcon/>
                             </button>
                         </div>
@@ -1165,28 +1460,6 @@ fn PosterUploadField(poster_file: RwSignal<Option<web_sys::File>>) -> impl IntoV
                     </p>
                 </div>
             </div>
-        </div>
-    }
-}
-
-#[component]
-fn SeasonNumberField(season_number: RwSignal<u32>) -> impl IntoView {
-    view! {
-        <div>
-            <label class="block text-sm font-medium text-gray-300 mb-1.5">"رقم الموسم *"</label>
-            <input
-                type="number"
-                name="season_number"
-                min="1"
-                prop:value=move || season_number.get().to_string()
-                on:input=move |ev| {
-                    if let Ok(n) = event_target_value(&ev).parse::<u32>()
-                        && n >= 1 {
-                            season_number.set(n);
-                        }
-                }
-                class=INPUT_CLASS
-            />
         </div>
     }
 }
@@ -1207,11 +1480,7 @@ fn ExistingSelectField(
     view! {
         <div>
             <label class="block text-sm font-medium text-gray-300 mb-1.5">{label}</label>
-            <ResourceView
-                resource=titles
-                view_fn=ExistingSelectInner
-                adapter=adapter
-            />
+            <ResourceView resource=titles view_fn=ExistingSelectInner adapter=adapter/>
         </div>
     }
 }
@@ -1221,31 +1490,21 @@ fn ExistingSelectInner(existing_id: RwSignal<Option<i64>>, list: Vec<MediaTitle>
     view! {
         <select
             on:change=move |ev| {
-                if let Some(sel) = ev
-                    .target()
-                    .and_then(|t| t.dyn_into::<HtmlSelectElement>().ok())
-                {
+                if let Some(sel) = ev.target().and_then(|t| t.dyn_into::<HtmlSelectElement>().ok()) {
                     existing_id.set(sel.value().parse().ok());
                 }
             }
             class=INPUT_CLASS
         >
-            <option value="" class="bg-gray-800">
-                "-- اختر --"
-            </option>
-            {list
-                .into_iter()
-                .map(|item| view! {
-                    <option value={item.id.to_string()} class="bg-gray-800">
-                        {item.title}
-                    </option>
-                })
-                .collect_view()}
+            <option value="" class="bg-gray-800">"-- اختر --"</option>
+            {list.into_iter().map(|item| view! {
+                <option value={item.id.to_string()} class="bg-gray-800">{item.title}</option>
+            }).collect_view()}
         </select>
     }
 }
 
-// ─── Section ④ — files ────────────────────────────────────────────────────
+// ─── Section ④ ────────────────────────────────────────────────────────────
 
 #[component]
 fn MediaFilesSection(
@@ -1263,21 +1522,8 @@ fn MediaFilesSection(
 ) -> impl IntoView {
     view! {
         <div class="space-y-4">
-            <MediaFilesToolbar
-                items
-                next_id
-                heading
-                input_id
-                accept
-                select_label
-                icon
-            />
-            <MediaItemList
-                items
-                number_label
-                title_label
-                file_label
-            />
+            <MediaFilesToolbar items next_id heading input_id accept select_label icon/>
+            <MediaItemList items number_label title_label file_label/>
             <p class="text-xs text-gray-500">{hint}</p>
         </div>
     }
@@ -1299,13 +1545,7 @@ fn MediaFilesToolbar(
                 {icon} {heading}
             </h2>
             <div class="flex flex-wrap items-center gap-2">
-                <MediaFilesInput
-                    items
-                    next_id
-                    input_id
-                    accept
-                    select_label
-                />
+                <MediaFilesInput items next_id input_id accept select_label/>
                 <SortMediaButton items/>
             </div>
         </div>
@@ -1348,14 +1588,8 @@ fn MediaFilesInput(
     };
 
     view! {
-        <input
-            type="file"
-            id=input_id
-            class="hidden"
-            multiple
-            accept=accept
-            on:change=file_handler
-        />
+        <input type="file" id=input_id class="hidden"
+            multiple accept=accept on:change=file_handler/>
         <label for=input_id class=UPLOAD_BTN_CLASS>
             <UploadIcon/> {select_label}
         </label>
@@ -1382,13 +1616,7 @@ fn MediaItemList(
     view! {
         <div class="space-y-3 max-h-80 overflow-y-auto p-1">
             <For each=move || items.get() key=|item| item.id let:item>
-                <MediaItemRow
-                    items
-                    item_id=item.id
-                    number_label
-                    title_label
-                    file_label
-                />
+                <MediaItemRow items item_id=item.id number_label title_label file_label/>
             </For>
         </div>
     }
@@ -1429,7 +1657,7 @@ fn MediaItemRow(
             {
                 list.swap(pos, pos - 1);
             }
-        })
+        });
     };
     let move_down = move |_| {
         items.update(|list| {
@@ -1438,7 +1666,7 @@ fn MediaItemRow(
             {
                 list.swap(pos, pos + 1);
             }
-        })
+        });
     };
     let title_update = move |ev: web_sys::Event| {
         if let Some(input) = ev
@@ -1463,46 +1691,23 @@ fn MediaItemRow(
                 </div>
                 <div class="sm:col-span-2">
                     <label class="text-xs text-gray-400 mb-0.5 block">{title_label}</label>
-                    <input
-                        type="text"
-                        prop:value=title
-                        on:input=title_update
+                    <input type="text" prop:value=title on:input=title_update
                         placeholder=title_label
-                        class="w-full bg-white/10 text-white rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                    />
+                        class="w-full bg-white/10 text-white rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400"/>
                 </div>
                 <div class="hidden sm:block">
                     <span class="text-xs text-gray-400">{file_label}</span>
-                    <div class="text-xs text-gray-300 truncate mt-0.5 max-w-32">
-                        {file_name}
-                    </div>
+                    <div class="text-xs text-gray-300 truncate mt-0.5 max-w-32">{file_name}</div>
                 </div>
             </div>
             <div class="flex items-center gap-1 mt-1 sm:mt-0">
-                <button
-                    type="button"
-                    on:click=move_up
-                    disabled=move || index() == 0
-                    class=ICON_BTN_CLASS
-                    title="نقل للأعلى"
-                >
-                    <UpArrow/>
-                </button>
-                <button
-                    type="button"
-                    on:click=move_down
+                <button type="button" on:click=move_up disabled=move || index() == 0
+                    class=ICON_BTN_CLASS title="نقل للأعلى"><UpArrow/></button>
+                <button type="button" on:click=move_down
                     disabled=move || index() + 1 == total()
-                    class=ICON_BTN_CLASS
-                    title="نقل للأسفل"
-                >
-                    <DownArrow/>
-                </button>
-                <button
-                    type="button"
-                    on:click=remove
-                    class="text-red-400 hover:text-red-300 transition p-1"
-                    title="حذف"
-                >
+                    class=ICON_BTN_CLASS title="نقل للأسفل"><DownArrow/></button>
+                <button type="button" on:click=remove
+                    class="text-red-400 hover:text-red-300 transition p-1" title="حذف">
                     <DeleteIcon/>
                 </button>
             </div>
@@ -1519,25 +1724,16 @@ fn HiddenFormState(
     existing_id: RwSignal<Option<i64>>,
 ) -> impl IntoView {
     view! {
-        <input
-            type="hidden"
-            name="media_type"
-            value=move || media_type.get().map(|m| m.to_string()).unwrap_or_default()
-        />
-        <input
-            type="hidden"
-            name="is_new"
-            value=move || is_new.get().map(|b| b.to_string()).unwrap_or_default()
-        />
-        <input
-            type="hidden"
-            name="existing_id"
-            value=move || existing_id.get().map(|id| id.to_string()).unwrap_or_default()
-        />
+        <input type="hidden" name="media_type"
+            value=move || media_type.get().map(|m| m.to_string()).unwrap_or_default()/>
+        <input type="hidden" name="is_new"
+            value=move || is_new.get().map(|b| b.to_string()).unwrap_or_default()/>
+        <input type="hidden" name="existing_id"
+            value=move || existing_id.get().map(|id| id.to_string()).unwrap_or_default()/>
     }
 }
 
-// ─── Header & submit ──────────────────────────────────────────────────────
+// ─── Header, progress, submit ────────────────────────────────────────────
 
 #[component]
 fn UploadHeader() -> impl IntoView {
@@ -1557,6 +1753,78 @@ fn UploadHeader() -> impl IntoView {
 }
 
 #[component]
+fn ConversionProgress(status: ConversionStatus) -> impl IntoView {
+    match status {
+        ConversionStatus::Writing => view! {
+            <ProgressShell icon="💾" title="جاري حفظ الملفات على القرص..."
+                subtitle=String::new() percent=None/>
+        }.into_any(),
+
+        ConversionStatus::Converting { conversion_index, conversion_count, current_file, progress } => {
+            let pct = (progress * 100.0).round() as u32;
+            let subtitle = if conversion_count > 1 {
+                format!("ملف {} من {} — {}", conversion_index + 1, conversion_count, current_file)
+            } else {
+                current_file
+            };
+            view! {
+                <ProgressShell icon="🎬" title="جاري تحويل الملف..."
+                    subtitle=subtitle percent=Some(pct)/>
+            }.into_any()
+        }
+
+        ConversionStatus::Finalizing => view! {
+            <ProgressShell icon="💾" title="جاري حفظ البيانات..."
+                subtitle=String::new() percent=None/>
+        }.into_any(),
+
+        ConversionStatus::Done => view! {
+            <div class="bg-green-500/15 border border-green-500/30 rounded-xl p-4 text-green-300 text-sm flex items-center gap-3">
+                <span class="text-lg">"✓"</span>
+                <span>"تم رفع الوسائط وتحويلها بنجاح"</span>
+            </div>
+        }.into_any(),
+
+        ConversionStatus::Failed(err) => view! {
+            <div class="bg-red-500/15 border border-red-500/30 rounded-xl p-4 text-red-300 text-sm">
+                <div class="font-bold mb-1">"فشل التحويل"</div>
+                <div class="text-xs break-all">{err}</div>
+            </div>
+        }.into_any(),
+    }
+}
+
+#[component]
+fn ProgressShell(
+    icon: &'static str,
+    title: &'static str,
+    #[prop(into)] subtitle: String,
+    percent: Option<u32>,
+) -> impl IntoView {
+    let show_percent = percent.is_some();
+    let percent = percent.unwrap_or(0);
+
+    view! {
+        <div class="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-4 space-y-3">
+            <div class="flex items-center gap-3 text-cyan-300">
+                <span class="text-lg">{icon}</span>
+                <span class="font-bold text-sm">{title}</span>
+            </div>
+            <div class="text-xs text-gray-400 truncate font-mono min-h-4">{subtitle}</div>
+            {show_percent.then(|| view! {
+                <div class="space-y-1">
+                    <div class="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div class="h-full bg-gradient-to-r from-cyan-400 to-blue-500 rounded-full transition-all duration-300"
+                            style=format!("width: {percent}%")></div>
+                    </div>
+                    <div class="text-xs text-cyan-300 font-mono text-right">{percent}"%"</div>
+                </div>
+            })}
+        </div>
+    }
+}
+
+#[component]
 fn UploadSubmitButton(
     pending: Signal<bool>,
     valid: Signal<bool>,
@@ -1566,22 +1834,16 @@ fn UploadSubmitButton(
     let disabled = move || pending.get() || !valid.get();
     view! {
         <div class="space-y-2">
-            <button
-                type="submit"
-                disabled=disabled
-                class="w-full py-3 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-base shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02] hover:shadow-cyan-500/40 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:from-cyan-500 disabled:hover:to-blue-500"
-            >
+            <button type="submit" disabled=disabled
+                class="w-full py-3 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-base shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02] hover:shadow-cyan-500/40 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:from-cyan-500 disabled:hover:to-blue-500">
                 <UploadIcon/>
                 {move || {
                     if pending.get() {
                         "جاري الرفع...".to_string()
                     } else {
                         let n = file_count.get();
-                        if n == 0 {
-                            "رفع الوسائط".to_string()
-                        } else {
-                            format!("رفع الوسائط ({n})")
-                        }
+                        if n == 0 { "رفع الوسائط".to_string() }
+                        else { format!("رفع الوسائط ({n})") }
                     }
                 }}
             </button>

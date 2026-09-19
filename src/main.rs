@@ -1,11 +1,10 @@
 #![recursion_limit = "256"]
 
-use homex::app::server::{AppState, Config};
-
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
     use axum::{Extension, Router, routing::get};
+    use homex::app::server::{AppState, Config};
     use homex::app::{server::routes::stream_media, *};
     use leptos::logging::log;
     use leptos::prelude::*;
@@ -19,16 +18,19 @@ async fn main() {
         .await
         .expect("failed to init database");
 
-    let state = AppState { db, config };
-
-    let posters_dir = state.config.storage.data_dir.join("posters");
+    let posters_dir = config.storage.data_dir.join("posters");
     tokio::fs::create_dir_all(&posters_dir)
         .await
         .expect("failed to create posters dir");
 
+    let state = AppState {
+        db,
+        config,
+        jobs: server::convert::new_jobs(),
+    };
+
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
-    // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
 
     let app = Router::new()
@@ -52,8 +54,6 @@ async fn main() {
         .layer(Extension(state))
         .with_state(leptos_options);
 
-    // run our app with hyper
-    // `axum::Server` is a re-export of `hyper::Server`
     log!("listening on http://{}", &server_addr);
     let listener = tokio::net::TcpListener::bind(&server_addr).await.unwrap();
     axum::serve(listener, app.into_make_service())
@@ -62,8 +62,4 @@ async fn main() {
 }
 
 #[cfg(not(feature = "ssr"))]
-pub fn main() {
-    // no client-side main function
-    // unless we want this to work with e.g., Trunk for pure client-side testing
-    // see lib.rs for hydration function instead
-}
+pub fn main() {}

@@ -187,7 +187,7 @@ fn DetailInfo(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
 
     view! {
         <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
-            {title}
+            {title.clone()}
         </h1>
         <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
             <span class="flex items-center gap-1"><ClockIcon/>{duration}</span>
@@ -196,7 +196,7 @@ fn DetailInfo(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
         <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">{description}</p>
         <div class="mt-6 flex gap-3">
             <a
-                download="download"
+                download={title}
                 href=download_link
                 class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
             >
