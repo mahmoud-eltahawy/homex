@@ -13,7 +13,7 @@ axum = { version = "0.8.0", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = { version = "0.8.0" }
-tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread","process"], optional = true }
 wasm-bindgen = { version = "0.2.106", optional = true }
 web-sys = { version = "0.3.103", features = [
     "Blob",
@@ -33,9 +33,12 @@ web-sys = { version = "0.3.103", features = [
 gloo = { version = "0.12.0"}
 gloo-timers = { version = "0.4.0",features = ["futures"]}
 serde = { version = "1.0.229", features = ["derive"] }
-tower-http = { version = "0.7.0",features = ["fs"], optional = true }
+tower-http = { version = "0.6.0",features = ["fs"], optional = true }
 leptos-use = "0.19"
 server_fn = { version = "0.8.13", features = ["multipart"] }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "migrate"], optional = true }
+toml = { version = "1",optional = true}
+tower = { version = "0.5",optional = true}
 
 [features]
 hydrate = [
@@ -47,6 +50,9 @@ ssr = [
     "dep:axum",
     "dep:tower-http",
     "dep:tokio",
+    "dep:sqlx",
+    "dep:toml",
+    "dep:tower",
     "dep:leptos_axum",
     "leptos/ssr",
     "leptos_meta/ssr",

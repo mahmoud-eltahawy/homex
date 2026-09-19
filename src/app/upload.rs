@@ -47,82 +47,103 @@ pub struct UploadResult {
     pub message: String,
 }
 
-// ─── Server functions (unchanged) ─────────────────────────────────────────
-
 #[server]
 async fn fetch_series_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
-    use crate::app::model::Series;
-    use crate::app::{delay, mockary::mock_series};
-    use std::collections::BTreeMap;
-    delay(200).await;
-    let mut map = BTreeMap::new();
-    for Series { id, title, .. } in mock_series() {
-        map.entry(id).or_insert(title);
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
     }
-    Ok(map
+    let rows: Vec<Row> = sqlx::query_as("SELECT id, title FROM series ORDER BY title")
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(rows
         .into_iter()
-        .map(|(id, title)| MediaTitle { id, title })
+        .map(|r| MediaTitle {
+            id: r.id as u64,
+            title: r.title,
+        })
         .collect())
 }
 
 #[server]
 async fn fetch_movie_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
-    use crate::app::model::Movie;
-    use crate::app::{delay, mockary::mock_movies};
-    use std::collections::BTreeMap;
-    delay(200).await;
-    let mut map = BTreeMap::new();
-    for Movie { id, title, .. } in mock_movies() {
-        map.entry(id).or_insert(title);
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
     }
-    Ok(map
+    let rows: Vec<Row> = sqlx::query_as("SELECT id, title FROM movies ORDER BY title")
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(rows
         .into_iter()
-        .map(|(id, title)| MediaTitle { id, title })
+        .map(|r| MediaTitle {
+            id: r.id as u64,
+            title: r.title,
+        })
         .collect())
 }
 
 #[server]
 async fn fetch_audio_group_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
-    use crate::app::model::AudioGroup;
-    use crate::app::{delay, mockary::mock_audio_groups};
-    use std::collections::BTreeMap;
-    delay(200).await;
-    let mut map = BTreeMap::new();
-    for AudioGroup { id, title, .. } in mock_audio_groups() {
-        map.entry(id).or_insert(title);
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
     }
-    Ok(map
+    let rows: Vec<Row> = sqlx::query_as("SELECT id, title FROM audio_groups ORDER BY title")
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(rows
         .into_iter()
-        .map(|(id, title)| MediaTitle { id, title })
+        .map(|r| MediaTitle {
+            id: r.id as u64,
+            title: r.title,
+        })
         .collect())
 }
 
 #[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {
+    use crate::app::server::AppState;
     use std::collections::BTreeMap;
 
+    let state: AppState = expect_context();
     let mut multipart = data.into_inner().unwrap();
 
+    // ── parse fields ─────────────────────────────────────────────────
     let mut title = String::new();
-    let mut media_type = String::new();
+    let mut media_type_str = String::new();
     let mut description = String::new();
     let mut is_new = true;
     let mut existing_id: Option<i64> = None;
-    let mut season_number: Option<u32> = None;
+    let mut season_number: Option<i64> = None;
 
-    let mut files: BTreeMap<usize, (String, usize)> = BTreeMap::new();
+    let mut files: BTreeMap<usize, (String, Vec<u8>)> = BTreeMap::new();
     let mut file_titles: BTreeMap<usize, String> = BTreeMap::new();
 
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().map(String::from).unwrap_or_default();
-
         match name.as_str() {
             "title" => {
                 title = field.text().await?;
                 continue;
             }
             "media_type" => {
-                media_type = field.text().await?;
+                media_type_str = field.text().await?;
                 continue;
             }
             "description" => {
@@ -134,18 +155,15 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
                 continue;
             }
             "existing_id" => {
-                let text = field.text().await?;
-                existing_id = text.parse().ok();
+                existing_id = field.text().await?.parse().ok();
                 continue;
             }
             "season_number" => {
-                let text = field.text().await?;
-                season_number = text.parse().ok();
+                season_number = field.text().await?.parse().ok();
                 continue;
             }
             _ => {}
         }
-
         if let Some(idx_str) = name.strip_prefix("file_title_") {
             if let Ok(idx) = idx_str.parse::<usize>() {
                 file_titles.insert(idx, field.text().await?);
@@ -154,9 +172,9 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
             }
         } else if let Some(idx_str) = name.strip_prefix("file_") {
             if let Ok(idx) = idx_str.parse::<usize>() {
-                let file_name = field.file_name().map(String::from).unwrap_or_default();
-                let bytes = field.bytes().await?;
-                files.insert(idx, (file_name, bytes.len()));
+                let name = field.file_name().map(String::from).unwrap_or_default();
+                let bytes = field.bytes().await?.to_vec();
+                files.insert(idx, (name, bytes));
             } else {
                 let _ = field.bytes().await?;
             }
@@ -169,36 +187,247 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         return Err(ServerFnError::new("لم يتم استلام أي ملف"));
     }
 
-    let action = if is_new {
-        "create new"
-    } else {
-        "append to existing"
+    let media_type: MediaType = media_type_str
+        .as_str()
+        .try_into()
+        .map_err(|e: &str| ServerFnError::new(e))?;
+
+    // ── write files to disk + insert DB rows ─────────────────────────
+    let slug = slugify(&title);
+    let base_subdir = match media_type {
+        MediaType::Movie => "movies",
+        MediaType::Series => "series",
+        MediaType::AudioGroup => "audio",
     };
-    let target = existing_id
-        .map(|id| format!("id={id}"))
-        .unwrap_or_else(|| "(no target)".to_string());
-    leptos::logging::log!(
-        "[upload] {action} {media_type} {target}: title={title:?} desc_len={} season={season_number:?} files={}",
-        description.len(),
-        files.len()
-    );
-    for (idx, (name, size)) in &files {
+    let base = state
+        .config
+        .storage
+        .media_root
+        .join(base_subdir)
+        .join(&slug);
+
+    tokio::fs::create_dir_all(&base)
+        .await
+        .map_err(|e| ServerFnError::new(format!("mkdir: {e}")))?;
+
+    let mut written: Vec<(i64, String, usize, String)> = Vec::new();
+    for (idx, (filename, bytes)) in &files {
+        let safe_name = sanitize_filename(filename);
+        let rel = format!("{base_subdir}/{slug}/{safe_name}");
+        let abs = state.config.storage.media_root.join(&rel);
+
+        tokio::fs::write(&abs, bytes)
+            .await
+            .map_err(|e| ServerFnError::new(format!("write {}: {e}", abs.display())))?;
+
+        let out = tokio::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                &abs.to_string_lossy(),
+            ])
+            .output()
+            .await?;
+        let dur: f64 = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(0.0);
+        let dur = dur.round() as i64;
+        let file_id: i64 = sqlx::query_scalar(
+            "INSERT INTO files (relative_path, size_bytes, duration_secs) \
+             VALUES (?, ?, ?) RETURNING id",
+        )
+        .bind(&rel)
+        .bind(bytes.len() as i64)
+        .bind(dur)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
         let t = file_titles
             .get(idx)
-            .map(String::as_str)
-            .unwrap_or("(no title)");
-        leptos::logging::log!("[upload]   file[{idx}]: {name} ({size} bytes) title={t:?}");
+            .cloned()
+            .unwrap_or_else(|| filename.clone());
+        written.push((file_id, filename.clone(), bytes.len(), t));
+    }
+    written.sort_by_key(|(id, _, _, _)| *id);
+
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    match media_type {
+        MediaType::Movie => {
+            let movie_id: i64 = if is_new {
+                sqlx::query_scalar(
+                    "INSERT INTO movies (title, description) VALUES (?, ?) RETURNING id",
+                )
+                .bind(&title)
+                .bind(if description.is_empty() {
+                    None
+                } else {
+                    Some(&description)
+                })
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?
+            } else {
+                existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
+            };
+
+            let start: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(number) + 1, 0) FROM movie_chapters WHERE movie_id = ?",
+            )
+            .bind(movie_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            for (i, (fid, _, _, ch_title)) in written.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO movie_chapters (movie_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(movie_id)
+                .bind(start + i as i64)
+                .bind(ch_title)
+                .bind(fid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            }
+        }
+        MediaType::Series => {
+            let series_id: i64 = if is_new {
+                sqlx::query_scalar(
+                    "INSERT INTO series (title, description) VALUES (?, ?) RETURNING id",
+                )
+                .bind(&title)
+                .bind(if description.is_empty() {
+                    None
+                } else {
+                    Some(&description)
+                })
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?
+            } else {
+                existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
+            };
+
+            let sn = season_number.unwrap_or(1);
+            let season_id: i64 = sqlx::query_scalar(
+                "INSERT INTO seasons (series_id, number) VALUES (?, ?) \
+                 ON CONFLICT(series_id, number) DO UPDATE SET number = number \
+                 RETURNING id",
+            )
+            .bind(series_id)
+            .bind(sn)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            let start: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(number) + 1, 1) FROM episodes WHERE season_id = ?",
+            )
+            .bind(season_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            for (i, (fid, _, _, ep_title)) in written.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO episodes (season_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(season_id)
+                .bind(start + i as i64)
+                .bind(ep_title)
+                .bind(fid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            }
+        }
+        MediaType::AudioGroup => {
+            let group_id: i64 = if is_new {
+                sqlx::query_scalar(
+                    "INSERT INTO audio_groups (title, description) VALUES (?, ?) RETURNING id",
+                )
+                .bind(&title)
+                .bind(if description.is_empty() {
+                    None
+                } else {
+                    Some(&description)
+                })
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?
+            } else {
+                existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
+            };
+
+            let start: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(number) + 1, 0) FROM audios WHERE group_id = ?",
+            )
+            .bind(group_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+            for (i, (fid, _, _, song_title)) in written.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO audios (group_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(group_id)
+                .bind(start + i as i64)
+                .bind(song_title)
+                .bind(fid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            }
+        }
     }
 
-    let verb = if is_new {
-        "إنشاء"
-    } else {
-        "إضافة إلى"
-    };
+    tx.commit()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
     Ok(UploadResult {
         success: true,
-        message: format!("{verb} {} ملف بنجاح", files.len()),
+        message: format!("تم رفع {} ملف بنجاح", written.len()),
     })
+}
+
+#[cfg(feature = "ssr")]
+fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_dash = false;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+#[cfg(feature = "ssr")]
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0'))
+        .collect()
 }
 
 // ─── Page shell ───────────────────────────────────────────────────────────
@@ -262,7 +491,7 @@ fn UploadContent() -> impl IntoView {
         let curr = media_type.get().is_some();
         if !prev.unwrap_or(false) && curr {
             let r = s2_ref;
-            let _ = set_timeout(
+            set_timeout(
                 move || {
                     if let Some(el) = r.get() {
                         el.scroll_into_view();
@@ -278,7 +507,7 @@ fn UploadContent() -> impl IntoView {
         let curr = is_new.get().is_some();
         if !prev.unwrap_or(false) && curr {
             let r = s3_ref;
-            let _ = set_timeout(
+            set_timeout(
                 move || {
                     if let Some(el) = r.get() {
                         el.scroll_into_view();

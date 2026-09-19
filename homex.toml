@@ -1,0 +1,8 @@
+[server]
+addr = "127.0.0.1:3000"
+
+[storage]
+# mergerfs mount point — the single logical pool
+media_root = "Downloads" #"/mnt/pool"
+# SSD-backed directory for the SQLite DB and uploaded posters
+data_dir = "Downloads" #"/opt/mydisc/data"

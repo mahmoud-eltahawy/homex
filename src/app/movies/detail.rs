@@ -1,7 +1,7 @@
 use crate::app::{
     detail::DetailShell,
     icons::{ClockIcon, DownloadIcon, MovieIcon},
-    model::{self, Movie, MovieChapter},
+    model::{Movie, MovieChapter},
     resource_view::ResourceView,
     video_player::VideoPlayer,
     view_schema::CardData,
@@ -12,14 +12,71 @@ use web_sys::wasm_bindgen::JsCast;
 use web_sys::HtmlSelectElement;
 
 #[server]
-pub async fn fetch_movie_detail(id: u64) -> Result<model::Movie, ServerFnError> {
-    use crate::app::delay;
-    use crate::app::mockary;
-    delay(200).await;
-    let list = mockary::mock_movies();
-    list.into_iter()
-        .find(|m| m.id == id)
-        .ok_or(ServerFnError::new("not found"))
+pub async fn fetch_movie_detail(id: u64) -> Result<crate::app::model::Movie, ServerFnError> {
+    use crate::app::model::{MediaFile, Movie, MovieChapter};
+    use crate::app::server::AppState;
+
+    let state: AppState = expect_context();
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
+        poster: Option<String>,
+        description: Option<String>,
+    }
+
+    let m: Row = sqlx::query_as("SELECT id, title, poster, description FROM movies WHERE id = ?")
+        .bind(id as i64)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .ok_or_else(|| ServerFnError::new("not found"))?;
+
+    #[derive(sqlx::FromRow)]
+    struct ChRow {
+        id: i64,
+        number: i64,
+        title: Option<String>,
+        poster: Option<String>,
+        description: Option<String>,
+        file_id: i64,
+        size: i64,
+        dur: i64,
+    }
+    let chapters: Vec<ChRow> = sqlx::query_as(
+        "SELECT mc.id, mc.number, mc.title, mc.poster, mc.description, \
+                f.id AS file_id, f.size_bytes AS size, f.duration_secs AS dur \
+         FROM movie_chapters mc JOIN files f ON f.id = mc.file_id \
+         WHERE mc.movie_id = ? ORDER BY mc.number",
+    )
+    .bind(id as i64)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    Ok(Movie {
+        id: m.id as u64,
+        title: m.title,
+        poster: m.poster,
+        description: m.description,
+        chapters: chapters
+            .into_iter()
+            .map(|c| MovieChapter {
+                id: c.id as u64,
+                number: c.number as u8,
+                title: c.title,
+                poster: c.poster,
+                description: c.description,
+                file: MediaFile {
+                    id: c.file_id as u64,
+                    path: format!("/media/{}", c.file_id),
+                    size: c.size as u64,
+                    duration: c.dur as u64,
+                },
+            })
+            .collect(),
+    })
 }
 
 pub struct MovieDetailPage {

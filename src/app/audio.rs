@@ -1,6 +1,6 @@
 use crate::app::{
     icons::{AudioIcon, MusicPosterSvg},
-    model::{self, Audio, AudioGroup, MediaType},
+    model::{Audio, AudioGroup, MediaType},
     view_schema::CardData,
 };
 use leptos::prelude::*;
@@ -39,71 +39,167 @@ pub async fn fetch_audio_groups(
     offset: usize,
     size: usize,
     search_query: Option<String>,
-) -> Result<Vec<model::AudioGroup>, ServerFnError> {
-    use crate::app::delay;
-    use crate::app::mockary::mock_audio_groups;
-    delay(300).await;
+) -> Result<Vec<AudioGroup>, ServerFnError> {
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
 
-    let list = match search_query {
-        None => mock_audio_groups(),
-        Some(pat) => mock_audio_groups()
-            .into_iter()
-            .filter(|x| x.title.to_lowercase().contains(&pat.to_lowercase()))
-            .collect(),
-    };
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
+        poster: Option<String>,
+        description: Option<String>,
+        audios_count: i64,
+    }
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT g.id, g.title, g.poster, g.description, \
+                (SELECT COUNT(*) FROM audios a WHERE a.group_id = g.id) AS audios_count \
+         FROM audio_groups g \
+         WHERE (?1 IS NULL OR g.title LIKE '%' || ?1 || '%') \
+         ORDER BY g.title LIMIT ?2 OFFSET ?3",
+    )
+    .bind(&search_query)
+    .bind(size as i64)
+    .bind(offset as i64)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    let size = size.clamp(0, list.len());
-    let offset = offset.clamp(0, list.len() - size);
-    let end = (offset + size).clamp(0, list.len());
-
-    Ok(list[offset..end].to_vec())
+    Ok(rows
+        .into_iter()
+        .map(|r| AudioGroup {
+            id: r.id as u64,
+            title: r.title,
+            poster: r.poster,
+            description: r.description,
+            audios_count: r.audios_count as u32,
+        })
+        .collect())
 }
 
 #[server]
 pub async fn fetch_audio_groups_count(
     search_query: Option<String>,
 ) -> Result<usize, ServerFnError> {
-    use crate::app::delay;
-    use crate::app::mockary::mock_audio_groups;
-    delay(300).await;
-
-    let list = match search_query {
-        None => mock_audio_groups(),
-        Some(pat) => mock_audio_groups()
-            .into_iter()
-            .filter(|x| x.title.to_lowercase().contains(&pat.to_lowercase()))
-            .collect(),
-    };
-
-    Ok(list.len())
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audio_groups \
+         WHERE (?1 IS NULL OR title LIKE '%' || ?1 || '%')",
+    )
+    .bind(&search_query)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(n as usize)
 }
 
 #[server]
 async fn fetch_audio_group_detail(id: u64) -> Result<AudioGroup, ServerFnError> {
-    use crate::app::delay;
-    use crate::app::mockary::mock_audio_groups;
-    delay(200).await;
-    mock_audio_groups()
-        .into_iter()
-        .find(|g| g.id == id)
-        .ok_or(ServerFnError::new("audio group not found"))
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
+        poster: Option<String>,
+        description: Option<String>,
+        audios_count: i64,
+    }
+    let r: Row = sqlx::query_as(
+        "SELECT g.id, g.title, g.poster, g.description, \
+                (SELECT COUNT(*) FROM audios a WHERE a.group_id = g.id) AS audios_count \
+         FROM audio_groups g WHERE g.id = ?",
+    )
+    .bind(id as i64)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?
+    .ok_or_else(|| ServerFnError::new("audio group not found"))?;
+
+    Ok(AudioGroup {
+        id: r.id as u64,
+        title: r.title,
+        poster: r.poster,
+        description: r.description,
+        audios_count: r.audios_count as u32,
+    })
 }
 
 #[server]
 pub async fn fetch_audios(group_id: u64) -> Result<Vec<Audio>, ServerFnError> {
-    use crate::app::delay;
-    use crate::app::mockary::mock_audios;
-    delay(200).await;
-    Ok(mock_audios(group_id))
+    use crate::app::model::MediaFile;
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
+        file_id: i64,
+        size: i64,
+        dur: i64,
+    }
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT a.id, a.title, f.id AS file_id, f.size_bytes AS size, f.duration_secs AS dur \
+         FROM audios a JOIN files f ON f.id = a.file_id \
+         WHERE a.group_id = ? ORDER BY a.number",
+    )
+    .bind(group_id as i64)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| Audio {
+            id: r.id as u64,
+            title: r.title,
+            file: MediaFile {
+                id: r.file_id as u64,
+                path: format!("/media/{}", r.file_id),
+                size: r.size as u64,
+                duration: r.dur as u64,
+            },
+        })
+        .collect())
 }
 
 #[server]
 pub async fn fetch_audio(group_id: u64, song_id: u64) -> Result<Audio, ServerFnError> {
-    use crate::app::delay;
-    use crate::app::mockary::mock_audios;
-    delay(200).await;
-    mock_audios(group_id)
-        .into_iter()
-        .find(|a| a.id == song_id)
-        .ok_or(ServerFnError::new("audio not found"))
+    use crate::app::model::MediaFile;
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        title: String,
+        file_id: i64,
+        size: i64,
+        dur: i64,
+    }
+    let r: Row = sqlx::query_as(
+        "SELECT a.id, a.title, f.id AS file_id, f.size_bytes AS size, f.duration_secs AS dur \
+         FROM audios a JOIN files f ON f.id = a.file_id \
+         WHERE a.group_id = ? AND a.id = ?",
+    )
+    .bind(group_id as i64)
+    .bind(song_id as i64)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?
+    .ok_or_else(|| ServerFnError::new("audio not found"))?;
+
+    Ok(Audio {
+        id: r.id as u64,
+        title: r.title,
+        file: MediaFile {
+            id: r.file_id as u64,
+            path: format!("/media/{}", r.file_id),
+            size: r.size as u64,
+            duration: r.dur as u64,
+        },
+    })
 }

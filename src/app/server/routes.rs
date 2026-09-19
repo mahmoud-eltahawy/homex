@@ -1,0 +1,53 @@
+use axum::{
+    body::Body,
+    extract::Path,
+    http::{Request, StatusCode},
+    response::{IntoResponse, Redirect, Response},
+    Extension,
+};
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
+
+use super::AppState;
+
+pub async fn stream_media(
+    Extension(state): Extension<AppState>,
+    Path(file_id): Path<i64>,
+    req: Request<Body>,
+) -> Response {
+    let rel: Option<String> =
+        match sqlx::query_scalar("SELECT relative_path FROM files WHERE id = ?")
+            .bind(file_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                leptos::logging::error!("[stream] db error: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+    let Some(rel) = rel else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // Absolute URLs (demo seed data) → redirect to origin.
+    if rel.starts_with("http://") || rel.starts_with("https://") {
+        return Redirect::temporary(&rel).into_response();
+    }
+
+    let abs = state.config.storage.media_root.join(&rel);
+    if !abs.exists() {
+        leptos::logging::warn!("[stream] missing file: {}", abs.display());
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    match ServeFile::new(&abs).oneshot(req).await {
+        Ok(res) => res.into_response(),
+        Err(e) => {
+            leptos::logging::error!("[stream] serve error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}

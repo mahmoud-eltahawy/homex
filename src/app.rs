@@ -15,6 +15,9 @@ use leptos_router::{
     path, Lazy,
 };
 
+#[cfg(feature = "ssr")]
+pub mod server;
+
 mod audio;
 mod common;
 pub mod detail;
@@ -32,16 +35,6 @@ mod settings;
 mod upload;
 mod video_player;
 mod view_schema;
-
-//TODO : DELETE this
-#[cfg(feature = "ssr")]
-mod mockary;
-
-//TODO : DELETE this
-#[cfg(feature = "ssr")]
-async fn delay(ms: i32) {
-    tokio::time::sleep(std::time::Duration::from_millis(ms as u64)).await;
-}
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
