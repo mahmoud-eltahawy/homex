@@ -1,6 +1,6 @@
 use super::{fetch_season, fetch_series_detail};
 use crate::app::{
-    detail::{DetailShell, Poster},
+    detail::{DetailHero, DetailShell, HeroBadge, HeroDescription, HeroMeta, HeroTitle, Poster},
     icons::{ClockIcon, SeriesIcon, SeriesPosterSvg},
     media_player::{MediaItem, MediaPlayer},
     model::{MediaType, Season, SeasonSummary, Series},
@@ -101,13 +101,31 @@ fn SeriesView(
         .clone()
         .unwrap_or_else(|| "لا يوجد وصف متاح.".to_string());
     let summaries = series.season_summaries.clone();
+    let season_count = series.season_count;
+    let edit_href = MediaType::Series.edit_href(series.id);
 
     let season_adapter = |season: Season| SeasonPlayerProps { season };
 
-    let edit_href = MediaType::Series.edit_href(series.id);
     view! {
         <DetailShell poster=poster.clone() edit_href>
-            <Info poster title season_count=series.season_count description/>
+            <DetailHero poster=view! {
+                <Poster
+                    src=poster.clone()
+                    alt=title.clone()
+                    class="w-full rounded-2xl shadow-2xl border border-white/10".to_string()
+                    placeholder=view! { <SeriesPosterSvg/> }.into_any()
+                />
+            }>
+                <HeroBadge label="مسلسل" icon=SeriesIcon()/>
+                <HeroTitle title=title.clone()/>
+                <HeroMeta>
+                    <span class="flex items-center gap-1">
+                        <ClockIcon/>
+                        {format!("{} مواسم", season_count)}
+                    </span>
+                </HeroMeta>
+                <HeroDescription text=description/>
+            </DetailHero>
             <div class="mt-10">
                 <SeasonSelector summaries selected_season/>
                 <ResourceView
@@ -148,42 +166,6 @@ fn SeasonPlayer(season: Season) -> impl IntoView {
                     </div>
                 })
             }}
-        </div>
-    }
-}
-
-#[component]
-fn Info(
-    poster: Option<String>,
-    title: String,
-    season_count: u32,
-    description: String,
-) -> impl IntoView {
-    view! {
-        <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
-            <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
-                <Poster
-                    src=poster
-                    alt=title.clone()
-                    class="w-full rounded-2xl shadow-2xl border border-white/10".to_string()
-                    placeholder=view! { <SeriesPosterSvg/> }.into_any()
-                />
-            </div>
-            <div class="flex-1 w-full">
-                <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
-                    <SeriesIcon/> "مسلسل"
-                </div>
-                <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
-                    {title.clone()}
-                </h1>
-                <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
-                    <span class="flex items-center gap-1">
-                        <ClockIcon/>
-                        {format!("{} مواسم", season_count)}
-                    </span>
-                </div>
-                <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">{description}</p>
-            </div>
         </div>
     }
 }

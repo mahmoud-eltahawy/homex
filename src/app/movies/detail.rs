@@ -1,6 +1,9 @@
 use crate::app::{
-    detail::{DetailShell, Poster},
-    icons::{ClockIcon, DownloadIcon, MovieIcon, MoviePosterSvg},
+    detail::{
+        DetailHero, DetailShell, DownloadButton, HeroBadge, HeroDescription, HeroMeta, HeroTitle,
+        Poster,
+    },
+    icons::{ClockIcon, MovieIcon, MoviePosterSvg},
     media_player::{MediaItem, MediaPlayer},
     model::{MediaType, Movie, MovieChapter},
     resource_view::ResourceView,
@@ -142,38 +145,9 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
 fn DetailBody(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
     let poster = movie.poster.clone();
     let title = movie.title.clone();
-    view! {
-        <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
-            <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
-                <Poster
-                    src=poster
-                    alt=title
-                    placeholder=view! { <MoviePosterSvg/> }.into_any()
-                />
-            </div>
-            <div class="flex-1 w-full">
-                <DetailMetaBadge/>
-                <DetailInfo movie=movie.clone() chapter=chapter/>
-            </div>
-        </div>
-    }
-}
-
-#[component]
-fn DetailMetaBadge() -> impl IntoView {
-    view! {
-        <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
-            <MovieIcon/>
-            "فيلم"
-        </div>
-    }
-}
-
-#[component]
-fn DetailInfo(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
-    let title = movie.title.to_string();
     let description = movie
         .description
+        .clone()
         .unwrap_or_else(|| "لا يوجد وصف متاح.".to_string());
 
     let download_link = chapter
@@ -190,26 +164,28 @@ fn DetailInfo(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
         .unwrap_or_default();
 
     let has_download = !download_link.is_empty();
+    let download_title = title.clone();
 
     view! {
-        <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
-            {title.clone()}
-        </h1>
-        <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
-            <span class="flex items-center gap-1"><ClockIcon/>{duration}</span>
-            <span>{size}</span>
-        </div>
-        <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">{description}</p>
-        {has_download.then(move || view! {
-            <div class="mt-6 flex gap-3">
-                <a
-                    download={title}
-                    href=download_link
-                    class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
-                >
-                    <DownloadIcon/> "تحميل"
-                </a>
-            </div>
-        })}
+        <DetailHero poster=view! {
+            <Poster
+                src=poster
+                alt=title.clone()
+                placeholder=view! { <MoviePosterSvg/> }.into_any()
+            />
+        }>
+            <HeroBadge label="فيلم" icon=MovieIcon()/>
+            <HeroTitle title=title.clone()/>
+            <HeroMeta>
+                <span class="flex items-center gap-1"><ClockIcon/>{duration}</span>
+                <span>{size}</span>
+            </HeroMeta>
+            <HeroDescription text=description/>
+            {has_download.then(move || view! {
+                <div class="mt-6 flex gap-3">
+                    <DownloadButton href=download_link download_name=download_title/>
+                </div>
+            })}
+        </DetailHero>
     }
 }

@@ -90,6 +90,32 @@ impl MediaType {
     pub fn edit_href(&self, id: u64) -> String {
         format!("{}/edit", self.detail_href(id))
     }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            MediaType::Movie => "فيلم",
+            MediaType::Series => "مسلسل",
+            MediaType::AudioGroup => "مجموعة صوتية",
+        }
+    }
+
+    #[cfg(feature = "ssr")]
+    pub fn table(&self) -> &'static str {
+        match self {
+            MediaType::Movie => "movies",
+            MediaType::Series => "series",
+            MediaType::AudioGroup => "audio_groups",
+        }
+    }
+
+    #[cfg(feature = "ssr")]
+    pub fn poster_subdir(&self) -> &'static str {
+        match self {
+            MediaType::Movie => "movies",
+            MediaType::Series => "series",
+            MediaType::AudioGroup => "audio",
+        }
+    }
 }
 
 impl Display for MediaType {

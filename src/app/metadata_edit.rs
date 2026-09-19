@@ -1,10 +1,10 @@
-use crate::app::route_params::use_u64_param;
 #[cfg(feature = "ssr")]
 use crate::app::server::{poster::write_poster, upload::extension_of};
 use crate::app::{
     icons::{DeleteIcon, EditIcon, UploadIcon},
     resource_view::ResourceView,
 };
+use crate::app::{model::MediaType, route_params::use_u64_param};
 use leptos::either::Either;
 use leptos::html;
 use leptos::prelude::*;
@@ -20,65 +20,6 @@ const CARD_CLASS: &str =
     "backdrop-blur-xl bg-white/5 rounded-3xl border border-white/10 p-6 md:p-8 shadow-2xl";
 const UPLOAD_BTN_CLASS: &str = "inline-flex items-center gap-1.5 bg-green-500/20 hover:bg-green-500/30 backdrop-blur-md text-green-300 font-medium py-1.5 px-3 rounded-lg cursor-pointer transition text-sm";
 const IMAGE_ACCEPT: &str = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
-
-// ─── Entity kind ──────────────────────────────────────────────────────────
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MetadataKind {
-    Movie,
-    Series,
-    AudioGroup,
-}
-
-impl MetadataKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Movie => "movie",
-            Self::Series => "series",
-            Self::AudioGroup => "audio",
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Movie => "فيلم",
-            Self::Series => "مسلسل",
-            Self::AudioGroup => "مجموعة صوتية",
-        }
-    }
-    pub fn detail_href(self, id: u64) -> String {
-        match self {
-            Self::Movie => format!("/movie/detail/{id}"),
-            Self::Series => format!("/series/detail/{id}"),
-            Self::AudioGroup => format!("/audio/detail/{id}"),
-        }
-    }
-    #[cfg(feature = "ssr")]
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "movie" => Some(Self::Movie),
-            "series" => Some(Self::Series),
-            "audio" => Some(Self::AudioGroup),
-            _ => None,
-        }
-    }
-    #[cfg(feature = "ssr")]
-    fn table(self) -> &'static str {
-        match self {
-            Self::Movie => "movies",
-            Self::Series => "series",
-            Self::AudioGroup => "audio_groups",
-        }
-    }
-
-    #[cfg(feature = "ssr")]
-    fn poster_subdir(self) -> &'static str {
-        match self {
-            Self::Movie => "movies",
-            Self::Series => "series",
-            Self::AudioGroup => "audio",
-        }
-    }
-}
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────
 
@@ -98,7 +39,8 @@ pub async fn load_metadata(kind: String, id: u64) -> Result<MetadataSnapshot, Se
 
     let state: AppState = expect_context();
 
-    let kind = MetadataKind::from_str(&kind).ok_or_else(|| ServerFnError::new("نوع غير معروف"))?;
+    let kind =
+        MediaType::try_from(kind.as_str()).map_err(|_| ServerFnError::new("نوع غير معروف"))?;
 
     #[derive(sqlx::FromRow)]
     struct Row {
@@ -169,7 +111,7 @@ pub async fn update_metadata(data: MultipartData) -> Result<(), ServerFnError> {
     }
 
     let kind =
-        MetadataKind::from_str(&kind_str).ok_or_else(|| ServerFnError::new("نوع غير معروف"))?;
+        MediaType::try_from(kind_str.as_str()).map_err(|_| ServerFnError::new("نوع غير معروف"))?;
     let table = kind.table();
 
     let description_opt = if description.trim().is_empty() {
@@ -235,11 +177,8 @@ pub async fn update_metadata(data: MultipartData) -> Result<(), ServerFnError> {
 // ─── Shared editor component ──────────────────────────────────────────────
 
 #[component]
-pub fn MetadataEditor(kind: MetadataKind, id: u64) -> impl IntoView {
-    let snapshot = Resource::new(
-        move || (kind, id),
-        |(k, i)| load_metadata(k.as_str().to_string(), i),
-    );
+pub fn MetadataEditor(kind: MediaType, id: u64) -> impl IntoView {
+    let snapshot = Resource::new(move || (kind, id), |(k, i)| load_metadata(k.to_string(), i));
 
     let adapter = move |snap: MetadataSnapshot| EditorFormProps {
         kind,
@@ -262,7 +201,7 @@ pub fn MetadataEditor(kind: MetadataKind, id: u64) -> impl IntoView {
 }
 
 #[component]
-fn EditorHeader(kind: MetadataKind, id: u64) -> impl IntoView {
+fn EditorHeader(kind: MediaType, id: u64) -> impl IntoView {
     let back_href = kind.detail_href(id);
     let label = kind.label();
     view! {
@@ -286,7 +225,7 @@ fn EditorHeader(kind: MetadataKind, id: u64) -> impl IntoView {
 }
 
 #[component]
-fn EditorForm(kind: MetadataKind, id: u64, snapshot: MetadataSnapshot) -> impl IntoView {
+fn EditorForm(kind: MediaType, id: u64, snapshot: MetadataSnapshot) -> impl IntoView {
     // Seeded once from the snapshot. Signals own the form after that.
     let title = RwSignal::new(snapshot.title);
     let description = RwSignal::new(snapshot.description.clone().unwrap_or_default());
@@ -315,7 +254,7 @@ fn EditorForm(kind: MetadataKind, id: u64, snapshot: MetadataSnapshot) -> impl I
         if let Some(file) = poster_file.get_untracked() {
             let _ = form_data.append_with_blob_and_filename("poster_file", &file, &file.name());
         }
-        let _ = form_data.append_with_str("kind", kind.as_str());
+        let _ = form_data.append_with_str("kind", &kind.to_string());
         let _ = form_data.append_with_str("id", &id.to_string());
         let _ = form_data.append_with_str(
             "remove_poster",
@@ -575,6 +514,6 @@ macro_rules! edit_page {
     };
 }
 
-edit_page!(MovieEditPage, MetadataKind::Movie);
-edit_page!(SeriesEditPage, MetadataKind::Series);
-edit_page!(AudioGroupEditPage, MetadataKind::AudioGroup);
+edit_page!(MovieEditPage, MediaType::Movie);
+edit_page!(SeriesEditPage, MediaType::Series);
+edit_page!(AudioGroupEditPage, MediaType::AudioGroup);

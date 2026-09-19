@@ -1,8 +1,8 @@
 use super::{fetch_audio, fetch_audio_group_detail, fetch_audios};
 use crate::app::{
     audio::AudioArtwork,
-    detail::DetailShell,
-    icons::{AudioIcon, ClockIcon, DownloadIcon},
+    detail::{DetailHero, DetailShell, DownloadButton, HeroBadge, HeroMeta, HeroTitle},
+    icons::{AudioIcon, ClockIcon},
     media_player::{MediaItem, MediaPlayer},
     model::{Audio, AudioGroup},
     resource_view::ResourceView,
@@ -100,34 +100,19 @@ fn AudioSongDetail(song: Audio, group: AudioGroup, audios: Vec<Audio>) -> impl I
             <div class="flex flex-col gap-6">
                 <Breadcrumb href=group_href name=group_name/>
 
-                <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
-                    <div class="flex-shrink-0 w-48 sm:w-56 md:w-64 mx-auto lg:mx-0">
-                        <AudioArtwork poster=poster.clone() title=title.clone()/>
+                <DetailHero poster=view! {
+                    <AudioArtwork poster=poster.clone() title=title.clone()/>
+                }>
+                    <HeroBadge label="مقطع صوتي" icon=AudioIcon()/>
+                    <HeroTitle title=title.clone()/>
+                    <HeroMeta>
+                        <span class="flex items-center gap-1"><ClockIcon/>{duration}</span>
+                        <span>{size}</span>
+                    </HeroMeta>
+                    <div class="mt-6 flex gap-3">
+                        <DownloadButton href=download download_name=title.clone()/>
                     </div>
-                    <div class="flex-1 w-full">
-                        <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
-                            <AudioIcon/>
-                            "مقطع صوتي"
-                        </div>
-                        <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
-                            {title.clone()}
-                        </h1>
-                        <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
-                            <span class="flex items-center gap-1">
-                                <ClockIcon/>
-                                {duration}
-                            </span>
-                            <span>{size}</span>
-                        </div>
-                        <a
-                            href=download
-                            download={title.clone()}
-                            class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
-                        >
-                            <DownloadIcon/> "تحميل"
-                        </a>
-                    </div>
-                </div>
+                </DetailHero>
 
                 <div class="mt-4">
                     <MediaPlayer

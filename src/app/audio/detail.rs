@@ -1,6 +1,6 @@
 use super::{AudioArtwork, fetch_audio_group_detail, fetch_audios};
 use crate::app::{
-    detail::DetailShell,
+    detail::{DetailHero, DetailShell, HeroBadge, HeroDescription, HeroMeta, HeroTitle},
     icons::{AudioIcon, ClockIcon, PlayIcon},
     model::{Audio, AudioGroup, MediaType},
     resource_view::ResourceView,
@@ -57,38 +57,28 @@ fn AudioGroupDetail(
         .clone()
         .unwrap_or_else(|| "لا يوجد وصف متاح.".to_string());
     let count = group.audios_count;
+    let edit_href = MediaType::AudioGroup.edit_href(group.id);
 
     let adapter = move |list: Vec<Audio>| AudioListProps {
         audios: list,
         group_id,
     };
 
-    let edit_href = MediaType::AudioGroup.edit_href(group.id);
     view! {
         <DetailShell poster=poster.clone() edit_href>
-            <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
-                <div class="flex-shrink-0 w-48 sm:w-56 md:w-64 mx-auto lg:mx-0">
-                    <AudioArtwork poster=poster title=title.clone()/>
-                </div>
-                <div class="flex-1 w-full">
-                    <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
-                        <AudioIcon/>
-                        "مجموعة صوتية"
-                    </div>
-                    <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
-                        {title}
-                    </h1>
-                    <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
-                        <span class="flex items-center gap-1">
-                            <ClockIcon/>
-                            {format!("{} مقطع", count)}
-                        </span>
-                    </div>
-                    <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">
-                        {description}
-                    </p>
-                </div>
-            </div>
+            <DetailHero poster=view! {
+                <AudioArtwork poster=poster.clone() title=title.clone()/>
+            }>
+                <HeroBadge label="مجموعة صوتية" icon=AudioIcon()/>
+                <HeroTitle title=title.clone()/>
+                <HeroMeta>
+                    <span class="flex items-center gap-1">
+                        <ClockIcon/>
+                        {format!("{} مقطع", count)}
+                    </span>
+                </HeroMeta>
+                <HeroDescription text=description/>
+            </DetailHero>
             <div class="mt-10">
                 <h2 class="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center gap-2">
                     <AudioIcon/> " المقاطع"
