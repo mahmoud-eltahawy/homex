@@ -123,9 +123,10 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     let first_chapter = movie.chapters.first().cloned();
     let poster = movie.poster.clone();
 
+    let edit_href = format!("/movie/detail/{}/edit", movie.id);
     view! {
-        <DetailShell poster=poster.clone()>
-            <DetailBody movie=movie.clone() chapter=first_chapter />
+        <DetailShell poster=poster.clone()  edit_href>
+            <DetailBody movie=movie.clone() chapter=first_chapter/>
             {has_items.then(move || {
                 view! {
                     <div class="mt-10">

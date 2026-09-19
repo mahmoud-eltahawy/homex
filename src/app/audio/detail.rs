@@ -7,7 +7,7 @@ use crate::app::{
 };
 use leptos::either::Either;
 use leptos::prelude::*;
-use leptos_router::{hooks::use_params_map, lazy_route, LazyRoute};
+use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
 
 pub struct AudioGroupDetailPage {
     pub group: Resource<Result<AudioGroup, ServerFnError>>,
@@ -66,8 +66,9 @@ fn AudioGroupDetail(
         group_id,
     };
 
+    let edit_href = format!("/audio/detail/{}/edit", group.id);
     view! {
-        <DetailShell poster=poster.clone()>
+        <DetailShell poster=poster.clone() edit_href>
             <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
                 <div class="flex-shrink-0 w-48 sm:w-56 md:w-64 mx-auto lg:mx-0">
                     <AudioPoster poster=poster title=title.clone()/>

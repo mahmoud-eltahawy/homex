@@ -129,7 +129,7 @@ fn AudioSongDetail(song: Audio, group: AudioGroup, audios: Vec<Audio>) -> impl I
                         </div>
                         <a
                             href=download
-                            download="download"
+                            download={title.clone()}
                             class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
                         >
                             <DownloadIcon/> "تحميل"

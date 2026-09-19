@@ -65,8 +65,9 @@ fn SeriesView(
 
     let season_adapter = |season: Season| SeasonPlayerProps { season };
 
+    let edit_href = format!("/series/detail/{}/edit", series.id);
     view! {
-        <DetailShell poster=poster.clone()>
+        <DetailShell poster=poster.clone() edit_href>
             <Info poster title season_count=series.season_count description/>
             <div class="mt-10">
                 <SeasonSelector summaries selected_season/>

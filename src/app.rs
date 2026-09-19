@@ -1,3 +1,4 @@
+use crate::app::metadata_edit::{AudioGroupEditPage, MovieEditPage, SeriesEditPage};
 use crate::app::{
     audio::{detail::AudioGroupDetailPage, song::AudioSongDetailPage},
     home::HomePage,
@@ -27,6 +28,7 @@ pub mod icons;
 mod layout;
 mod listing;
 mod media_player;
+mod metadata_edit;
 mod model;
 mod movies;
 mod pagination;
@@ -80,7 +82,18 @@ pub fn App() -> impl IntoView {
                         path=path!("/audio/detail/:id/song/:song_id")
                         view={Lazy::<AudioSongDetailPage>::new()}
                     />
-
+                    <Route
+                        path=path!("/movie/detail/:id/edit")
+                        view={Lazy::<MovieEditPage>::new()}
+                    />
+                    <Route
+                        path=path!("/series/detail/:id/edit")
+                        view={Lazy::<SeriesEditPage>::new()}
+                    />
+                    <Route
+                        path=path!("/audio/detail/:id/edit")
+                        view={Lazy::<AudioGroupEditPage>::new()}
+                    />
                 </ParentRoute>
             </Routes>
         </Router>
