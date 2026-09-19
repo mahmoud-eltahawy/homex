@@ -116,6 +116,18 @@ impl MediaType {
             MediaType::AudioGroup => "audio",
         }
     }
+
+    pub fn new_href(&self) -> String {
+        format!("{}/new", self.listing_href())
+    }
+
+    pub fn new_label(&self) -> &'static str {
+        match self {
+            MediaType::Movie => "إضافة فيلم جديد",
+            MediaType::Series => "إضافة مسلسل جديد",
+            MediaType::AudioGroup => "إضافة مجموعة صوتية جديدة",
+        }
+    }
 }
 
 impl Display for MediaType {

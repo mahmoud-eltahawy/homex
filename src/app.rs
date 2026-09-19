@@ -1,4 +1,5 @@
 use crate::app::metadata_edit::{AudioGroupEditPage, MovieEditPage, SeriesEditPage};
+use crate::app::new_upload::{NewAudioGroupPage, NewMoviePage, NewSeriesPage};
 use crate::app::{
     audio::{detail::AudioGroupDetailPage, song::AudioSongDetailPage},
     home::HomePage,
@@ -28,6 +29,7 @@ mod media_player;
 mod metadata_edit;
 mod model;
 mod movies;
+mod new_upload;
 mod pagination;
 mod resource_view;
 mod route_params;
@@ -37,6 +39,8 @@ mod series;
 pub mod server;
 mod settings;
 mod upload;
+mod upload_api;
+mod upload_ui;
 mod view_schema;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -93,6 +97,18 @@ pub fn App() -> impl IntoView {
                     <Route
                         path=path!("/audio/detail/:id/edit")
                         view={Lazy::<AudioGroupEditPage>::new()}
+                    />
+                    <Route
+                        path=path!("/movie/new")
+                        view={Lazy::<NewMoviePage>::new()}
+                    />
+                    <Route
+                        path=path!("/series/new")
+                        view={Lazy::<NewSeriesPage>::new()}
+                    />
+                    <Route
+                        path=path!("/audio/new")
+                        view={Lazy::<NewAudioGroupPage>::new()}
                     />
                 </ParentRoute>
             </Routes>

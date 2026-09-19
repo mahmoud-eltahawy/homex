@@ -12,8 +12,8 @@ use crate::app::{
     view_schema::CardsList,
 };
 use leptos::prelude::*;
-use leptos_router::{lazy_route, LazyRoute};
-use serde::{de::DeserializeOwned, Serialize};
+use leptos_router::{LazyRoute, lazy_route};
+use serde::{Serialize, de::DeserializeOwned};
 use std::future::Future;
 
 const LISTING_PAGE_SIZE: usize = 18;
@@ -39,14 +39,29 @@ where
             data,
             count,
         } = self;
+
+        let mt = C::media_type();
+        let new_href = mt.new_href();
+        let new_label = mt.new_label();
+
         let adapter = move |count| PaginationControlsProps {
             offset,
             count,
             window_size: 8,
             page_size: LISTING_PAGE_SIZE,
         };
+
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-end mb-3">
+                    <a
+                        href=new_href
+                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40"
+                    >
+                        <span class="text-lg leading-none">"+"</span>
+                        {new_label}
+                    </a>
+                </div>
                 <SearchBar
                     search_query
                     offset_reset=move || offset.set(0)
