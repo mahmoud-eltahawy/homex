@@ -1,12 +1,12 @@
 use super::{fetch_audio, fetch_audio_group_detail, fetch_audios};
 use crate::app::{
+    audio::AudioArtwork,
     detail::DetailShell,
     icons::{AudioIcon, ClockIcon, DownloadIcon},
     media_player::{MediaItem, MediaPlayer},
     model::{Audio, AudioGroup},
     resource_view::ResourceView,
 };
-use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
 
@@ -148,26 +148,6 @@ fn AudioSongDetail(song: Audio, group: AudioGroup, audios: Vec<Audio>) -> impl I
                 </div>
             </div>
         </DetailShell>
-    }
-}
-
-#[component]
-fn AudioArtwork(poster: Option<String>, title: String) -> impl IntoView {
-    match poster {
-        Some(src) => Either::Left(view! {
-            <img
-                src=src
-                class="w-full aspect-square object-cover rounded-2xl shadow-2xl border border-white/10"
-                alt=title
-            />
-        }),
-        None => Either::Right(view! {
-            <div class="w-full aspect-square rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-500/20 via-purple-500/20 to-pink-500/20 flex items-center justify-center overflow-hidden">
-                <div class="text-cyan-300/80 origin-center scale-[6]">
-                    <AudioIcon/>
-                </div>
-            </div>
-        }),
     }
 }
 

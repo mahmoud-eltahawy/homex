@@ -1,5 +1,7 @@
+#[cfg(feature = "ssr")]
+use crate::app::server::{poster::write_poster, upload::extension_of};
 use crate::app::{
-    icons::{AudioIcon, DeleteIcon, EditIcon, MovieIcon, SeriesIcon, UploadIcon},
+    icons::{DeleteIcon, EditIcon, UploadIcon},
     resource_view::ResourceView,
 };
 use leptos::either::Either;
@@ -42,13 +44,6 @@ impl MetadataKind {
             Self::AudioGroup => "مجموعة صوتية",
         }
     }
-    pub fn icon(self) -> AnyView {
-        match self {
-            Self::Movie => MovieIcon().into_any(),
-            Self::Series => SeriesIcon().into_any(),
-            Self::AudioGroup => AudioIcon().into_any(),
-        }
-    }
     pub fn detail_href(self, id: u64) -> String {
         match self {
             Self::Movie => format!("/movie/detail/{id}"),
@@ -56,6 +51,7 @@ impl MetadataKind {
             Self::AudioGroup => format!("/audio/detail/{id}"),
         }
     }
+    #[cfg(feature = "ssr")]
     fn from_str(s: &str) -> Option<Self> {
         match s {
             "movie" => Some(Self::Movie),
@@ -64,11 +60,21 @@ impl MetadataKind {
             _ => None,
         }
     }
+    #[cfg(feature = "ssr")]
     fn table(self) -> &'static str {
         match self {
             Self::Movie => "movies",
             Self::Series => "series",
             Self::AudioGroup => "audio_groups",
+        }
+    }
+
+    #[cfg(feature = "ssr")]
+    fn poster_subdir(self) -> &'static str {
+        match self {
+            Self::Movie => "movies",
+            Self::Series => "series",
+            Self::AudioGroup => "audio",
         }
     }
 }
@@ -165,32 +171,16 @@ pub async fn update_metadata(data: MultipartData) -> Result<(), ServerFnError> {
         MetadataKind::from_str(&kind_str).ok_or_else(|| ServerFnError::new("نوع غير معروف"))?;
     let table = kind.table();
 
-    // Resolve the poster column change, if any:
-    //   Some(Some(url)) → write new file, set poster = url
-    //   Some(None)      → set poster = NULL
-    //   None            → leave poster alone
     let poster_update: Option<Option<String>> = if let Some((ext, bytes)) = new_poster {
-        let dir = state
-            .config
-            .storage
-            .data_dir
-            .join("posters")
-            .join(kind.as_str());
-        tokio::fs::create_dir_all(&dir)
-            .await
-            .map_err(|e| ServerFnError::new(format!("mkdir posters: {e}")))?;
-
-        // Deterministic filename per entity — this becomes the "replace"
-        // operation. The old file (with a different extension) lingers;
-        // a future cleanup task can garbage-collect it by scanning the
-        // directory against live ids.
-        let filename = format!("{id}.{ext}");
-        let abs = dir.join(&filename);
-        tokio::fs::write(&abs, &bytes)
-            .await
-            .map_err(|e| ServerFnError::new(format!("write poster: {e}")))?;
-
-        Some(Some(format!("/posters/{}/{filename}", kind.as_str())))
+        let url = write_poster(
+            &state.config.storage.data_dir,
+            kind.poster_subdir(),
+            id,
+            &ext,
+            &bytes,
+        )
+        .await?;
+        Some(Some(url))
     } else if remove_poster {
         Some(None)
     } else {
@@ -203,61 +193,44 @@ pub async fn update_metadata(data: MultipartData) -> Result<(), ServerFnError> {
         Some(description.as_str())
     };
 
+    // Title and description are always touched.
+    sqlx::query(AssertSqlSafe(format!(
+        "UPDATE {table} SET title = ?, description = ? WHERE id = ?"
+    )))
+    .bind(&title)
+    .bind(description_opt)
+    .bind(id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    // Poster is a separate concern, and is only touched when the user
+    // actually changed it. Two statements beat one interleaved match —
+    // SQLite is in-process, the extra round-trip is negligible.
     match poster_update {
         Some(Some(url)) => {
-            let sql = AssertSqlSafe(format!(
-                "UPDATE {table} SET title = ?, description = ?, poster = ? WHERE id = ?"
-            ));
-            sqlx::query(sql)
-                .bind(&title)
-                .bind(description_opt)
-                .bind(&url)
-                .bind(id)
-                .execute(&state.db)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            sqlx::query(AssertSqlSafe(format!(
+                "UPDATE {table} SET poster = ? WHERE id = ?"
+            )))
+            .bind(&url)
+            .bind(id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
         }
         Some(None) => {
-            let sql = AssertSqlSafe(format!(
-                "UPDATE {table} SET title = ?, description = ?, poster = NULL WHERE id = ?"
-            ));
-            sqlx::query(sql)
-                .bind(&title)
-                .bind(description_opt)
-                .bind(id)
-                .execute(&state.db)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            sqlx::query(AssertSqlSafe(format!(
+                "UPDATE {table} SET poster = NULL WHERE id = ?"
+            )))
+            .bind(id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
         }
-        None => {
-            let sql = AssertSqlSafe(format!(
-                "UPDATE {table} SET title = ?, description = ? WHERE id = ?"
-            ));
-            sqlx::query(sql)
-                .bind(&title)
-                .bind(description_opt)
-                .bind(id)
-                .execute(&state.db)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
-        }
+        None => {}
     }
 
     Ok(())
-}
-
-#[cfg(feature = "ssr")]
-fn extension_of(filename: &str) -> String {
-    match filename.rsplit_once('.') {
-        Some((_, ext))
-            if !ext.is_empty()
-                && ext.len() <= 8
-                && ext.chars().all(|c| c.is_ascii_alphanumeric()) =>
-        {
-            ext.to_ascii_lowercase()
-        }
-        _ => "jpg".to_string(),
-    }
 }
 
 // ─── Shared editor component ──────────────────────────────────────────────

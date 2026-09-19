@@ -1,7 +1,7 @@
 use super::{fetch_season, fetch_series_detail};
 use crate::app::{
-    detail::DetailShell,
-    icons::{ClockIcon, SeriesIcon},
+    detail::{DetailShell, Poster},
+    icons::{ClockIcon, SeriesIcon, SeriesPosterSvg},
     media_player::{MediaItem, MediaPlayer},
     model::{Season, SeasonSummary, Series},
     resource_view::ResourceView,
@@ -123,9 +123,12 @@ fn Info(
     view! {
         <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
             <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
-                {poster.map(|src| view! {
-                    <img src=src class="w-full rounded-2xl shadow-2xl border border-white/10" alt=title.clone()/>
-                })}
+                <Poster
+                    src=poster
+                    alt=title.clone()
+                    class="w-full rounded-2xl shadow-2xl border border-white/10".to_string()
+                    placeholder=view! { <SeriesPosterSvg/> }.into_any()
+                />
             </div>
             <div class="flex-1 w-full">
                 <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">

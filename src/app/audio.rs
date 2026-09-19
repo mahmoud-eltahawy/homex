@@ -1,4 +1,5 @@
 use crate::app::{
+    detail::Poster,
     icons::{AudioIcon, MusicPosterSvg},
     model::{Audio, AudioGroup, MediaType},
     view_schema::CardData,
@@ -7,6 +8,27 @@ use leptos::prelude::*;
 
 pub mod detail;
 pub mod song;
+
+#[component]
+pub fn AudioArtwork(poster: Option<String>, title: String) -> impl IntoView {
+    let placeholder = view! {
+        <div class="w-full aspect-square rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-500/20 via-purple-500/20 to-pink-500/20 flex items-center justify-center overflow-hidden">
+            <div class="text-cyan-300/80 origin-center scale-[6]">
+                <AudioIcon/>
+            </div>
+        </div>
+    }
+    .into_any();
+
+    view! {
+        <Poster
+            src=poster
+            alt=title
+            class="w-full aspect-square object-cover rounded-2xl shadow-2xl border border-white/10".to_string()
+            placeholder=placeholder
+        />
+    }
+}
 
 impl CardData for AudioGroup {
     fn id(&self) -> u64 {

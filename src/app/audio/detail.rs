@@ -1,4 +1,4 @@
-use super::{fetch_audio_group_detail, fetch_audios};
+use super::{AudioArtwork, fetch_audio_group_detail, fetch_audios};
 use crate::app::{
     detail::DetailShell,
     icons::{AudioIcon, ClockIcon, PlayIcon},
@@ -71,7 +71,7 @@ fn AudioGroupDetail(
         <DetailShell poster=poster.clone() edit_href>
             <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
                 <div class="flex-shrink-0 w-48 sm:w-56 md:w-64 mx-auto lg:mx-0">
-                    <AudioPoster poster=poster title=title.clone()/>
+                    <AudioArtwork poster=poster title=title.clone()/>
                 </div>
                 <div class="flex-1 w-full">
                     <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-3 py-1 text-sm font-medium mb-4 border border-white/5">
@@ -103,26 +103,6 @@ fn AudioGroupDetail(
                 />
             </div>
         </DetailShell>
-    }
-}
-
-#[component]
-fn AudioPoster(poster: Option<String>, title: String) -> impl IntoView {
-    match poster {
-        Some(src) => Either::Left(view! {
-            <img
-                src=src
-                class="w-full aspect-square object-cover rounded-2xl shadow-2xl border border-white/10"
-                alt=title
-            />
-        }),
-        None => Either::Right(view! {
-            <div class="w-full aspect-square rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-500/20 via-purple-500/20 to-pink-500/20 flex items-center justify-center overflow-hidden">
-                <div class="text-cyan-300/80 origin-center scale-[6]">
-                    <AudioIcon/>
-                </div>
-            </div>
-        }),
     }
 }
 
