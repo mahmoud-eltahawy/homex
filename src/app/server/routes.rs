@@ -1,9 +1,9 @@
 use axum::{
+    Extension,
     body::Body,
     extract::Path,
     http::{Request, StatusCode},
     response::{IntoResponse, Redirect, Response},
-    Extension,
 };
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
@@ -38,7 +38,7 @@ pub async fn stream_media(
     }
 
     let abs = state.config.storage.media_root.join(&rel);
-    if !abs.exists() {
+    if tokio::fs::metadata(&abs).await.is_err() {
         leptos::logging::warn!("[stream] missing file: {}", abs.display());
         return StatusCode::NOT_FOUND.into_response();
     }

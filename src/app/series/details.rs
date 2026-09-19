@@ -3,11 +3,12 @@ use crate::app::{
     detail::{DetailShell, Poster},
     icons::{ClockIcon, SeriesIcon, SeriesPosterSvg},
     media_player::{MediaItem, MediaPlayer},
-    model::{Season, SeasonSummary, Series},
+    model::{MediaType, Season, SeasonSummary, Series},
     resource_view::ResourceView,
+    route_params::use_u64_param,
 };
 use leptos::{either::Either, prelude::*};
-use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
+use leptos_router::{LazyRoute, lazy_route};
 use web_sys::HtmlSelectElement;
 use web_sys::wasm_bindgen::JsCast;
 
@@ -20,30 +21,68 @@ pub struct SeriesDetailPage {
 #[lazy_route]
 impl LazyRoute for SeriesDetailPage {
     fn data() -> Self {
-        let params = use_params_map();
-        let id =
-            move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
-
+        let id = use_u64_param("id");
         let selected_season = RwSignal::new(1);
+        let series = Resource::new(id, fetch_series_detail);
+        let episodes = Resource::new(
+            move || {
+                // Only fetch a season once we know which seasons exist.
+                let series_id = id();
+                let season = match series.get() {
+                    Some(Ok(s)) => s
+                        .season_summaries
+                        .iter()
+                        .any(|x| x.season_number == selected_season.get())
+                        .then(|| selected_season.get()),
+                    _ => None,
+                };
+                (series_id, season)
+            },
+            |(series_id, season)| async move {
+                match season {
+                    Some(s) => fetch_season(series_id, s).await,
+                    None => Ok(Season {
+                        season_number: 0,
+                        episodes: vec![],
+                    }),
+                }
+            },
+        );
 
         Self {
-            series: Resource::new(id, fetch_series_detail),
-            episodes: Resource::new(
-                move || (id(), selected_season.get()),
-                |(series_id, season)| fetch_season(series_id, season),
-            ),
+            series,
+            episodes,
             selected_season,
         }
     }
 
     fn view(this: Self) -> AnyView {
-        let adapter = move |series: Series| SeriesViewProps {
-            series,
-            episodes: this.episodes,
-            selected_season: this.selected_season,
+        let series = this.series;
+        let episodes = this.episodes;
+        let selected_season = this.selected_season;
+
+        Effect::new(move |_| {
+            let Some(Ok(s)) = series.get() else { return };
+            let Some(first) = s.season_summaries.first() else {
+                return;
+            };
+            let current = selected_season.get_untracked();
+            if !s
+                .season_summaries
+                .iter()
+                .any(|x| x.season_number == current)
+            {
+                selected_season.set(first.season_number);
+            }
+        });
+
+        let adapter = move |s: Series| SeriesViewProps {
+            series: s,
+            episodes,
+            selected_season,
         };
         view! {
-            <ResourceView resource=this.series view_fn=SeriesView adapter=adapter />
+            <ResourceView resource=series view_fn=SeriesView adapter=adapter />
         }
         .into_any()
     }
@@ -65,7 +104,7 @@ fn SeriesView(
 
     let season_adapter = |season: Season| SeasonPlayerProps { season };
 
-    let edit_href = format!("/series/detail/{}/edit", series.id);
+    let edit_href = MediaType::Series.edit_href(series.id);
     view! {
         <DetailShell poster=poster.clone() edit_href>
             <Info poster title season_count=series.season_count description/>

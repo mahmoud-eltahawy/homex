@@ -6,9 +6,10 @@ use crate::app::{
     media_player::{MediaItem, MediaPlayer},
     model::{Audio, AudioGroup},
     resource_view::ResourceView,
+    route_params::use_u64_param,
 };
 use leptos::prelude::*;
-use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
+use leptos_router::{LazyRoute, lazy_route};
 
 pub struct AudioSongDetailPage {
     pub song: Resource<Result<Audio, ServerFnError>>,
@@ -19,16 +20,8 @@ pub struct AudioSongDetailPage {
 #[lazy_route]
 impl LazyRoute for AudioSongDetailPage {
     fn data() -> Self {
-        let params = use_params_map();
-        let group_id =
-            move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
-        let song_id = move || {
-            params.with(|p| {
-                p.get("song_id")
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(0)
-            })
-        };
+        let group_id = use_u64_param("id");
+        let song_id = use_u64_param("song_id");
 
         Self {
             song: Resource::new(move || (group_id(), song_id()), |(g, s)| fetch_audio(g, s)),
@@ -36,7 +29,6 @@ impl LazyRoute for AudioSongDetailPage {
             audios: Resource::new(group_id, fetch_audios),
         }
     }
-
     fn view(this: Self) -> AnyView {
         let group = this.group;
         let audios = this.audios;

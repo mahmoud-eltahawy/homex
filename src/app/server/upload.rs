@@ -5,16 +5,28 @@ mod persist;
 mod types;
 mod validate;
 
+use std::time::Duration;
+
 pub use multipart::parse_upload_multipart;
 pub use naming::{extension_of, new_job_id, sanitize_filename, slugify};
+use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};
 
 use leptos::prelude::ServerFnError;
 
 use crate::app::model::MediaType;
-use crate::app::server::AppState;
 use crate::app::server::convert::{JobPhase, job_set_phase};
+use crate::app::server::{AppState, Jobs};
+
+const JOB_RETENTION: Duration = Duration::from_secs(60);
+
+pub fn schedule_job_eviction(jobs: Jobs, job_id: String) {
+    tokio::spawn(async move {
+        sleep(JOB_RETENTION).await;
+        jobs.write().await.remove(&job_id);
+    });
+}
 
 pub async fn process_upload(
     payload: UploadPayload,
@@ -48,5 +60,8 @@ pub async fn process_upload(
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
     job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
+    if let Some(id) = job_id {
+        schedule_job_eviction(state.jobs.clone(), id.to_string());
+    }
     Ok(format!("تم رفع {} ملف بنجاح", file_rows.len()))
 }

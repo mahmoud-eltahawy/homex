@@ -1,3 +1,4 @@
+use crate::app::route_params::use_u64_param;
 #[cfg(feature = "ssr")]
 use crate::app::server::{poster::write_poster, upload::extension_of};
 use crate::app::{
@@ -7,7 +8,7 @@ use crate::app::{
 use leptos::either::Either;
 use leptos::html;
 use leptos::prelude::*;
-use leptos_router::hooks::{use_navigate, use_params_map};
+use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
@@ -171,27 +172,17 @@ pub async fn update_metadata(data: MultipartData) -> Result<(), ServerFnError> {
         MetadataKind::from_str(&kind_str).ok_or_else(|| ServerFnError::new("نوع غير معروف"))?;
     let table = kind.table();
 
-    let poster_update: Option<Option<String>> = if let Some((ext, bytes)) = new_poster {
-        let url = write_poster(
-            &state.config.storage.data_dir,
-            kind.poster_subdir(),
-            id,
-            &ext,
-            &bytes,
-        )
-        .await?;
-        Some(Some(url))
-    } else if remove_poster {
-        Some(None)
-    } else {
-        None
-    };
-
     let description_opt = if description.trim().is_empty() {
         None
     } else {
         Some(description.as_str())
     };
+
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
 
     // Title and description are always touched.
     sqlx::query(AssertSqlSafe(format!(
@@ -200,35 +191,43 @@ pub async fn update_metadata(data: MultipartData) -> Result<(), ServerFnError> {
     .bind(&title)
     .bind(description_opt)
     .bind(id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    // Poster is a separate concern, and is only touched when the user
-    // actually changed it. Two statements beat one interleaved match —
-    // SQLite is in-process, the extra round-trip is negligible.
-    match poster_update {
-        Some(Some(url)) => {
-            sqlx::query(AssertSqlSafe(format!(
-                "UPDATE {table} SET poster = ? WHERE id = ?"
-            )))
-            .bind(&url)
-            .bind(id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-        }
-        Some(None) => {
-            sqlx::query(AssertSqlSafe(format!(
-                "UPDATE {table} SET poster = NULL WHERE id = ?"
-            )))
-            .bind(id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-        }
-        None => {}
+    // Poster is a separate concern; only touched when the user changed it.
+    // The file write happens *before* the DB write so a failed write
+    // aborts the transaction without having committed title/description.
+    if let Some((ext, bytes)) = new_poster {
+        let url = write_poster(
+            &state.config.storage.data_dir,
+            kind.poster_subdir(),
+            id,
+            &ext,
+            &bytes,
+        )
+        .await?;
+        sqlx::query(AssertSqlSafe(format!(
+            "UPDATE {table} SET poster = ? WHERE id = ?"
+        )))
+        .bind(&url)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    } else if remove_poster {
+        sqlx::query(AssertSqlSafe(format!(
+            "UPDATE {table} SET poster = NULL WHERE id = ?"
+        )))
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
 
     Ok(())
 }
@@ -561,11 +560,9 @@ macro_rules! edit_page {
         #[lazy_route]
         impl LazyRoute for $page {
             fn data() -> Self {
-                let params = use_params_map();
-                let id = move || {
-                    params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0))
-                };
-                Self { id: id() }
+                Self {
+                    id: use_u64_param("id")(),
+                }
             }
 
             fn view(this: Self) -> AnyView {

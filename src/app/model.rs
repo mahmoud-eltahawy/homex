@@ -16,7 +16,7 @@ impl MediaFile {
         if bytes >= 1_000_000_000.0 {
             format!("{:.1} GB", bytes / 1_000_000_000.0)
         } else if bytes >= 1_000_000.0 {
-            format!("{:.1} MG", bytes / 1_000_000.0)
+            format!("{:.1} MB", bytes / 1_000_000.0)
         } else if bytes >= 1_000.0 {
             format!("{:.1} KB", bytes / 1_000.0)
         } else {
@@ -82,8 +82,13 @@ impl MediaType {
         }
         .to_string()
     }
+
     pub fn detail_href(&self, id: u64) -> String {
         format!("{}/detail/{}", self.listing_href(), id)
+    }
+
+    pub fn edit_href(&self, id: u64) -> String {
+        format!("{}/edit", self.detail_href(id))
     }
 }
 
@@ -104,7 +109,7 @@ impl TryFrom<&str> for MediaType {
             "movie" => Ok(MediaType::Movie),
             "series" => Ok(MediaType::Series),
             "audio" => Ok(MediaType::AudioGroup),
-            _ => Err("Media type must be 'movie' or 'series'"),
+            _ => Err("Media type must be 'movie' or 'series' or 'audio'"),
         }
     }
 }

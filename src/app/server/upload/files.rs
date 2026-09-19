@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use leptos::prelude::ServerFnError;
 
 use crate::app::model::MediaType;
@@ -59,69 +61,84 @@ pub async fn stage_files(
 
     let targets = targets_for(payload);
     let conversion_count = targets.iter().filter(|t| t.is_some()).count();
-    let mut staged = Vec::with_capacity(payload.files.len());
 
-    for (i, file) in payload.files.iter().enumerate() {
-        let ext = file.filename.rsplit('.').next().unwrap_or("").to_string();
-        let stem = file
-            .filename
-            .rsplitn(2, '.')
-            .nth(1)
-            .unwrap_or(&file.filename)
-            .to_string();
-        let safe_stem = sanitize_filename(&stem);
+    let mut written: Vec<PathBuf> = Vec::new();
+    let mut staged: Vec<StagedFile> = Vec::with_capacity(payload.files.len());
 
-        let raw_rel = format!("{subdir}/{slug}/{safe_stem}.{ext}");
-        let raw_abs = state.config.storage.media_root.join(&raw_rel);
+    let result: Result<(), ServerFnError> = async {
+        for (i, file) in payload.files.iter().enumerate() {
+            let ext = file.filename.rsplit('.').next().unwrap_or("").to_string();
+            let stem = file
+                .filename
+                .rsplitn(2, '.')
+                .nth(1)
+                .unwrap_or(&file.filename)
+                .to_string();
+            let safe_stem = sanitize_filename(&stem);
 
-        tokio::fs::write(&raw_abs, &file.bytes)
+            let raw_rel = format!("{subdir}/{slug}/{safe_stem}.{ext}");
+            let raw_abs = state.config.storage.media_root.join(&raw_rel);
+
+            tokio::fs::write(&raw_abs, &file.bytes)
+                .await
+                .map_err(|e| ServerFnError::new(format!("write {}: {e}", raw_abs.display())))?;
+            written.push(raw_abs.clone());
+
+            let Some(target) = targets[i] else {
+                let dur = ffprobe_duration(&raw_abs).await.round() as i64;
+                staged.push(StagedFile {
+                    rel: raw_rel,
+                    duration: dur,
+                    size: file.bytes.len() as u64,
+                    title: file.title.clone(),
+                });
+                continue;
+            };
+
+            let out_rel = format!("{subdir}/{slug}/{safe_stem}.{}", target.extension());
+            let out_abs = state.config.storage.media_root.join(&out_rel);
+
+            let conversion_pos = targets[..i].iter().filter(|t| t.is_some()).count();
+            let total_secs = ffprobe_duration(&raw_abs).await;
+
+            convert_file(
+                &raw_abs,
+                &out_abs,
+                target,
+                total_secs,
+                conversion_pos,
+                conversion_count,
+                &file.filename,
+                &state.jobs,
+                job_id,
+            )
             .await
-            .map_err(|e| ServerFnError::new(format!("write {}: {e}", raw_abs.display())))?;
+            .map_err(ServerFnError::new)?;
 
-        let Some(target) = targets[i] else {
-            let dur = ffprobe_duration(&raw_abs).await.round() as i64;
+            written.push(out_abs.clone());
+            let _ = tokio::fs::remove_file(&raw_abs).await;
+
+            let size = tokio::fs::metadata(&out_abs)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+
             staged.push(StagedFile {
-                rel: raw_rel,
-                duration: dur,
-                size: file.bytes.len() as u64,
+                rel: out_rel,
+                duration: total_secs.round() as i64,
+                size,
                 title: file.title.clone(),
             });
-            continue;
-        };
+        }
+        Ok(())
+    }
+    .await;
 
-        let out_rel = format!("{subdir}/{slug}/{safe_stem}.{}", target.extension());
-        let out_abs = state.config.storage.media_root.join(&out_rel);
-
-        let conversion_pos = targets[..i].iter().filter(|t| t.is_some()).count();
-        let total_secs = ffprobe_duration(&raw_abs).await;
-
-        convert_file(
-            &raw_abs,
-            &out_abs,
-            target,
-            total_secs,
-            conversion_pos,
-            conversion_count,
-            &file.filename,
-            &state.jobs,
-            job_id,
-        )
-        .await
-        .map_err(ServerFnError::new)?;
-
-        let _ = tokio::fs::remove_file(&raw_abs).await;
-
-        let size = tokio::fs::metadata(&out_abs)
-            .await
-            .map(|m| m.len())
-            .unwrap_or(0);
-
-        staged.push(StagedFile {
-            rel: out_rel,
-            duration: total_secs.round() as i64,
-            size,
-            title: file.title.clone(),
-        });
+    if let Err(e) = result {
+        for p in written {
+            let _ = tokio::fs::remove_file(&p).await;
+        }
+        return Err(e);
     }
 
     Ok(staged)

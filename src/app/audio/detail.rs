@@ -2,12 +2,13 @@ use super::{AudioArtwork, fetch_audio_group_detail, fetch_audios};
 use crate::app::{
     detail::DetailShell,
     icons::{AudioIcon, ClockIcon, PlayIcon},
-    model::{Audio, AudioGroup},
+    model::{Audio, AudioGroup, MediaType},
     resource_view::ResourceView,
+    route_params::use_u64_param,
 };
 use leptos::either::Either;
 use leptos::prelude::*;
-use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
+use leptos_router::{LazyRoute, lazy_route};
 
 pub struct AudioGroupDetailPage {
     pub group: Resource<Result<AudioGroup, ServerFnError>>,
@@ -17,10 +18,7 @@ pub struct AudioGroupDetailPage {
 #[lazy_route]
 impl LazyRoute for AudioGroupDetailPage {
     fn data() -> Self {
-        let params = use_params_map();
-        let id =
-            move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
-
+        let id = use_u64_param("id");
         Self {
             group: Resource::new(id, fetch_audio_group_detail),
             audios: Resource::new(id, fetch_audios),
@@ -28,9 +26,8 @@ impl LazyRoute for AudioGroupDetailPage {
     }
 
     fn view(this: Self) -> AnyView {
-        let params = use_params_map();
-        let group_id =
-            move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
+        let group_id = use_u64_param("id");
+
         let adapter = move |group: AudioGroup| AudioGroupDetailProps {
             group,
             audios: this.audios,
@@ -66,7 +63,7 @@ fn AudioGroupDetail(
         group_id,
     };
 
-    let edit_href = format!("/audio/detail/{}/edit", group.id);
+    let edit_href = MediaType::AudioGroup.edit_href(group.id);
     view! {
         <DetailShell poster=poster.clone() edit_href>
             <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">

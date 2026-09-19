@@ -1,13 +1,13 @@
 use crate::app::{
-    detail::DetailShell,
-    icons::{ClockIcon, DownloadIcon, MovieIcon},
+    detail::{DetailShell, Poster},
+    icons::{ClockIcon, DownloadIcon, MovieIcon, MoviePosterSvg},
     media_player::{MediaItem, MediaPlayer},
-    model::{Movie, MovieChapter},
+    model::{MediaType, Movie, MovieChapter},
     resource_view::ResourceView,
-    view_schema::CardData,
+    route_params::use_u64_param,
 };
 use leptos::prelude::*;
-use leptos_router::{LazyRoute, hooks::use_params_map, lazy_route};
+use leptos_router::{LazyRoute, lazy_route};
 
 #[server]
 pub async fn fetch_movie_detail(id: u64) -> Result<crate::app::model::Movie, ServerFnError> {
@@ -85,10 +85,7 @@ pub struct MovieDetailPage {
 #[lazy_route]
 impl LazyRoute for MovieDetailPage {
     fn data() -> Self {
-        let params = use_params_map();
-        let id =
-            move || params.with(|p| p.get("id").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
-        let movie = Resource::new(id, fetch_movie_detail);
+        let movie = Resource::new(use_u64_param("id"), fetch_movie_detail);
         Self { movie }
     }
 
@@ -123,7 +120,7 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     let first_chapter = movie.chapters.first().cloned();
     let poster = movie.poster.clone();
 
-    let edit_href = format!("/movie/detail/{}/edit", movie.id);
+    let edit_href = MediaType::Movie.edit_href(movie.id);
     view! {
         <DetailShell poster=poster.clone()  edit_href>
             <DetailBody movie=movie.clone() chapter=first_chapter/>
@@ -143,10 +140,16 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
 
 #[component]
 fn DetailBody(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
+    let poster = movie.poster.clone();
+    let title = movie.title.clone();
     view! {
         <div class="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
             <div class="flex-shrink-0 w-40 sm:w-48 md:w-56 lg:w-64 mx-auto lg:mx-0">
-                {movie.clone().poster()}
+                <Poster
+                    src=poster
+                    alt=title
+                    placeholder=view! { <MoviePosterSvg/> }.into_any()
+                />
             </div>
             <div class="flex-1 w-full">
                 <DetailMetaBadge/>
@@ -186,6 +189,8 @@ fn DetailInfo(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
         .map(|ch| ch.file.human_readable_size())
         .unwrap_or_default();
 
+    let has_download = !download_link.is_empty();
+
     view! {
         <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
             {title.clone()}
@@ -195,14 +200,16 @@ fn DetailInfo(movie: Movie, chapter: Option<MovieChapter>) -> impl IntoView {
             <span>{size}</span>
         </div>
         <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">{description}</p>
-        <div class="mt-6 flex gap-3">
-            <a
-                download={title}
-                href=download_link
-                class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
-            >
-                <DownloadIcon/> "تحميل"
-            </a>
-        </div>
+        {has_download.then(move || view! {
+            <div class="mt-6 flex gap-3">
+                <a
+                    download={title}
+                    href=download_link
+                    class="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40 text-sm"
+                >
+                    <DownloadIcon/> "تحميل"
+                </a>
+            </div>
+        })}
     }
 }

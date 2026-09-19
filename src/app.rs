@@ -17,9 +17,6 @@ use leptos_router::{
     path,
 };
 
-#[cfg(feature = "ssr")]
-pub mod server;
-
 mod audio;
 mod common;
 pub mod detail;
@@ -33,8 +30,11 @@ mod model;
 mod movies;
 mod pagination;
 mod resource_view;
+mod route_params;
 mod search;
 mod series;
+#[cfg(feature = "ssr")]
+pub mod server;
 mod settings;
 mod upload;
 mod view_schema;

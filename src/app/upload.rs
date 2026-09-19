@@ -156,7 +156,8 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
     use crate::app::server::AppState;
     use crate::app::server::convert::{Job, JobPhase};
     use crate::app::server::upload::{
-        needs_conversion, new_job_id, parse_upload_multipart, process_upload, validate_extensions,
+        needs_conversion, new_job_id, parse_upload_multipart, process_upload,
+        schedule_job_eviction, validate_extensions,
     };
 
     let state: AppState = expect_context();
@@ -188,6 +189,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
 
     let state_bg = state.clone();
     let job_id_bg = job_id.clone();
+
     tokio::spawn(async move {
         if let Err(e) = process_upload(payload, &state_bg, Some(&job_id_bg)).await {
             crate::app::server::convert::job_set_phase(
@@ -196,6 +198,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
                 JobPhase::Failed(e.to_string()),
             )
             .await;
+            schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
         }
     });
 
