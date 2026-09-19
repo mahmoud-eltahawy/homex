@@ -5,15 +5,15 @@ use crate::app::{
     },
     resource_view::ResourceView,
 };
-use leptos::html;
 use leptos::prelude::*;
+use leptos::{either::Either, html};
 use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 use std::rc::Rc;
 use std::time::Duration;
 use web_sys::{
-    FormData, HtmlFormElement, HtmlInputElement, HtmlSelectElement, MouseEvent,
+    FormData, HtmlFormElement, HtmlInputElement, HtmlSelectElement, MouseEvent, Url,
     wasm_bindgen::JsCast,
 };
 
@@ -119,6 +119,7 @@ async fn fetch_audio_group_titles() -> Result<Vec<MediaTitle>, ServerFnError> {
 #[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {
     use crate::app::server::AppState;
+    use sqlx::AssertSqlSafe;
     use std::collections::BTreeMap;
 
     let state: AppState = expect_context();
@@ -135,8 +136,23 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
     let mut files: BTreeMap<usize, (String, Vec<u8>)> = BTreeMap::new();
     let mut file_titles: BTreeMap<usize, String> = BTreeMap::new();
 
+    // Poster bytes + extension, if the user uploaded one.
+    let mut poster: Option<(String, Vec<u8>)> = None;
+
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().map(String::from).unwrap_or_default();
+
+        // Poster first — it's a single field, not indexed.
+        if name == "poster_file" {
+            let fname = field.file_name().map(String::from).unwrap_or_default();
+            let bytes = field.bytes().await?.to_vec();
+            if !bytes.is_empty() {
+                let ext = extension_of(&fname);
+                poster = Some((ext, bytes));
+            }
+            continue;
+        }
+
         match name.as_str() {
             "title" => {
                 title = field.text().await?;
@@ -164,6 +180,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
             }
             _ => {}
         }
+
         if let Some(idx_str) = name.strip_prefix("file_title_") {
             if let Ok(idx) = idx_str.parse::<usize>() {
                 file_titles.insert(idx, field.text().await?);
@@ -192,7 +209,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         .try_into()
         .map_err(|e: &str| ServerFnError::new(e))?;
 
-    // ── write files to disk + insert DB rows ─────────────────────────
+    // ── write media files to disk + insert `files` rows ──────────────
     let slug = slugify(&title);
     let base_subdir = match media_type {
         MediaType::Movie => "movies",
@@ -237,6 +254,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
             .parse()
             .unwrap_or(0.0);
         let dur = dur.round() as i64;
+
         let file_id: i64 = sqlx::query_scalar(
             "INSERT INTO files (relative_path, size_bytes, duration_secs) \
              VALUES (?, ?, ?) RETURNING id",
@@ -256,145 +274,175 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
     }
     written.sort_by_key(|(id, _, _, _)| *id);
 
+    // ── entity + child rows, all in one transaction ──────────────────
     let mut tx = state
         .db
         .begin()
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    match media_type {
-        MediaType::Movie => {
-            let movie_id: i64 = if is_new {
-                sqlx::query_scalar(
-                    "INSERT INTO movies (title, description) VALUES (?, ?) RETURNING id",
-                )
-                .bind(&title)
-                .bind(if description.is_empty() {
-                    None
+    // Match arm returns (table_name, entity_id) so poster handling can
+    // run once afterwards regardless of media type.
+    let (table, entity_id): (&str, i64) =
+        match media_type {
+            MediaType::Movie => {
+                let movie_id: i64 = if is_new {
+                    sqlx::query_scalar(
+                        "INSERT INTO movies (title, description) VALUES (?, ?) RETURNING id",
+                    )
+                    .bind(&title)
+                    .bind(if description.is_empty() {
+                        None
+                    } else {
+                        Some(&description)
+                    })
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| ServerFnError::new(e.to_string()))?
                 } else {
-                    Some(&description)
-                })
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?
-            } else {
-                existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
-            };
+                    existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
+                };
 
-            let start: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(MAX(number) + 1, 0) FROM movie_chapters WHERE movie_id = ?",
-            )
-            .bind(movie_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-            for (i, (fid, _, _, ch_title)) in written.iter().enumerate() {
-                sqlx::query(
-                    "INSERT INTO movie_chapters (movie_id, number, title, file_id) \
-                     VALUES (?, ?, ?, ?)",
+                let start: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(number) + 1, 0) FROM movie_chapters WHERE movie_id = ?",
                 )
                 .bind(movie_id)
-                .bind(start + i as i64)
-                .bind(ch_title)
-                .bind(fid)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
-            }
-        }
-        MediaType::Series => {
-            let series_id: i64 = if is_new {
-                sqlx::query_scalar(
-                    "INSERT INTO series (title, description) VALUES (?, ?) RETURNING id",
-                )
-                .bind(&title)
-                .bind(if description.is_empty() {
-                    None
-                } else {
-                    Some(&description)
-                })
                 .fetch_one(&mut *tx)
                 .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?
-            } else {
-                existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
-            };
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-            let sn = season_number.unwrap_or(1);
-            let season_id: i64 = sqlx::query_scalar(
-                "INSERT INTO seasons (series_id, number) VALUES (?, ?) \
+                for (i, (fid, _, _, ch_title)) in written.iter().enumerate() {
+                    sqlx::query(
+                        "INSERT INTO movie_chapters (movie_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                    )
+                    .bind(movie_id)
+                    .bind(start + i as i64)
+                    .bind(ch_title)
+                    .bind(fid)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| ServerFnError::new(e.to_string()))?;
+                }
+                ("movies", movie_id)
+            }
+            MediaType::Series => {
+                let series_id: i64 = if is_new {
+                    sqlx::query_scalar(
+                        "INSERT INTO series (title, description) VALUES (?, ?) RETURNING id",
+                    )
+                    .bind(&title)
+                    .bind(if description.is_empty() {
+                        None
+                    } else {
+                        Some(&description)
+                    })
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| ServerFnError::new(e.to_string()))?
+                } else {
+                    existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
+                };
+
+                let sn = season_number.unwrap_or(1);
+                let season_id: i64 = sqlx::query_scalar(
+                    "INSERT INTO seasons (series_id, number) VALUES (?, ?) \
                  ON CONFLICT(series_id, number) DO UPDATE SET number = number \
                  RETURNING id",
-            )
-            .bind(series_id)
-            .bind(sn)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-            let start: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(MAX(number) + 1, 1) FROM episodes WHERE season_id = ?",
-            )
-            .bind(season_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-            for (i, (fid, _, _, ep_title)) in written.iter().enumerate() {
-                sqlx::query(
-                    "INSERT INTO episodes (season_id, number, title, file_id) \
-                     VALUES (?, ?, ?, ?)",
                 )
-                .bind(season_id)
-                .bind(start + i as i64)
-                .bind(ep_title)
-                .bind(fid)
-                .execute(&mut *tx)
+                .bind(series_id)
+                .bind(sn)
+                .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+                let start: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(number) + 1, 1) FROM episodes WHERE season_id = ?",
+                )
+                .bind(season_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+                for (i, (fid, _, _, ep_title)) in written.iter().enumerate() {
+                    sqlx::query(
+                        "INSERT INTO episodes (season_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                    )
+                    .bind(season_id)
+                    .bind(start + i as i64)
+                    .bind(ep_title)
+                    .bind(fid)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| ServerFnError::new(e.to_string()))?;
+                }
+                ("series", series_id)
             }
-        }
-        MediaType::AudioGroup => {
-            let group_id: i64 = if is_new {
-                sqlx::query_scalar(
+            MediaType::AudioGroup => {
+                let group_id: i64 =
+                    if is_new {
+                        sqlx::query_scalar(
                     "INSERT INTO audio_groups (title, description) VALUES (?, ?) RETURNING id",
                 )
                 .bind(&title)
-                .bind(if description.is_empty() {
-                    None
-                } else {
-                    Some(&description)
-                })
+                .bind(if description.is_empty() { None } else { Some(&description) })
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| ServerFnError::new(e.to_string()))?
-            } else {
-                existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
-            };
+                    } else {
+                        existing_id.ok_or_else(|| ServerFnError::new("existing_id required"))?
+                    };
 
-            let start: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(MAX(number) + 1, 0) FROM audios WHERE group_id = ?",
-            )
-            .bind(group_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-            for (i, (fid, _, _, song_title)) in written.iter().enumerate() {
-                sqlx::query(
-                    "INSERT INTO audios (group_id, number, title, file_id) \
-                     VALUES (?, ?, ?, ?)",
+                let start: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(number) + 1, 0) FROM audios WHERE group_id = ?",
                 )
                 .bind(group_id)
-                .bind(start + i as i64)
-                .bind(song_title)
-                .bind(fid)
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+                for (i, (fid, _, _, song_title)) in written.iter().enumerate() {
+                    sqlx::query(
+                        "INSERT INTO audios (group_id, number, title, file_id) \
+                     VALUES (?, ?, ?, ?)",
+                    )
+                    .bind(group_id)
+                    .bind(start + i as i64)
+                    .bind(song_title)
+                    .bind(fid)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| ServerFnError::new(e.to_string()))?;
+                }
+                ("audio_groups", group_id)
             }
-        }
+        };
+
+    // ── poster, if any ───────────────────────────────────────────────
+    // Written with the entity id in the filename so two uploads with
+    // the same title (slug) can't collide.
+    if let Some((ext, bytes)) = poster.as_ref() {
+        let filename = format!("{entity_id}.{ext}");
+        let rel_dir = base_subdir.to_string();
+        let abs_dir = state.config.storage.data_dir.join("posters").join(&rel_dir);
+        tokio::fs::create_dir_all(&abs_dir)
+            .await
+            .map_err(|e| ServerFnError::new(format!("mkdir posters: {e}")))?;
+
+        let abs = abs_dir.join(&filename);
+        tokio::fs::write(&abs, bytes)
+            .await
+            .map_err(|e| ServerFnError::new(format!("write poster: {e}")))?;
+
+        let url = format!("/posters/{rel_dir}/{filename}");
+        let sql = AssertSqlSafe(format!("UPDATE {table} SET poster = ? WHERE id = ?"));
+        sqlx::query(sql)
+            .bind(&url)
+            .bind(entity_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
     }
 
     tx.commit()
@@ -428,6 +476,20 @@ fn sanitize_filename(name: &str) -> String {
     name.chars()
         .filter(|c| !matches!(c, '/' | '\\' | '\0'))
         .collect()
+}
+
+#[cfg(feature = "ssr")]
+fn extension_of(filename: &str) -> String {
+    match filename.rsplit_once('.') {
+        Some((_, ext))
+            if !ext.is_empty()
+                && ext.len() <= 8
+                && ext.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            ext.to_ascii_lowercase()
+        }
+        _ => "jpg".to_string(),
+    }
 }
 
 // ─── Page shell ───────────────────────────────────────────────────────────
@@ -465,6 +527,7 @@ fn UploadContent() -> impl IntoView {
     let title = RwSignal::new(String::new());
     let description = RwSignal::new(String::new());
     let season_number = RwSignal::new(1u32);
+    let poster_file = RwSignal::new(None::<web_sys::File>); // ← new
 
     // Files queued for the current operation.
     let items = RwSignal::new(Vec::<UploadItem>::new());
@@ -582,6 +645,10 @@ fn UploadContent() -> impl IntoView {
             let _ = form_data.append_with_str(&format!("file_title_{i}"), &item.title);
         }
 
+        if let Some(poster) = poster_file.get_untracked() {
+            let _ = form_data.append_with_blob_and_filename("poster_file", &poster, &poster.name());
+        }
+
         upload_action.dispatch(form_data);
     };
 
@@ -614,6 +681,7 @@ fn UploadContent() -> impl IntoView {
                     title
                     description
                     season_number
+                    poster_file
                     items
                     next_id
                 />
@@ -656,6 +724,7 @@ fn UploadContent() -> impl IntoView {
                             title
                             description
                             season_number
+                            poster_file
                             titles
                         />
                     </FormSection>
@@ -780,6 +849,7 @@ fn MediaKindCards(
     title: RwSignal<String>,
     description: RwSignal<String>,
     season_number: RwSignal<u32>,
+    poster_file: RwSignal<Option<web_sys::File>>,
     items: RwSignal<Vec<UploadItem>>,
     next_id: RwSignal<u32>,
 ) -> impl IntoView {
@@ -807,6 +877,7 @@ fn MediaKindCards(
             title.set(String::new());
             description.set(String::new());
             season_number.set(1);
+            poster_file.set(None);
             items.set(Vec::new());
             next_id.set(1);
         });
@@ -936,6 +1007,7 @@ fn DetailsSection(
     title: RwSignal<String>,
     description: RwSignal<String>,
     season_number: RwSignal<u32>,
+    poster_file: RwSignal<Option<web_sys::File>>,
     titles: Resource<Result<Vec<MediaTitle>, ServerFnError>>,
 ) -> impl IntoView {
     let is_new_true = Memo::new(move |_| is_new.get() == Some(true));
@@ -956,7 +1028,7 @@ fn DetailsSection(
                     titles
                 />
             </Show>
-
+            <PosterUploadField poster_file/>
             <Show when=move || is_series.get()>
                 <SeasonNumberField season_number/>
             </Show>
@@ -996,6 +1068,103 @@ fn DescriptionField(description: RwSignal<String>) -> impl IntoView {
                 placeholder="وصف مختصر (اختياري)..."
                 class=TEXTAREA_CLASS
             ></textarea>
+        </div>
+    }
+}
+
+#[component]
+fn PosterUploadField(poster_file: RwSignal<Option<web_sys::File>>) -> impl IntoView {
+    let input_id = "posterFileInput";
+    let preview_url = RwSignal::new(None::<String>);
+    let file_name = RwSignal::new(String::new());
+
+    let on_change = move |ev: web_sys::Event| {
+        let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        else {
+            return;
+        };
+        let Some(files) = input.files() else { return };
+        let Some(file) = files.get(0) else { return };
+
+        // Revoke the previous preview URL before replacing it.
+        if let Some(prev) = preview_url.get_untracked()
+            && let Ok(_) = Url::revoke_object_url(&prev)
+        {}
+
+        file_name.set(file.name());
+        if let Ok(url) = Url::create_object_url_with_blob(&file) {
+            preview_url.set(Some(url));
+        } else {
+            preview_url.set(None);
+        }
+        poster_file.set(Some(file));
+    };
+
+    let clear = move |_| {
+        if let Some(prev) = preview_url.get_untracked() {
+            let _ = Url::revoke_object_url(&prev);
+        }
+        preview_url.set(None);
+        file_name.set(String::new());
+        poster_file.set(None);
+    };
+
+    // Make sure the browser doesn't leak the last blob URL.
+    on_cleanup(move || {
+        if let Some(prev) = preview_url.get_untracked() {
+            let _ = Url::revoke_object_url(&prev);
+        }
+    });
+
+    view! {
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                "الصورة (اختياري)"
+            </label>
+            <div class="flex items-start gap-4">
+                <div class="w-24 h-36 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center overflow-hidden shrink-0">
+                    {move || match preview_url.get() {
+                        Some(url) => Either::Left(view! {
+                            <img src=url class="w-full h-full object-cover" alt=""/>
+                        }),
+                        None => Either::Right(view! {
+                            <span class="text-gray-600 text-xs text-center px-2">
+                                "لا توجد صورة"
+                            </span>
+                        }),
+                    }}
+                </div>
+                <div class="flex-1 flex flex-col gap-2 min-w-0">
+                    <input
+                        type="file"
+                        id=input_id
+                        class="hidden"
+                        accept="image/*"
+                        on:change=on_change
+                    />
+                    <label for=input_id class=UPLOAD_BTN_CLASS>
+                        <UploadIcon/> "اختيار صورة"
+                    </label>
+                    <Show when=move || !file_name.get().is_empty()>
+                        <div class="flex items-center gap-2 text-xs text-gray-400">
+                            <span class="truncate">{move || file_name.get()}</span>
+                            <button
+                                type="button"
+                                on:click=clear
+                                class="text-red-400 hover:text-red-300 transition shrink-0"
+                                aria-label="إزالة الصورة"
+                            >
+                                <DeleteIcon/>
+                            </button>
+                        </div>
+                    </Show>
+                    <p class="text-xs text-gray-500">
+                        "تظهر في القوائم وصفحة التفاصيل. صورة عمودية (2:3) للأفلام والمسلسلات، مربعة للصوتيات."
+                    </p>
+                </div>
+            </div>
         </div>
     }
 }

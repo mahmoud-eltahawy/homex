@@ -10,6 +10,7 @@ async fn main() {
     use leptos::logging::log;
     use leptos::prelude::*;
     use leptos_axum::{LeptosRoutes, generate_route_list};
+    use tower_http::services::ServeDir;
 
     let config = Config::load().expect("failed to load homex.toml");
     let server_addr = config.server.addr;
@@ -20,12 +21,18 @@ async fn main() {
 
     let state = AppState { db, config };
 
+    let posters_dir = state.config.storage.data_dir.join("posters");
+    tokio::fs::create_dir_all(&posters_dir)
+        .await
+        .expect("failed to create posters dir");
+
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
 
     let app = Router::new()
+        .nest_service("/posters", ServeDir::new(posters_dir))
         .leptos_routes_with_context(
             &leptos_options,
             routes,
