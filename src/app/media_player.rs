@@ -582,20 +582,15 @@ fn PlaylistPanel(
                 <For
                     each=move || items.get().into_iter().enumerate()
                     key=|(_, item)| item.id
-                    let:entry
+                    let:((index,item))
                 >
-                    {
-                        let (index, item) = entry;
-                        view! {
-                            <PlaylistItem
-                                item=item
-                                index=index
-                                current_idx=current_idx
-                                on_rename=on_rename
-                                on_delete=on_delete
-                            />
-                        }
-                    }
+                    <PlaylistItem
+                        item=item
+                        index=index
+                        current_idx=current_idx
+                        on_rename=on_rename
+                        on_delete=on_delete
+                    />
                 </For>
             </div>
         </div>
