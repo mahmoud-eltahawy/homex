@@ -44,27 +44,6 @@ pub async fn patch_child_title(kind: String, id: u64, title: String) -> Result<(
 }
 
 #[server]
-pub async fn patch_chapter_title(id: u64, title: String) -> Result<(), ServerFnError> {
-    use crate::app::server::AppState;
-
-    let state: AppState = expect_context();
-    let t = if title.trim().is_empty() {
-        None
-    } else {
-        Some(title)
-    };
-
-    sqlx::query("UPDATE movie_chapters SET title = ? WHERE id = ?")
-        .bind(t)
-        .bind(id as i64)
-        .execute(&state.db)
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    Ok(())
-}
-
-#[server]
 pub async fn create_empty(kind: String) -> Result<u64, ServerFnError> {
     use crate::app::server::AppState;
     use sqlx::AssertSqlSafe;

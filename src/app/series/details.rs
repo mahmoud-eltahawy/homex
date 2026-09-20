@@ -7,7 +7,7 @@ use crate::app::{
     resource_view::ResourceView,
     route_params::use_u64_param,
 };
-use leptos::{either::Either, prelude::*};
+use leptos::prelude::*;
 use leptos_router::{LazyRoute, lazy_route};
 use web_sys::HtmlSelectElement;
 use web_sys::wasm_bindgen::JsCast;
@@ -149,25 +149,14 @@ fn SeasonPlayer(season: Season) -> impl IntoView {
         })
         .collect();
 
-    let has_items = !items.is_empty();
     let playlist_title = format!("الموسم {}", season.season_number);
 
     view! {
         <div class="mt-4">
-            {if has_items {
-                Either::Left(view! {
-                    <MediaPlayer
-                        items=Signal::stored(items)
-                        playlist_title=playlist_title
-                    />
-                })
-            } else {
-                Either::Right(view! {
-                    <div class="py-8 text-center text-gray-500 text-sm">
-                        "لا توجد حلقات في هذا الموسم."
-                    </div>
-                })
-            }}
+            <MediaPlayer
+                items=items.into()
+                playlist_title=playlist_title
+            />
         </div>
     }
 }

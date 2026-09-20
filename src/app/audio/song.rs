@@ -116,7 +116,7 @@ fn AudioSongDetail(song: Audio, group: AudioGroup, audios: Vec<Audio>) -> impl I
 
                 <div class="mt-4">
                     <MediaPlayer
-                        items=Signal::stored(items)
+                        items=items.into()
                         initial_index=initial_index
                         audio=true
                         artwork=group_artwork
