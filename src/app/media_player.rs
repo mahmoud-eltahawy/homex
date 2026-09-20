@@ -1,6 +1,6 @@
 use crate::app::icons::{
-    FullscreenExitIcon, FullscreenIcon, MuteIcon, NextPageIcon, PauseIcon, PlayIcon, PrevPageIcon,
-    VolumeIcon,
+    DeleteIcon, EditIcon, FullscreenExitIcon, FullscreenIcon, MuteIcon, NextPageIcon, PauseIcon,
+    PlayIcon, PrevPageIcon, VolumeIcon,
 };
 use leptos::wasm_bindgen::JsCast;
 use leptos::{either::Either, ev::fullscreenchange};
@@ -45,33 +45,29 @@ impl MediaItem {
 
 #[component]
 pub fn MediaPlayer(
-    items: Vec<MediaItem>,
+    items: Signal<Vec<MediaItem>>,
     #[prop(optional)] initial_index: usize,
     #[prop(default = false)] audio: bool,
     #[prop(default = None)] artwork: Option<String>,
     #[prop(optional)] playlist_title: Option<String>,
     #[prop(default = true)] show_playlist: bool,
+    #[prop(optional)] on_rename: Option<Callback<(u64, String)>>,
+    #[prop(optional)] on_delete: Option<Callback<u64>>,
 ) -> impl IntoView {
-    if items.is_empty() {
-        return view! {
-            <div class="aspect-video bg-black rounded-2xl flex items-center justify-center text-gray-500 text-sm">
-                "لا يوجد محتوى للتشغيل"
-            </div>
+    let current_idx = RwSignal::new(initial_index);
+
+    let has_playlist = Signal::derive(move || show_playlist && items.get().len() > 1);
+
+    Effect::new(move |_| {
+        let n = items.get().len();
+        if n == 0 {
+            current_idx.set(0);
+        } else if current_idx.get() >= n {
+            current_idx.set(n - 1);
         }
-        .into_any();
-    }
+    });
 
-    let count = items.len();
-    let has_playlist = show_playlist && count > 1;
-    let safe_initial = initial_index.min(count - 1);
-
-    let current_idx = RwSignal::new(safe_initial);
-
-    // Items are immutable for the lifetime of the component, so we can
-    // clone the Vec into the one reactive derivation that needs it and
-    // hand the original off to the playlist panel.
-    let items_for_memo = items.clone();
-    let current_item = Memo::new(move |_| items_for_memo.get(current_idx.get()).cloned());
+    let current_item = Memo::new(move |_| items.get().get(current_idx.get()).cloned());
 
     let current_src = Signal::derive(move || current_item.get().map(|i| i.src).unwrap_or_default());
     let current_title =
@@ -87,15 +83,17 @@ pub fn MediaPlayer(
     };
 
     let has_prev = Signal::derive(move || current_idx.get() > 0);
-    let has_next = Signal::derive(move || current_idx.get() + 1 < count);
+
+    let has_next = Signal::derive(move || current_idx.get() + 1 < items.get().len());
+
+    let on_next: Callback<MouseEvent> = Callback::new(move |_| {
+        if current_idx.get_untracked() + 1 < items.get_untracked().len() {
+            current_idx.update(|i| *i += 1);
+        }
+    });
 
     let on_prev: Callback<MouseEvent> = Callback::new(move |_| {
         current_idx.update(|i| *i = i.saturating_sub(1));
-    });
-    let on_next: Callback<MouseEvent> = Callback::new(move |_| {
-        if current_idx.get_untracked() + 1 < count {
-            current_idx.update(|i| *i += 1);
-        }
     });
 
     // ── Element + state ──────────────────────────────────────────────
@@ -221,9 +219,10 @@ pub fn MediaPlayer(
 
     // Auto-advance. We set a flag so the src-change effect knows to
     // immediately start playback (matching YouTube behaviour).
+
     let handle_ended = move |_| {
         playing.set(false);
-        if current_idx.get_untracked() + 1 < count {
+        if current_idx.get_untracked() + 1 < items.get_untracked().len() {
             play_after_load.set(true);
             current_idx.update(|i| *i += 1);
         }
@@ -324,17 +323,19 @@ pub fn MediaPlayer(
         </div>
     };
 
-    let playlist_view = has_playlist.then(|| {
-        view! {
+    let playlist_view = view! {
+        <Show when=move || has_playlist.get()>
             <aside class="w-full lg:w-80 xl:w-96 lg:flex-shrink-0">
                 <PlaylistPanel
                     items=items
                     current_idx=current_idx
-                    title=playlist_title
+                    title=playlist_title.clone()
+                    on_rename=on_rename
+                    on_delete=on_delete
                 />
             </aside>
-        }
-    });
+        </Show>
+    };
 
     view! {
         <div class="flex flex-col lg:flex-row gap-4 items-start">
@@ -342,7 +343,6 @@ pub fn MediaPlayer(
             {playlist_view}
         </div>
     }
-    .into_any()
 }
 
 // ─── Controls overlay ─────────────────────────────────────────────────────
@@ -364,7 +364,7 @@ fn MediaControls(
     handle_volume: impl Fn(web_sys::Event) + 'static,
     start_hide_timer: impl Fn() + 'static + Clone,
     #[prop(default = true)] show_fullscreen: bool,
-    #[prop(default = false)] show_nav: bool,
+    show_nav: Signal<bool>,
     #[prop(into)] current_title: Signal<String>,
     on_prev: Callback<MouseEvent>,
     on_next: Callback<MouseEvent>,
@@ -456,7 +456,7 @@ fn ControlButtons(
     toggle_fullscreen: impl Fn(MouseEvent) + 'static,
     handle_volume: impl Fn(web_sys::Event) + 'static,
     #[prop(default = true)] show_fullscreen: bool,
-    #[prop(default = false)] show_nav: bool,
+    show_nav: Signal<bool>,
     on_prev: Callback<MouseEvent>,
     on_next: Callback<MouseEvent>,
     has_prev: Signal<bool>,
@@ -498,30 +498,34 @@ fn ControlButtons(
 
     let nav_class = "hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:scale-100";
 
-    let prev_btn = show_nav.then(move || {
-        view! {
-            <button
-                on:click=move |ev| on_prev.run(ev)
-                disabled=move || !has_prev.get()
-                class=nav_class
-                aria-label="السابق"
-            >
-                <PrevPageIcon/>
-            </button>
-        }
-    });
-    let next_btn = show_nav.then(move || {
-        view! {
-            <button
-                on:click=move |ev| on_next.run(ev)
-                disabled=move || !has_next.get()
-                class=nav_class
-                aria-label="التالي"
-            >
-                <NextPageIcon/>
-            </button>
-        }
-    });
+    let prev_btn = move || {
+        show_nav.get().then(move || {
+            view! {
+                <button
+                    on:click=move |ev| on_prev.run(ev)
+                    disabled=move || !has_prev.get()
+                    class=nav_class
+                    aria-label="السابق"
+                >
+                    <PrevPageIcon/>
+                </button>
+            }
+        })
+    };
+    let next_btn = move || {
+        show_nav.get().then(move || {
+            view! {
+                <button
+                    on:click=move |ev| on_next.run(ev)
+                    disabled=move || !has_next.get()
+                    class=nav_class
+                    aria-label="التالي"
+                >
+                    <NextPageIcon/>
+                </button>
+            }
+        })
+    };
 
     view! {
         <div class="flex items-center gap-2 sm:gap-3 text-white">
@@ -562,31 +566,39 @@ fn ControlButtons(
 
 #[component]
 fn PlaylistPanel(
-    items: Vec<MediaItem>,
+    items: Signal<Vec<MediaItem>>,
     current_idx: RwSignal<usize>,
     #[prop(default = None)] title: Option<String>,
+    #[prop(default = None)] on_rename: Option<Callback<(u64, String)>>,
+    #[prop(default = None)] on_delete: Option<Callback<u64>>,
 ) -> impl IntoView {
     let title = title.unwrap_or_else(|| "قائمة التشغيل".to_string());
-    let count = items.len();
-    let items_for_loop = items;
 
     view! {
         <div class="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden flex flex-col max-h-[60vh] lg:max-h-[500px]">
             <div class="px-4 py-3 border-b border-white/10 flex items-center justify-between shrink-0">
                 <h3 class="text-sm font-bold text-white truncate">{title}</h3>
                 <span class="text-xs text-gray-400 font-mono bg-white/10 px-2 py-0.5 rounded-full">
-                    {count}
+                    {move || items.get().len()}
                 </span>
             </div>
             <div class="overflow-y-auto p-2 flex-1 min-h-0">
                 <For
-                    each=move || items_for_loop.clone().into_iter().enumerate()
+                    each=move || items.get().into_iter().enumerate()
                     key=|(_, item)| item.id
                     let:entry
                 >
                     {
                         let (index, item) = entry;
-                        view! { <PlaylistItem item=item index=index current_idx=current_idx /> }
+                        view! {
+                            <PlaylistItem
+                                item=item
+                                index=index
+                                current_idx=current_idx
+                                on_rename=on_rename
+                                on_delete=on_delete
+                            />
+                        }
                     }
                 </For>
             </div>
@@ -595,11 +607,67 @@ fn PlaylistPanel(
 }
 
 #[component]
-fn PlaylistItem(item: MediaItem, index: usize, current_idx: RwSignal<usize>) -> impl IntoView {
+fn PlaylistItem(
+    item: MediaItem,
+    index: usize,
+    current_idx: RwSignal<usize>,
+    #[prop(default = None)] on_rename: Option<Callback<(u64, String)>>,
+    #[prop(default = None)] on_delete: Option<Callback<u64>>,
+) -> impl IntoView {
+    let id = item.id;
+
+    // StoredValue is Copy and survives being captured by multiple closures.
+    let title = StoredValue::new(item.title.clone());
+    let subtitle = StoredValue::new(item.subtitle.clone());
+
     let is_current = move || current_idx.get() == index;
-    let class = move || {
+
+    let editing = RwSignal::new(false);
+    let draft = RwSignal::new(item.title.clone());
+    let input_ref = NodeRef::<html::Input>::new();
+
+    let on_select = move |_| {
+        if !editing.get_untracked() {
+            current_idx.set(index);
+        }
+    };
+
+    let begin_edit = move |ev: web_sys::MouseEvent| {
+        ev.stop_propagation();
+        draft.set(title.get_value());
+        editing.set(true);
+    };
+
+    // Callback is Copy — both on:keydown and on:blur can hold a copy.
+    let do_commit: Callback<()> = Callback::new(move |_| {
+        editing.set(false);
+        let new_title = draft.get_untracked();
+        if new_title != title.get_value()
+            && let Some(cb) = on_rename
+        {
+            cb.run((id, new_title));
+        }
+    });
+
+    let on_delete_click = move |ev: web_sys::MouseEvent| {
+        ev.stop_propagation();
+        if let Some(cb) = on_delete {
+            cb.run(id);
+        }
+    };
+
+    Effect::new(move |_| {
+        if editing.get()
+            && let Some(input) = input_ref.get()
+        {
+            let _ = input.focus();
+            input.select();
+        }
+    });
+
+    let row_class = move || {
         format!(
-            "w-full flex items-center gap-3 p-2 rounded-lg cursor-pointer transition text-right {}",
+            "w-full flex items-center gap-2 p-2 rounded-lg cursor-pointer transition text-right group/row {}",
             if is_current() {
                 "bg-cyan-500/15 border border-cyan-500/30"
             } else {
@@ -607,18 +675,62 @@ fn PlaylistItem(item: MediaItem, index: usize, current_idx: RwSignal<usize>) -> 
             }
         )
     };
-    let on_click = move |_| current_idx.set(index);
 
     view! {
-        <button type="button" class=class on:click=on_click>
-            <PlaylistIndicator index=index is_current=Signal::derive(is_current) />
+        <div class=row_class on:click=on_select>
+            <PlaylistIndicator index=index is_current=Signal::derive(is_current)/>
+
             <div class="flex-1 min-w-0">
-                <div class="text-sm text-white truncate">{item.title}</div>
-                {item.subtitle.map(|s| view! {
-                    <div class="text-xs text-gray-400 truncate">{s}</div>
-                })}
+                <Show
+                    when=move || editing.get()
+                    fallback=move || view! {
+                        <>
+                            <div class="text-sm text-white truncate">{title.get_value()}</div>
+                            {subtitle.get_value().map(|s| view! {
+                                <div class="text-xs text-gray-400 truncate">{s}</div>
+                            })}
+                        </>
+                    }
+                >
+                    <input
+                        node_ref=input_ref
+                        type="text"
+                        class="w-full bg-white/10 text-white text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                        prop:value=move || draft.get()
+                        on:input=move |ev| draft.set(event_target_value(&ev))
+                        on:keydown=move |ev: web_sys::KeyboardEvent| match ev.key().as_str() {
+                            "Enter" => { ev.prevent_default(); do_commit.run(()); }
+                            "Escape" => { ev.prevent_default(); editing.set(false); }
+                            _ => {}
+                        }
+                        on:blur=move |_| do_commit.run(())
+                        on:click=move |ev| ev.stop_propagation()
+                    />
+                </Show>
             </div>
-        </button>
+
+            {on_rename.map(|_| view! {
+                <button
+                    type="button"
+                    on:click=begin_edit
+                    class="opacity-0 group-hover/row:opacity-100 transition text-gray-400 hover:text-white p-1 shrink-0"
+                    aria-label="إعادة تسمية"
+                >
+                    <EditIcon/>
+                </button>
+            })}
+
+            {on_delete.map(|_| view! {
+                <button
+                    type="button"
+                    on:click=on_delete_click
+                    class="opacity-0 group-hover/row:opacity-100 transition text-red-400 hover:text-red-300 p-1 shrink-0"
+                    aria-label="حذف"
+                >
+                    <DeleteIcon/>
+                </button>
+            })}
+        </div>
     }
 }
 

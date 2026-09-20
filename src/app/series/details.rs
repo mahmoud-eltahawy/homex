@@ -156,7 +156,10 @@ fn SeasonPlayer(season: Season) -> impl IntoView {
         <div class="mt-4">
             {if has_items {
                 Either::Left(view! {
-                    <MediaPlayer items=items playlist_title=playlist_title />
+                    <MediaPlayer
+                        items=Signal::stored(items)
+                        playlist_title=playlist_title
+                    />
                 })
             } else {
                 Either::Right(view! {

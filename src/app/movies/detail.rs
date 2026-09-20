@@ -1,6 +1,6 @@
 use crate::app::{
     detail::{DetailHero, DetailShell, HeroBadge},
-    icons::{DeleteIcon, MovieIcon, MoviePosterSvg, UploadIcon},
+    icons::{MovieIcon, MoviePosterSvg, UploadIcon},
     inline_edit::{EditablePoster, EditableText, EditableTextArea},
     media_api::{patch_field, upload_poster_inline},
     media_player::{MediaItem, MediaPlayer},
@@ -157,28 +157,66 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     let description = RwSignal::new(movie.description.clone().unwrap_or_default());
     let poster = RwSignal::new(movie.poster.clone());
 
-    // Bumped to trigger a chapters refetch after an upload or delete.
-    let refresh = RwSignal::new(0u32);
-    let chapters = Resource::new(
-        move || (id, refresh.get()),
-        |(id, _)| fetch_movie_chapters(id),
-    );
+    let chapters = Resource::new(move || id, fetch_movie_chapters);
 
-    // ── Server actions ──────────────────────────────────────────────────
+    // ── Actions ─────────────────────────────────────────────────────────
     let patch = Action::new_local(
         |(kind, id, field, value): &(String, u64, String, Option<String>)| {
             patch_field(kind.clone(), *id, field.clone(), value.clone())
         },
     );
-
     let poster_upload =
         Action::new_local(|fd: &web_sys::FormData| upload_poster_inline(fd.clone().into()));
-
-    let delete_child = Action::new_local(|(kind, id): &(String, u64)| {
-        crate::app::media_api::delete_child(kind.clone(), *id)
+    let rename_chapter = Action::new_local(|(id, t): &(u64, String)| {
+        crate::app::media_api::patch_chapter_title(*id, t.clone())
+    });
+    let delete_chapter = Action::new_local(|id: &u64| {
+        crate::app::media_api::delete_child("movie_chapter".to_string(), *id)
+    });
+    let upload = Action::new_local(|fd: &web_sys::FormData| {
+        crate::app::upload_api::upload_media(fd.clone().into())
     });
 
-    // ── Commit helpers ──────────────────────────────────────────────────
+    // Any of these settling = refetch the chapters.
+    Effect::new(move |_| {
+        if matches!(rename_chapter.value().get(), Some(Ok(())))
+            || matches!(delete_chapter.value().get(), Some(Ok(())))
+            || matches!(upload.value().get(), Some(Ok(_)))
+        {
+            chapters.refetch();
+        }
+    });
+
+    // ── Item derivation ─────────────────────────────────────────────────
+    let items = Signal::derive(move || {
+        chapters
+            .get()
+            .and_then(|r| r.ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|ch| {
+                let t = ch
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| format!("الفصل {}", ch.number + 1));
+                let mut it = MediaItem::new(ch.id, t, ch.file.path.clone());
+                if let Some(d) = ch.description {
+                    it = it.with_subtitle(d);
+                }
+                it
+            })
+            .collect::<Vec<_>>()
+    });
+
+    // ── Callbacks for the playlist ──────────────────────────────────────
+    let on_rename = Callback::new(move |(id, new_title): (u64, String)| {
+        rename_chapter.dispatch((id, new_title));
+    });
+    let on_delete = Callback::new(move |id: u64| {
+        delete_chapter.dispatch(id);
+    });
+
+    // ── Hero commits (unchanged) ────────────────────────────────────────
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
         patch.dispatch(("movie".into(), id, "title".into(), Some(v)));
@@ -200,6 +238,39 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
             poster.set(Some(url));
         }
     });
+
+    // ── Add-chapters button (file input lives in the hero area) ─────────
+    let add_input_id = format!("chapter-input-{id}");
+    let add_input_id: &'static str = add_input_id.leak();
+    let on_files = move |ev: web_sys::Event| {
+        let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+        else {
+            return;
+        };
+        let Some(files) = input.files() else { return };
+        if files.length() == 0 {
+            return;
+        }
+        let fd = web_sys::FormData::new().unwrap();
+        let _ = fd.append_with_str("title", "");
+        let _ = fd.append_with_str("description", "");
+        let _ = fd.append_with_str("media_type", "movie");
+        let _ = fd.append_with_str("is_new", "false");
+        let _ = fd.append_with_str("existing_id", &id.to_string());
+        for i in 0..files.length() {
+            if let Some(f) = files.get(i) {
+                let file: web_sys::File = f.unchecked_into();
+                let name = file.name();
+                let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+                let _ = fd.append_with_blob_and_filename(&format!("file_{i}"), &file, &name);
+                let _ = fd.append_with_str(&format!("file_title_{i}"), &stem);
+            }
+        }
+        upload.dispatch(fd);
+        input.set_value("");
+    };
 
     view! {
         <DetailShell poster=movie.poster.clone()>
@@ -225,187 +296,28 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
                         class="text-gray-300 leading-relaxed text-base sm:text-lg"
                     />
                 </div>
+
+                // ── Add-chapters row, right next to the hero ────────────
+                <div class="mt-6 flex items-center gap-3">
+                    <input type="file" id=add_input_id class="hidden" multiple
+                        accept=".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts" on:change=on_files/>
+                    <label for=add_input_id class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-300 text-sm font-medium cursor-pointer transition">
+                        <UploadIcon/> "إضافة فصول"
+                    </label>
+                    <Show when=move || upload.pending().get()>
+                        <span class="text-cyan-300 text-sm">"جاري الرفع والتحويل..."</span>
+                    </Show>
+                </div>
             </DetailHero>
 
             <div class="mt-10">
-                <ChapterPanel
-                    movie_id=id
-                    chapters=chapters
-                    refresh=refresh
-                    delete_action=delete_child
+                <MediaPlayer
+                    items=items
+                    playlist_title=movie.title.clone()
+                    on_rename=on_rename
+                    on_delete=on_delete
                 />
             </div>
-
-            {move || {
-                let items: Vec<MediaItem> = chapters
-                    .get()
-                    .and_then(|r| r.ok())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|ch| {
-                        let t = ch
-                            .title
-                            .clone()
-                            .unwrap_or_else(|| format!("الفصل {}", ch.number + 1));
-                        let mut it = MediaItem::new(ch.id, t, ch.file.path.clone());
-                        if let Some(d) = ch.description {
-                            it = it.with_subtitle(d);
-                        }
-                        it
-                    })
-                    .collect::<Vec<_>>();
-                (!items.is_empty()).then(|| view! {
-                    <div class="mt-10">
-                        <MediaPlayer items=items playlist_title=movie.title.clone()/>
-                    </div>
-                })
-            }}
         </DetailShell>
-    }
-}
-
-// ─── Chapters panel ─────────────────────────────────────────────────────────
-
-#[component]
-fn ChapterPanel(
-    movie_id: u64,
-    chapters: Resource<Result<Vec<MovieChapter>, ServerFnError>>,
-    refresh: RwSignal<u32>,
-    delete_action: Action<(String, u64), Result<(), ServerFnError>>,
-) -> impl IntoView {
-    let upload = Action::new_local(|fd: &web_sys::FormData| {
-        crate::app::upload_api::upload_media(fd.clone().into())
-    });
-
-    // After a successful upload, refresh the chapters list.
-    Effect::new(move |_| {
-        if matches!(upload.value().get(), Some(Ok(_))) {
-            refresh.update(|n| *n += 1);
-        }
-    });
-
-    // Stable id — movie_id comes from the route, identical on SSR and hydrate.
-    let input_id = format!("chapter-input-{movie_id}");
-    let input_id: &'static str = input_id.leak();
-
-    let on_files = move |ev: web_sys::Event| {
-        let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-        else {
-            return;
-        };
-        let Some(files) = input.files() else { return };
-        if files.length() == 0 {
-            return;
-        }
-
-        let fd = web_sys::FormData::new().unwrap();
-        let _ = fd.append_with_str("title", "");
-        let _ = fd.append_with_str("description", "");
-        let _ = fd.append_with_str("media_type", "movie");
-        let _ = fd.append_with_str("is_new", "false");
-        let _ = fd.append_with_str("existing_id", &movie_id.to_string());
-
-        for i in 0..files.length() {
-            if let Some(f) = files.get(i) {
-                let file: web_sys::File = f.unchecked_into();
-                let name = file.name();
-                let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-                let _ = fd.append_with_blob_and_filename(&format!("file_{i}"), &file, &name);
-                let _ = fd.append_with_str(&format!("file_title_{i}"), &stem);
-            }
-        }
-        upload.dispatch(fd);
-        input.set_value("");
-    };
-
-    // Unwrapped chapter list; empty until the first fetch resolves.
-    let rows = move || chapters.get().and_then(|r| r.ok()).unwrap_or_default();
-
-    view! {
-        <div class="space-y-3">
-            <div class="flex items-center justify-between">
-                <h2 class="text-xl font-bold text-white">"الفصول"</h2>
-                <input type="file" id=input_id class="hidden" multiple
-                    accept=".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts" on:change=on_files/>
-                <label for=input_id class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-300 text-sm font-medium cursor-pointer transition">
-                    <UploadIcon/> "إضافة فصول"
-                </label>
-            </div>
-
-            <Show when=move || upload.pending().get()>
-                <div class="text-cyan-300 text-sm">"جاري الرفع والتحويل..."</div>
-            </Show>
-
-            <Show when=move || delete_action.pending().get()>
-                <div class="text-cyan-300 text-sm">"جاري الحذف..."</div>
-            </Show>
-
-            <For each=rows key=|c| c.id let:ch>
-                <ChapterRow chapter=ch refresh=refresh delete_action=delete_action/>
-            </For>
-        </div>
-    }
-}
-
-#[component]
-fn ChapterRow(
-    chapter: MovieChapter,
-    refresh: RwSignal<u32>,
-    delete_action: Action<(String, u64), Result<(), ServerFnError>>,
-) -> impl IntoView {
-    let chapter_id = chapter.id;
-    let title = RwSignal::new(chapter.title.clone().unwrap_or_default());
-    let number = chapter.number;
-    let file_path = chapter.file.path.clone();
-
-    let on_delete = move |_| {
-        delete_action.dispatch(("movie_chapter".to_string(), chapter_id));
-        // Trigger a refetch after the delete has been dispatched.
-        // (The delete itself is fast; a tiny delay avoids racing the DB.)
-        refresh.update(|n| *n += 1);
-    };
-
-    // Rename chapters by patching `movie_chapters.title` directly.
-    // (We don't have a generic child-patch server fn yet, so we add one.)
-    let rename = Action::new_local(|(id, title): &(u64, String)| {
-        crate::app::media_api::patch_chapter_title(*id, title.clone())
-    });
-    let on_title_change = move |ev: web_sys::Event| {
-        title.set(event_target_value(&ev));
-    };
-    let on_title_blur = move |_| {
-        rename.dispatch((chapter_id, title.get_untracked()));
-    };
-
-    view! {
-        <div class="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 flex items-center gap-3">
-            <span class="text-gray-400 text-sm font-mono w-8 shrink-0">
-                {number + 1}
-            </span>
-            <input
-                type="text"
-                class="flex-1 bg-transparent text-white focus:outline-none focus:bg-white/5 rounded px-2 py-1"
-                prop:value=move || title.get()
-                on:input=on_title_change
-                on:blur=on_title_blur
-            />
-            <a
-                href=file_path
-                class="text-cyan-400 hover:text-cyan-300 text-sm shrink-0"
-                download
-            >
-                "تحميل"
-            </a>
-            <button
-                type="button"
-                on:click=on_delete
-                class="text-red-400 hover:text-red-300 p-1 shrink-0"
-                aria-label="حذف"
-            >
-                <DeleteIcon/>
-            </button>
-        </div>
     }
 }
