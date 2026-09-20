@@ -8,7 +8,7 @@ mod validate;
 use std::time::Duration;
 
 pub use multipart::parse_upload_multipart;
-pub use naming::{extension_of, new_job_id, sanitize_filename, slugify};
+pub use naming::{extension_of, new_job_id, new_storage_token, sanitize_filename, slugify};
 use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};

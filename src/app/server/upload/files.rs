@@ -8,6 +8,7 @@ use crate::app::server::convert::{
     TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
     is_video_container_supported,
 };
+use crate::app::server::upload::new_storage_token;
 
 use super::naming::{sanitize_filename, slugify};
 use super::types::{StagedFile, UploadPayload};
@@ -76,7 +77,9 @@ pub async fn stage_files(
                 .to_string();
             let safe_stem = sanitize_filename(&stem);
 
-            let raw_rel = format!("{subdir}/{slug}/{safe_stem}.{ext}");
+            let token = new_storage_token();
+
+            let raw_rel = format!("{subdir}/{slug}/{safe_stem}-{token}.{ext}");
             let raw_abs = state.config.storage.media_root.join(&raw_rel);
 
             tokio::fs::write(&raw_abs, &file.bytes)
@@ -95,7 +98,7 @@ pub async fn stage_files(
                 continue;
             };
 
-            let out_rel = format!("{subdir}/{slug}/{safe_stem}.{}", target.extension());
+            let out_rel = format!("{subdir}/{slug}/{safe_stem}-{token}.{}", target.extension());
             let out_abs = state.config.storage.media_root.join(&out_rel);
 
             let conversion_pos = targets[..i].iter().filter(|t| t.is_some()).count();

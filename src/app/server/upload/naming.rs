@@ -1,3 +1,22 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static STORAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Short, collision-resistant suffix used to disambiguate on-disk filenames.
+/// Mixes wall-clock nanoseconds with a process-local counter so two files
+/// staged in the same nanosecond (or in concurrent uploads) still differ.
+pub fn new_storage_token() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let c = STORAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    format!("{:010x}{:04x}", ns & 0xFFFFFFFFFF, c & 0xFFFF)
+}
+
 pub fn slugify(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last_dash = false;
