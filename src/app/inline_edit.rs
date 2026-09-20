@@ -14,6 +14,115 @@ const BTN_OK: &str =
 const BTN_X: &str =
     "p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 transition shrink-0";
 
+#[derive(Clone, Copy)]
+pub struct EditMode(pub RwSignal<bool>);
+
+pub fn provide_edit_mode() -> RwSignal<bool> {
+    let signal = RwSignal::new(false);
+    provide_context(EditMode(signal));
+    signal
+}
+
+pub fn use_edit_mode() -> Signal<bool> {
+    match use_context::<EditMode>() {
+        Some(EditMode(s)) => Signal::derive(move || s.get()),
+        None => Signal::derive(|| true),
+    }
+}
+
+pub fn collapse_when_locked(editing: RwSignal<bool>) {
+    let mode_on = use_edit_mode();
+    Effect::new(move |_| {
+        if !mode_on.get() && editing.get() {
+            editing.set(false);
+        }
+    });
+}
+
+#[derive(Clone, Copy)]
+pub struct EditableCtl {
+    pub commit: Callback<()>,
+    pub cancel: Callback<()>,
+}
+
+#[component]
+pub fn Editable<D, E>(
+    #[prop(into)] display: Callback<(), D>,
+    #[prop(into)] editor: Callback<EditableCtl, E>,
+    #[prop(into)] on_commit: Callback<()>,
+    #[prop(optional, into)] on_begin: Option<Callback<()>>,
+    #[prop(default = true)] show_pencil: bool,
+    #[prop(default = true)] show_actions: bool,
+) -> impl IntoView
+where
+    D: IntoView + 'static,
+    E: IntoView + 'static,
+{
+    let mode_on = use_edit_mode();
+    let editing = RwSignal::new(false);
+    collapse_when_locked(editing);
+
+    let commit = Callback::new(move |_| {
+        editing.set(false);
+        on_commit.run(());
+    });
+    let cancel = Callback::new(move |_| editing.set(false));
+
+    let begin = move |_| {
+        if let Some(cb) = on_begin {
+            cb.run(());
+        }
+        editing.set(true);
+    };
+
+    let ctl = EditableCtl { commit, cancel };
+
+    view! {
+        <div class="inline-flex items-center gap-2 w-full min-w-0">
+            <Show
+                when=move || editing.get()
+                fallback=move || view! {
+                    <>
+                        {display.run(())}
+                        {show_pencil.then(|| view! {
+                            <Show when=move || mode_on.get()>
+                                <button
+                                    type="button"
+                                    class=BTN_EDIT
+                                    on:click=begin
+                                    aria-label="تعديل"
+                                >
+                                    <EditIcon/>
+                                </button>
+                            </Show>
+                        })}
+                    </>
+                }
+            >
+                {editor.run(ctl)}
+                {show_actions.then(|| view! {
+                    <button
+                        type="button"
+                        class=BTN_OK
+                        on:click=move |_| ctl.commit.run(())
+                        aria-label="حفظ"
+                    >
+                        "✓"
+                    </button>
+                    <button
+                        type="button"
+                        class=BTN_X
+                        on:click=move |_| ctl.cancel.run(())
+                        aria-label="إلغاء"
+                    >
+                        <XIcon/>
+                    </button>
+                })}
+            </Show>
+        </div>
+    }
+}
+
 // ─── Single-line text ───────────────────────────────────────────────────────
 
 #[component]
@@ -23,79 +132,47 @@ pub fn EditableText(
     #[prop(optional, into)] class: Option<String>,
     #[prop(optional, into)] placeholder: Option<String>,
 ) -> impl IntoView {
-    let editing = RwSignal::new(false);
-    let draft = RwSignal::new(String::new());
-    let input_ref = NodeRef::<html::Input>::new();
-
     let display_class = class.unwrap_or_else(|| "text-white".into());
     let placeholder = placeholder.unwrap_or_else(|| "أدخل نصاً".into());
 
-    let start = move |_| {
-        draft.set(value.get_untracked());
-        editing.set(true);
-    };
-    let save = move || {
-        if !editing.get_untracked() {
-            return;
-        }
-        editing.set(false);
-        let new_val = draft.get_untracked();
-        if new_val != value.get_untracked() {
-            on_commit.run(new_val);
-        }
-    };
-    let cancel = move || editing.set(false);
+    let draft = RwSignal::new(String::new());
+    let input_ref = NodeRef::<html::Input>::new();
 
-    Effect::new(move |_| {
-        if editing.get()
-            && let Some(input) = input_ref.get()
-        {
-            let _ = input.focus();
-            input.select();
+    // Seed the draft from the current value the moment editing starts.
+    let on_begin = Callback::new(move |_| draft.set(value.get_untracked()));
+
+    // Read the draft, fire the outer commit only if it actually changed.
+    let commit = Callback::new(move |_| {
+        let v = draft.get_untracked();
+        if v != value.get_untracked() {
+            on_commit.run(v);
         }
     });
 
-    let display_class_for_fallback = display_class.clone();
-    let value_for_fallback = value;
-
     view! {
-        <div class="inline-flex items-center gap-2 w-full min-w-0">
-            <Show
-                when=move || editing.get()
-                fallback=move || {
-                    let display_class = display_class_for_fallback.clone();
-                    let value = value_for_fallback;
-                    view! {
-                        <>
-                            <span class=display_class>{move || value.get()}</span>
-                            <button type="button" class=BTN_EDIT on:click=start aria-label="تعديل">
-                                <EditIcon/>
-                            </button>
-                        </>
-                    }
-                }
-            >
+        <Editable
+            on_begin=on_begin
+            on_commit=commit
+            display=Callback::new(move |_| view! {
+                <span class=display_class.clone()>{move || value.get()}</span>
+            })
+            editor=Callback::new(move |ctl : EditableCtl| view! {
                 <input
                     node_ref=input_ref
+                    autofocus=true
                     type="text"
                     class=INPUT
                     placeholder=placeholder.clone()
                     prop:value=move || draft.get()
                     on:input=move |ev| draft.set(event_target_value(&ev))
                     on:keydown=move |ev| match ev.key().as_str() {
-                        "Enter" => { ev.prevent_default(); save(); }
-                        "Escape" => cancel(),
+                        "Enter" => { ev.prevent_default(); ctl.commit.run(()); }
+                        "Escape" => ctl.cancel.run(()),
                         _ => {}
                     }
                 />
-                <button type="button" class=BTN_OK on:click=move |_| save() aria-label="حفظ">
-                    "✓"
-                </button>
-                <button type="button" class=BTN_X on:click=move |_| cancel() aria-label="إلغاء">
-                    <XIcon/>
-                </button>
-            </Show>
-        </div>
+            })
+        />
     }
 }
 
@@ -108,68 +185,44 @@ pub fn EditableTextArea(
     #[prop(optional, into)] class: Option<String>,
     #[prop(optional, into)] placeholder: Option<String>,
 ) -> impl IntoView {
-    let editing = RwSignal::new(false);
-    let draft = RwSignal::new(String::new());
-    let ta_ref = NodeRef::<html::Textarea>::new();
-
     let display_class = class.unwrap_or_else(|| "text-gray-300".into());
     let placeholder = placeholder.unwrap_or_else(|| "لا يوجد وصف".into());
 
-    let start = move |_| {
-        draft.set(value.get_untracked());
-        editing.set(true);
-    };
-    let save = move || {
-        if !editing.get_untracked() {
-            return;
-        }
-        editing.set(false);
-        let new_val = draft.get_untracked();
-        if new_val != value.get_untracked() {
-            on_commit.run(new_val);
-        }
-    };
-    let cancel = move || editing.set(false);
+    let draft = RwSignal::new(String::new());
+    let ta_ref = NodeRef::<html::Textarea>::new();
 
-    Effect::new(move |_| {
-        if editing.get()
-            && let Some(ta) = ta_ref.get()
-        {
-            let _ = ta.focus();
+    let on_begin = Callback::new(move |_| draft.set(value.get_untracked()));
+    let commit = Callback::new(move |_| {
+        let v = draft.get_untracked();
+        if v != value.get_untracked() {
+            on_commit.run(v);
         }
     });
 
-    // Clone once for the fallback so both the outer `Fn` fallback and the
-    // inner reactive closure get their own copy.
-    let display_class_for_fallback = display_class.clone();
-    let placeholder_for_fallback = placeholder.clone();
-    let value_for_fallback = value;
-
-    view! {
-        <div class="w-full">
-            <Show
-                when=move || editing.get()
-                fallback=move || {
-                    let display_class = display_class_for_fallback.clone();
-                    let placeholder = placeholder_for_fallback.clone();
-                    let value = value_for_fallback;
-                    view! {
-                        <div class="flex items-start gap-2">
-                            <p class=display_class>
-                                {move || {
-                                    let v = value.get();
-                                    if v.is_empty() { placeholder.clone() } else { v }
-                                }}
-                            </p>
-                            <button type="button" class=BTN_EDIT on:click=start aria-label="تعديل">
-                                <EditIcon/>
-                            </button>
-                        </div>
+    let display = Callback::new({
+        let placeholder = placeholder.clone();
+        move |_| {
+            view! {
+                <p class=display_class.clone()>
+                    {
+                        let placeholder = placeholder.clone();
+                        move || {
+                            let v = value.get();
+                            if v.is_empty() { placeholder.clone() } else { v }
+                        }
                     }
-                }
-            >
+                </p>
+            }
+        }
+    });
+
+    let editor = Callback::new({
+        let placeholder = placeholder.clone();
+        move |ctl: EditableCtl| {
+            view! {
                 <textarea
                     node_ref=ta_ref
+                    autofocus=true
                     rows=3
                     class=TEXTAREA
                     placeholder=placeholder.clone()
@@ -178,22 +231,22 @@ pub fn EditableTextArea(
                     on:keydown=move |ev| {
                         if ev.key() == "Enter" && (ev.ctrl_key() || ev.meta_key()) {
                             ev.prevent_default();
-                            save();
+                            ctl.commit.run(());
                         } else if ev.key() == "Escape" {
-                            cancel();
+                            ctl.cancel.run(());
                         }
                     }
                 ></textarea>
-                <div class="flex gap-2 mt-2">
-                    <button type="button" class=BTN_OK on:click=move |_| save() aria-label="حفظ">
-                        "✓ حفظ"
-                    </button>
-                    <button type="button" class=BTN_X on:click=move |_| cancel() aria-label="إلغاء">
-                        "إلغاء"
-                    </button>
-                </div>
-            </Show>
-        </div>
+            }
+        }
+    });
+    view! {
+        <Editable
+            on_begin=on_begin
+            on_commit=commit
+            display=display
+            editor=editor
+        />
     }
 }
 
@@ -206,9 +259,6 @@ pub fn EditablePoster(
     on_file: Callback<web_sys::File>,
     #[prop(into)] input_id: String,
 ) -> impl IntoView {
-    let input_id_for_input = input_id.clone();
-    let input_id_for_label = input_id;
-
     let on_change = move |ev: web_sys::Event| {
         let Some(input) = ev
             .target()
@@ -220,6 +270,30 @@ pub fn EditablePoster(
         let Some(file) = files.get(0) else { return };
         input.set_value("");
         on_file.run(file);
+    };
+
+    let edit_mode = use_edit_mode();
+
+    let edit_view = {
+        let input_id_for_input = input_id.clone();
+        let input_id_for_label = input_id;
+        move || {
+            edit_mode.get().then_some(view! {
+            <input
+                type="file"
+                id=input_id_for_input.clone()
+                class="hidden"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                on:change=on_change
+            />
+            <label
+                for=input_id_for_label.clone()
+                class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md hover:bg-black/80 text-white text-xs font-medium cursor-pointer opacity-80 group-hover:opacity-100 transition"
+            >
+                <UploadIcon/> "تغيير الصورة"
+            </label>
+        })
+        }
     };
 
     view! {
@@ -234,19 +308,7 @@ pub fn EditablePoster(
                 }.into_any(),
                 None => placeholder.run(),
             }}
-            <input
-                type="file"
-                id=input_id_for_input
-                class="hidden"
-                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                on:change=on_change
-            />
-            <label
-                for=input_id_for_label
-                class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md hover:bg-black/80 text-white text-xs font-medium cursor-pointer opacity-80 group-hover:opacity-100 transition"
-            >
-                <UploadIcon/> "تغيير الصورة"
-            </label>
+            {edit_view}
         </div>
     }
 }

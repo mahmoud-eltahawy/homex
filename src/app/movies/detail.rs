@@ -1,7 +1,7 @@
 use crate::app::{
     detail::{DetailHero, DetailShell, HeroBadge},
     icons::{MovieIcon, MoviePosterSvg, UploadIcon},
-    inline_edit::{EditablePoster, EditableText, EditableTextArea},
+    inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
     media_api::{delete_child, patch_child_title, patch_field, upload_poster_inline},
     media_player::{MediaItem, MediaPlayer},
     model::{Movie, MovieChapter},
@@ -168,8 +168,6 @@ fn MovieDetail(
         }
     });
 
-    let upload_error = upload.error();
-
     // ── Commit helpers for the hero ────────────────────────────────────
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
@@ -202,44 +200,6 @@ fn MovieDetail(
     });
 
     // ── File input handler ─────────────────────────────────────────────
-    let add_input_id = format!("chapter-input-{id}");
-    let add_input_id: &'static str = add_input_id.leak();
-
-    let on_files = move |ev: web_sys::Event| {
-        let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-        else {
-            return;
-        };
-        let Some(files) = input.files() else { return };
-        if files.length() == 0 {
-            return;
-        }
-
-        let fd = web_sys::FormData::new().unwrap();
-        let _ = fd.append_with_str("title", "");
-        let _ = fd.append_with_str("description", "");
-        let _ = fd.append_with_str("media_type", "movie");
-        let _ = fd.append_with_str("is_new", "false");
-        let _ = fd.append_with_str("existing_id", &id.to_string());
-
-        for i in 0..files.length() {
-            if let Some(f) = files.get(i) {
-                let file: web_sys::File = f.unchecked_into();
-                let name = file.name();
-                let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-                let _ = fd.append_with_blob_and_filename(&format!("file_{i}"), &file, &name);
-                let _ = fd.append_with_str(&format!("file_title_{i}"), &stem);
-            }
-        }
-
-        upload.dispatch(fd);
-        input.set_value("");
-    };
-
-    let upload_pending = upload.pending;
-    let upload_status = upload.status;
 
     let chapters_adapter = {
         let movie = movie.clone();
@@ -275,27 +235,7 @@ fn MovieDetail(
                         class="text-gray-300 leading-relaxed text-base sm:text-lg"
                     />
                 </div>
-
-                <div class="mt-6 flex items-center gap-3 flex-wrap">
-                    <input type="file" id=add_input_id class="hidden" multiple
-                        accept=".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts" on:change=on_files/>
-                    <label for=add_input_id class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-300 text-sm font-medium cursor-pointer transition">
-                        <UploadIcon/> "إضافة فصول"
-                    </label>
-                    <Show when=move || upload_pending.get()>
-                        <span class="text-cyan-300 text-sm">"جاري الرفع..."</span>
-                    </Show>
-                </div>
-
-                <div class="mt-3">
-                    <UploadProgress status=Signal::derive(move || upload_status.get())/>
-                </div>
-
-                {move || upload_error.get().map(|e| view! {
-                    <div class="mt-3 bg-red-500/15 text-red-300 border border-red-500/30 rounded-xl p-3 text-sm">
-                        {e}
-                    </div>
-                })}
+                <AppendChapters upload id/>
             </DetailHero>
 
             <ResourceView
@@ -304,6 +244,81 @@ fn MovieDetail(
                 adapter=chapters_adapter
             />
         </DetailShell>
+    }
+}
+
+#[component]
+fn AppendChapters(upload: UploadJob, id: u64) -> impl IntoView {
+    let add_input_id = format!("chapter-input-{id}");
+    let add_input_id: &'static str = add_input_id.leak();
+
+    let upload_pending = upload.pending;
+    let upload_status = upload.status;
+
+    let upload_error = upload.error();
+
+    let on_files = move |ev: web_sys::Event| {
+        let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+        else {
+            return;
+        };
+        let Some(files) = input.files() else { return };
+        if files.length() == 0 {
+            return;
+        }
+
+        let fd = web_sys::FormData::new().unwrap();
+        let _ = fd.append_with_str("title", "");
+        let _ = fd.append_with_str("description", "");
+        let _ = fd.append_with_str("media_type", "movie");
+        let _ = fd.append_with_str("is_new", "false");
+        let _ = fd.append_with_str("existing_id", &id.to_string());
+
+        for i in 0..files.length() {
+            if let Some(f) = files.get(i) {
+                let file: web_sys::File = f.unchecked_into();
+                let name = file.name();
+                let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+                let _ = fd.append_with_blob_and_filename(&format!("file_{i}"), &file, &name);
+                let _ = fd.append_with_str(&format!("file_title_{i}"), &stem);
+            }
+        }
+
+        upload.dispatch(fd);
+        input.set_value("");
+    };
+
+    let error = move || {
+        upload_error.get().map(|e| view! {
+            <div class="mt-3 bg-red-500/15 text-red-300 border border-red-500/30 rounded-xl p-3 text-sm">
+                {e}
+            </div>
+        })
+    };
+
+    let edit_on = use_edit_mode();
+
+    move || {
+        edit_on.get().then_some(
+        view! {
+            <div class="mt-6 flex items-center gap-3 flex-wrap">
+                <input type="file" id=add_input_id class="hidden" multiple
+                    accept=".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts" on:change=on_files/>
+                <label for=add_input_id class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-300 text-sm font-medium cursor-pointer transition">
+                    <UploadIcon/> "إضافة فصول"
+                </label>
+                <Show when=move || upload_pending.get()>
+                    <span class="text-cyan-300 text-sm">"جاري الرفع..."</span>
+                </Show>
+            </div>
+            <div class="mt-3">
+                <UploadProgress status=Signal::derive(move || upload_status.get())/>
+            </div>
+
+            {error}
+        })
     }
 }
 
