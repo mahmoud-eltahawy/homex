@@ -2,6 +2,7 @@ use crate::app::icons::{
     DeleteIcon, EditIcon, FullscreenExitIcon, FullscreenIcon, MuteIcon, NextPageIcon, PauseIcon,
     PlayIcon, PrevPageIcon, VolumeIcon,
 };
+use crate::app::inline_edit::use_edit_mode;
 use leptos::wasm_bindgen::JsCast;
 use leptos::{either::Either, ev::fullscreenchange};
 use leptos::{html, prelude::*};
@@ -671,6 +672,33 @@ fn PlaylistItem(
         )
     };
 
+    let edit_on = use_edit_mode();
+
+    let edit_buttons = move || {
+        edit_on.get().then_some((
+            on_rename.map(|_| view! {
+                <button
+                    type="button"
+                    on:click=begin_edit
+                    class="opacity-0 group-hover/row:opacity-100 transition text-gray-400 hover:text-white p-1 shrink-0"
+                    aria-label="إعادة تسمية"
+                >
+                    <EditIcon/>
+                </button>
+            }),
+            on_delete.map(|_| view! {
+                <button
+                    type="button"
+                    on:click=on_delete_click
+                    class="opacity-0 group-hover/row:opacity-100 transition text-red-400 hover:text-red-300 p-1 shrink-0"
+                    aria-label="حذف"
+                >
+                    <DeleteIcon/>
+                </button>
+            })
+    ))
+    };
+
     view! {
         <div class=row_class on:click=on_select>
             <PlaylistIndicator index=index is_current=Signal::derive(is_current)/>
@@ -703,28 +731,7 @@ fn PlaylistItem(
                     />
                 </Show>
             </div>
-
-            {on_rename.map(|_| view! {
-                <button
-                    type="button"
-                    on:click=begin_edit
-                    class="opacity-0 group-hover/row:opacity-100 transition text-gray-400 hover:text-white p-1 shrink-0"
-                    aria-label="إعادة تسمية"
-                >
-                    <EditIcon/>
-                </button>
-            })}
-
-            {on_delete.map(|_| view! {
-                <button
-                    type="button"
-                    on:click=on_delete_click
-                    class="opacity-0 group-hover/row:opacity-100 transition text-red-400 hover:text-red-300 p-1 shrink-0"
-                    aria-label="حذف"
-                >
-                    <DeleteIcon/>
-                </button>
-            })}
+            {edit_buttons}
         </div>
     }
 }
