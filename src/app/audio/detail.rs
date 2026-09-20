@@ -2,7 +2,7 @@ use super::{AudioArtwork, fetch_audio_group_detail, fetch_audios};
 use crate::app::{
     detail::{DetailHero, DetailShell, HeroBadge, HeroDescription, HeroMeta, HeroTitle},
     icons::{AudioIcon, ClockIcon, PlayIcon},
-    model::{Audio, AudioGroup, MediaType},
+    model::{Audio, AudioGroup},
     resource_view::ResourceView,
     route_params::use_u64_param,
 };
@@ -57,7 +57,6 @@ fn AudioGroupDetail(
         .clone()
         .unwrap_or_else(|| "لا يوجد وصف متاح.".to_string());
     let count = group.audios_count;
-    let edit_href = MediaType::AudioGroup.edit_href(group.id);
 
     let adapter = move |list: Vec<Audio>| AudioListProps {
         audios: list,
@@ -65,7 +64,7 @@ fn AudioGroupDetail(
     };
 
     view! {
-        <DetailShell poster=poster.clone() edit_href>
+        <DetailShell poster=poster.clone()>
             <DetailHero poster=view! {
                 <AudioArtwork poster=poster.clone() title=title.clone()/>
             }>

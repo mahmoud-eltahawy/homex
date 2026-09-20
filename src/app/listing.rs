@@ -41,8 +41,8 @@ where
         } = self;
 
         let mt = C::media_type();
-        let new_href = mt.new_href();
         let new_label = mt.new_label();
+        let media_type_str = mt.to_string();
 
         let adapter = move |count| PaginationControlsProps {
             offset,
@@ -54,13 +54,7 @@ where
         view! {
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex justify-end mb-3">
-                    <a
-                        href=new_href
-                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 hover:shadow-cyan-500/40"
-                    >
-                        <span class="text-lg leading-none">"+"</span>
-                        {new_label}
-                    </a>
+                    <CreateNewButton kind=media_type_str.clone() label=new_label.to_string()/>
                 </div>
                 <SearchBar
                     search_query
@@ -146,5 +140,40 @@ impl LazyRoute for AudioGroupListingPage {
 
     fn view(this: Self) -> AnyView {
         this.view().into_any()
+    }
+}
+
+#[component]
+pub fn CreateNewButton(#[prop(into)] kind: String, #[prop(into)] label: String) -> impl IntoView {
+    use leptos_router::hooks::use_navigate;
+
+    let create =
+        Action::new_local(|kind: &String| crate::app::media_api::create_empty(kind.clone()));
+    let navigate = use_navigate();
+
+    let kind_effect = kind.clone();
+    Effect::new(move |_| {
+        if let Some(Ok(id)) = create.value().get() {
+            let href = match kind_effect.as_str() {
+                "movie" => format!("/movie/detail/{id}"),
+                "series" => format!("/series/detail/{id}"),
+                "audio" => format!("/audio/detail/{id}"),
+                _ => return,
+            };
+            navigate(&href, Default::default());
+        }
+    });
+
+    let kind_click = kind.clone();
+    view! {
+        <button
+            type="button"
+            on:click=move |_| {create.dispatch(kind_click.clone());}
+            disabled=move || create.pending().get()
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100"
+        >
+            <span class="text-lg leading-none">"+"</span>
+            {move || if create.pending().get() { "جاري الإنشاء...".to_string() } else { label.clone() }}
+        </button>
     }
 }

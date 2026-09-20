@@ -3,7 +3,7 @@ use crate::app::{
     detail::{DetailHero, DetailShell, HeroBadge, HeroDescription, HeroMeta, HeroTitle, Poster},
     icons::{ClockIcon, SeriesIcon, SeriesPosterSvg},
     media_player::{MediaItem, MediaPlayer},
-    model::{MediaType, Season, SeasonSummary, Series},
+    model::{Season, SeasonSummary, Series},
     resource_view::ResourceView,
     route_params::use_u64_param,
 };
@@ -102,12 +102,11 @@ fn SeriesView(
         .unwrap_or_else(|| "لا يوجد وصف متاح.".to_string());
     let summaries = series.season_summaries.clone();
     let season_count = series.season_count;
-    let edit_href = MediaType::Series.edit_href(series.id);
 
     let season_adapter = |season: Season| SeasonPlayerProps { season };
 
     view! {
-        <DetailShell poster=poster.clone() edit_href>
+        <DetailShell poster=poster.clone()>
             <DetailHero poster=view! {
                 <Poster
                     src=poster.clone()

@@ -1,7 +1,27 @@
 use leptos::prelude::*;
+use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 
-use crate::app::upload_ui::{ConversionStatus, UploadResult};
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UploadResult {
+    pub success: bool,
+    pub message: String,
+    pub job_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ConversionStatus {
+    Writing,
+    Converting {
+        conversion_index: usize,
+        conversion_count: usize,
+        current_file: String,
+        progress: f32,
+    },
+    Finalizing,
+    Done,
+    Failed(String),
+}
 
 #[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {

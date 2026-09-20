@@ -70,8 +70,8 @@ pub async fn stage_files(
             let ext = file.filename.rsplit('.').next().unwrap_or("").to_string();
             let stem = file
                 .filename
-                .rsplitn(2, '.')
-                .nth(1)
+                .rsplit_once('.')
+                .map(|x| x.0)
                 .unwrap_or(&file.filename)
                 .to_string();
             let safe_stem = sanitize_filename(&stem);

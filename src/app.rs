@@ -1,11 +1,3 @@
-use crate::app::edit_chooser::{AudioGroupEditChooser, MovieEditChooser, SeriesEditChooser};
-use crate::app::metadata_edit::{
-    AudioGroupMetadataEditPage, MovieMetadataEditPage, SeriesMetadataEditPage,
-};
-use crate::app::new_upload::{
-    AudioGroupAppendPage, MovieAppendPage, NewAudioGroupPage, NewMoviePage, NewSeriesPage,
-    SeriesAppendPage,
-};
 use crate::app::{
     audio::{detail::AudioGroupDetailPage, song::AudioSongDetailPage},
     home::HomePage,
@@ -26,16 +18,15 @@ use leptos_router::{
 mod audio;
 mod common;
 pub mod detail;
-mod edit_chooser;
 mod home;
 pub mod icons;
+mod inline_edit;
 mod layout;
 mod listing;
+mod media_api;
 mod media_player;
-mod metadata_edit;
 mod model;
 mod movies;
-mod new_upload;
 mod pagination;
 mod resource_view;
 mod route_params;
@@ -45,7 +36,6 @@ mod series;
 pub mod server;
 mod settings;
 mod upload_api;
-mod upload_ui;
 mod view_schema;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -110,61 +100,6 @@ pub fn App() -> impl IntoView {
                     <Route
                         path=path!("/audio/detail/:id/song/:song_id")
                         view={Lazy::<AudioSongDetailPage>::new()}
-                    />
-
-                    // Movie edit flow
-                    <Route
-                        path=path!("/movie/detail/:id/edit")
-                        view={Lazy::<MovieEditChooser>::new()}
-                    />
-                    <Route
-                        path=path!("/movie/detail/:id/edit/metadata")
-                        view={Lazy::<MovieMetadataEditPage>::new()}
-                    />
-                    <Route
-                        path=path!("/movie/detail/:id/edit/append")
-                        view={Lazy::<MovieAppendPage>::new()}
-                    />
-
-                    // Series edit flow
-                    <Route
-                        path=path!("/series/detail/:id/edit")
-                        view={Lazy::<SeriesEditChooser>::new()}
-                    />
-                    <Route
-                        path=path!("/series/detail/:id/edit/metadata")
-                        view={Lazy::<SeriesMetadataEditPage>::new()}
-                    />
-                    <Route
-                        path=path!("/series/detail/:id/edit/append")
-                        view={Lazy::<SeriesAppendPage>::new()}
-                    />
-
-                    // Audio group edit flow
-                    <Route
-                        path=path!("/audio/detail/:id/edit")
-                        view={Lazy::<AudioGroupEditChooser>::new()}
-                    />
-                    <Route
-                        path=path!("/audio/detail/:id/edit/metadata")
-                        view={Lazy::<AudioGroupMetadataEditPage>::new()}
-                    />
-                    <Route
-                        path=path!("/audio/detail/:id/edit/append")
-                        view={Lazy::<AudioGroupAppendPage>::new()}
-                    />
-
-                    <Route
-                        path=path!("/movie/new")
-                        view={Lazy::<NewMoviePage>::new()}
-                    />
-                    <Route
-                        path=path!("/series/new")
-                        view={Lazy::<NewSeriesPage>::new()}
-                    />
-                    <Route
-                        path=path!("/audio/new")
-                        view={Lazy::<NewAudioGroupPage>::new()}
                     />
                 </ParentRoute>
             </Routes>
