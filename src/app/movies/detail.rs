@@ -98,30 +98,41 @@ async fn fetch_movie_chapters(id: u64) -> Result<Vec<MovieChapter>, ServerFnErro
 
 pub struct MovieDetailPage {
     movie: Resource<Result<Movie, ServerFnError>>,
+    chapters: Resource<Result<Vec<MovieChapter>, ServerFnError>>,
 }
 
 #[lazy_route]
 impl LazyRoute for MovieDetailPage {
     fn data() -> Self {
-        let movie = Resource::new(use_u64_param("id"), fetch_movie_detail);
-        Self { movie }
+        let id = use_u64_param("id");
+        let movie = Resource::new(id, fetch_movie_detail);
+        let chapters = Resource::new(id, fetch_movie_chapters);
+        Self { movie, chapters }
     }
     fn view(this: Self) -> AnyView {
-        let adapter = |movie| MovieDetailProps { movie };
-        view! { <ResourceView resource=this.movie view_fn=MovieDetail adapter=adapter /> }
-            .into_any()
+        let MovieDetailPage { movie, chapters } = this;
+        let adapter = move |movie| MovieDetailProps { movie, chapters };
+        view! {
+            <ResourceView
+                resource=movie
+                view_fn=MovieDetail
+                adapter=adapter
+            />
+        }
+        .into_any()
     }
 }
 
 #[component]
-fn MovieDetail(movie: Movie) -> impl IntoView {
+fn MovieDetail(
+    movie: Movie,
+    chapters: Resource<Result<Vec<MovieChapter>, ServerFnError>>,
+) -> impl IntoView {
     let id = movie.id;
 
     let title = RwSignal::new(movie.title.clone());
     let description = RwSignal::new(movie.description.clone().unwrap_or_default());
     let poster = RwSignal::new(movie.poster.clone());
-
-    let chapters = Resource::new(move || id, fetch_movie_chapters);
 
     // ── Media metadata patching ─────────────────────────────────────────
     let patch = Action::new_local(
@@ -151,15 +162,11 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
     // ── Uploads ────────────────────────────────────────────────────────
     let upload = UploadJob::new();
 
-    // Refetch when a background job finishes.
-    {
-        let upload = upload.clone();
-        Effect::new(move |_| {
-            if upload.done_tick.get() > 0 {
-                chapters.refetch();
-            }
-        });
-    }
+    Effect::new(move |_| {
+        if upload.done_tick.get() > 0 {
+            chapters.refetch();
+        }
+    });
 
     let upload_error = upload.error();
 
@@ -194,32 +201,10 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
         delete_chapter.dispatch(cid);
     });
 
-    // ── Playlist items ─────────────────────────────────────────────────
-    let items = Signal::derive(move || {
-        chapters
-            .get()
-            .and_then(|r| r.ok())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|ch| {
-                let t = ch
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| format!("الفصل {}", ch.number + 1));
-                let mut it = MediaItem::new(ch.id, t, ch.file.path.clone());
-                if let Some(d) = ch.description {
-                    it = it.with_subtitle(d);
-                }
-                it
-            })
-            .collect::<Vec<_>>()
-    });
-
     // ── File input handler ─────────────────────────────────────────────
     let add_input_id = format!("chapter-input-{id}");
     let add_input_id: &'static str = add_input_id.leak();
 
-    let upload_for_files = upload.clone();
     let on_files = move |ev: web_sys::Event| {
         let Some(input) = ev
             .target()
@@ -249,12 +234,22 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
             }
         }
 
-        upload_for_files.dispatch(fd);
+        upload.dispatch(fd);
         input.set_value("");
     };
 
     let upload_pending = upload.pending;
     let upload_status = upload.status;
+
+    let chapters_adapter = {
+        let movie = movie.clone();
+        move |chapters| ChaptersViewProps {
+            movie: movie.clone(),
+            chapters,
+            on_rename,
+            on_delete,
+        }
+    };
 
     view! {
         <DetailShell poster=movie.poster.clone()>
@@ -303,16 +298,45 @@ fn MovieDetail(movie: Movie) -> impl IntoView {
                 })}
             </DetailHero>
 
-            <Show when=move || !items.get().is_empty()>
-                <div class="mt-10">
-                    <MediaPlayer
-                        items=items
-                        playlist_title=movie.title.clone()
-                        on_rename=on_rename
-                        on_delete=on_delete
-                    />
-                </div>
-            </Show>
+            <ResourceView
+                resource=chapters
+                view_fn=ChaptersView
+                adapter=chapters_adapter
+            />
         </DetailShell>
     }
+}
+
+#[component]
+fn ChaptersView(
+    movie: Movie,
+    chapters: Vec<MovieChapter>,
+    on_rename: Callback<(u64, String)>,
+    on_delete: Callback<u64>,
+) -> impl IntoView {
+    let items = chapters
+        .into_iter()
+        .map(|ch| {
+            let t = ch
+                .title
+                .clone()
+                .unwrap_or_else(|| format!("الفصل {}", ch.number + 1));
+            let mut it = MediaItem::new(ch.id, t, ch.file.path.clone());
+            if let Some(d) = ch.description {
+                it = it.with_subtitle(d);
+            }
+            it
+        })
+        .collect::<Vec<_>>();
+
+    (!items.is_empty()).then_some(view! {
+        <div class="mt-10">
+            <MediaPlayer
+                items=items.into()
+                playlist_title=movie.title.clone()
+                on_rename=on_rename
+                on_delete=on_delete
+            />
+        </div>
+    })
 }
