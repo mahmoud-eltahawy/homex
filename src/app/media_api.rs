@@ -10,6 +10,39 @@ fn table_for(kind: &str) -> Result<&'static str, ServerFnError> {
 
 // ─── Create empty item ──────────────────────────────────────────────────────
 
+// ─── Patch a chapter/episode/audio title ────────────────────────────────────
+
+#[server]
+pub async fn patch_child_title(kind: String, id: u64, title: String) -> Result<(), ServerFnError> {
+    use crate::app::server::AppState;
+    use sqlx::AssertSqlSafe;
+
+    let state: AppState = expect_context();
+    let table = match kind.as_str() {
+        "movie_chapter" => "movie_chapters",
+        "episode" => "episodes",
+        "audio" => "audios",
+        _ => return Err(ServerFnError::new("نوع غير معروف")),
+    };
+
+    let t = if title.trim().is_empty() {
+        None
+    } else {
+        Some(title)
+    };
+
+    sqlx::query(AssertSqlSafe(format!(
+        "UPDATE {table} SET title = ? WHERE id = ?"
+    )))
+    .bind(t)
+    .bind(id as i64)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    Ok(())
+}
+
 #[server]
 pub async fn patch_chapter_title(id: u64, title: String) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
