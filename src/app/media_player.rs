@@ -34,11 +34,6 @@ impl MediaItem {
         self.subtitle = Some(subtitle.into());
         self
     }
-    #[allow(dead_code)]
-    pub fn with_artwork(mut self, artwork: impl Into<String>) -> Self {
-        self.artwork = Some(artwork.into());
-        self
-    }
 }
 
 // ─── Top-level component ──────────────────────────────────────────────────

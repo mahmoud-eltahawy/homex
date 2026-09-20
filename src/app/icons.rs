@@ -149,35 +149,6 @@ pub fn DeleteIcon() -> impl IntoView {
 }
 
 #[component]
-pub fn UpArrow() -> impl IntoView {
-    view! {
-        <Icon class="h-4 w-4" label="Go Up" tooltip="Go Up">
-            <polyline points="6 15 12 9 18 15" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn DownArrow() -> impl IntoView {
-    view! {
-        <Icon class="h-4 w-4" label="Go Down" tooltip="Go Down">
-            <polyline points="6 9 12 15 18 9" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn SortIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5" label="Sort Items" tooltip="Sort Items">
-            <path d="M3 6h18M3 12h12M3 18h6" />
-            <path d="M17 15v6M17 21l-3-3M17 21l3-3" />
-            <path d="M7 9v6M7 15l-3-3M7 15l3-3" />
-        </Icon>
-    }
-}
-
-#[component]
 pub fn VolumeIcon() -> impl IntoView {
     view! {
         <Icon class="h-5 w-5" label="Volume" tooltip="Volume">
