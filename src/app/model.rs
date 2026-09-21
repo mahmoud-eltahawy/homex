@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -9,171 +7,93 @@ pub struct MediaFile {
     pub size: u64,
     pub duration: u64,
 }
+// impl MediaFile unchanged
 
-impl MediaFile {
-    pub fn human_readable_size(&self) -> String {
-        let bytes = self.size as f64;
-        if bytes >= 1_000_000_000.0 {
-            format!("{:.1} GB", bytes / 1_000_000_000.0)
-        } else if bytes >= 1_000_000.0 {
-            format!("{:.1} MB", bytes / 1_000_000.0)
-        } else if bytes >= 1_000.0 {
-            format!("{:.1} KB", bytes / 1_000.0)
-        } else {
-            format!("{} BYTE", bytes)
-        }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MediaKind {
+    Video,
+    Audio,
+}
+
+impl MediaKind {
+    pub fn as_str(self) -> &'static str {
+        match self { Self::Video => "video", Self::Audio => "audio" }
     }
-    pub fn human_readable_duration(&self) -> String {
-        let secs = self.duration;
-        let hours = secs / 3600;
-        let minutes = (secs % 3600) / 60;
-        let seconds = secs % 60;
-        if hours > 0 {
-            format!("{} Hour And {} Minute", hours, minutes)
-        } else if minutes > 0 {
-            format!("{} Minute", minutes)
-        } else {
-            format!("{} Second", seconds)
+    pub fn label(self) -> &'static str {
+        match self { Self::Video => "فيديو", Self::Audio => "صوت" }
+    }
+}
+
+impl TryFrom<&str> for MediaKind {
+    type Error = &'static str;
+    fn try_from(v: &str) -> Result<Self, Self::Error> {
+        match v.to_ascii_lowercase().as_str() {
+            "video" => Ok(Self::Video),
+            "audio" => Ok(Self::Audio),
+            _ => Err("media_kind must be 'video' or 'audio'"),
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Movie {
+pub struct Section {
     pub id: u64,
+    pub slug: String,
+    pub title: String,
+    pub media_kind: MediaKind,
+    pub nested: bool,
+    pub position: i64,
+    /// how many cards (collections) it holds — populated by the listing fn
+    pub collections_count: u32,
+}
+
+impl Section {
+    pub fn href(&self) -> String { format!("/s/{}", self.slug) }
+    pub fn detail_href(&self, collection_id: u64) -> String {
+        format!("/s/{}/{}", self.slug, collection_id)
+    }
+    /// label for the "create new" button inside the section page
+    pub fn new_label(&self) -> &'static str {
+        match (self.media_kind, self.nested) {
+            (MediaKind::Video, false) => "إضافة فيديو جديد",
+            (MediaKind::Video, true)  => "إضافة مسلسل جديد",
+            (MediaKind::Audio, false) => "إضافة مقطع صوتي جديد",
+            (MediaKind::Audio, true)  => "إضافة مجموعة صوتية جديدة",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: u64,
+    pub section_id: u64,
+    pub section_slug: String,
     pub title: String,
     pub poster: Option<String>,
     pub description: Option<String>,
+    pub items_count: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MovieChapter {
+pub struct Item {
     pub id: u64,
-    pub number: u8,
+    pub collection_id: u64,
+    pub number: i64,
+    pub season_number: Option<i64>,
     pub title: Option<String>,
     pub poster: Option<String>,
     pub description: Option<String>,
     pub file: MediaFile,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct AudioGroup {
-    pub id: u64,
-    pub title: String,
-    pub poster: Option<String>,
-    pub description: Option<String>,
-    pub audios_count: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum MediaType {
-    Movie,
-    Series,
-    AudioGroup,
-}
-
-impl MediaType {
-    pub fn listing_href(&self) -> String {
-        match self {
-            MediaType::Movie => "/movie",
-            MediaType::Series => "/series",
-            MediaType::AudioGroup => "/audio",
-        }
-        .to_string()
+impl Item {
+    pub fn display_title(&self) -> String {
+        self.title.clone().unwrap_or_else(|| format!("المقطع {}", self.number + 1))
     }
-
-    pub fn detail_href(&self, id: u64) -> String {
-        format!("{}/detail/{}", self.listing_href(), id)
-    }
-
-    #[cfg(feature = "ssr")]
-    pub fn table(&self) -> &'static str {
-        match self {
-            MediaType::Movie => "movies",
-            MediaType::Series => "series",
-            MediaType::AudioGroup => "audio_groups",
-        }
-    }
-
-    #[cfg(feature = "ssr")]
-    pub fn poster_subdir(&self) -> &'static str {
-        match self {
-            MediaType::Movie => "movies",
-            MediaType::Series => "series",
-            MediaType::AudioGroup => "audio",
-        }
-    }
-
-    pub fn new_label(&self) -> &'static str {
-        match self {
-            MediaType::Movie => "إضافة فيلم جديد",
-            MediaType::Series => "إضافة مسلسل جديد",
-            MediaType::AudioGroup => "إضافة مجموعة صوتية جديدة",
-        }
-    }
-}
-
-impl Display for MediaType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MediaType::Movie => write!(f, "movie"),
-            MediaType::Series => write!(f, "series"),
-            MediaType::AudioGroup => write!(f, "audio"),
-        }
-    }
-}
-
-impl TryFrom<&str> for MediaType {
-    type Error = &'static str;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
-            "movie" => Ok(MediaType::Movie),
-            "series" => Ok(MediaType::Series),
-            "audio" => Ok(MediaType::AudioGroup),
-            _ => Err("Media type must be 'movie' or 'series' or 'audio'"),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Episode {
-    pub id: i64,
-    pub season: u32,
-    pub episode: u32,
-    pub file: MediaFile,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Series {
-    pub id: u64,
-    pub title: String,
-    pub poster: Option<String>,
-    pub description: Option<String>,
-    pub season_count: u32,
-    pub season_summaries: Vec<SeasonSummary>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SeasonSummary {
-    pub season_number: u32,
-    pub episode_count: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Season {
-    pub season_number: u32,
-    pub episodes: Vec<Episode>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Audio {
-    pub id: u64,
-    pub title: String,
-    pub file: MediaFile,
-}
-
-impl Audio {
-    pub fn href(&self, group_id: u64) -> String {
-        format!("/audio/detail/{}/song/{}", group_id, self.id)
+    pub fn href(&self, section_slug: &str) -> String {
+        format!(
+            "/s/{}/{}/item/{}",
+            section_slug, self.collection_id, self.id
+        )
     }
 }

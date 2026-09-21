@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use leptos::prelude::ServerFnError;
 
-use crate::app::model::MediaType;
+use crate::app::model::MediaKind;
 use crate::app::server::AppState;
 use crate::app::server::convert::{
     TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
@@ -13,30 +13,21 @@ use crate::app::server::upload::new_storage_token;
 use super::naming::{sanitize_filename, slugify};
 use super::types::{StagedFile, UploadPayload};
 
-pub(super) fn base_subdir(media_type: MediaType) -> &'static str {
-    match media_type {
-        MediaType::Movie => "movies",
-        MediaType::Series => "series",
-        MediaType::AudioGroup => "audio",
-    }
-}
-
-/// Which target format each file needs (`None` = already browser-playable).
-fn targets_for(payload: &UploadPayload) -> Vec<Option<TargetFormat>> {
+fn targets_for(payload: &UploadPayload, kind: MediaKind) -> Vec<Option<TargetFormat>> {
     payload
         .files
         .iter()
         .map(|f| {
             let ext = f.filename.rsplit('.').next().unwrap_or("");
-            match payload.media_type {
-                MediaType::Movie | MediaType::Series => {
+            match kind {
+                MediaKind::Video => {
                     if is_video_container_supported(ext) {
                         None
                     } else {
                         Some(TargetFormat::Mp4)
                     }
                 }
-                MediaType::AudioGroup => {
+                MediaKind::Audio => {
                     if is_audio_container_supported(ext) {
                         None
                     } else {
@@ -51,16 +42,22 @@ fn targets_for(payload: &UploadPayload) -> Vec<Option<TargetFormat>> {
 pub async fn stage_files(
     payload: &UploadPayload,
     state: &AppState,
+    kind: MediaKind,
     job_id: Option<&str>,
 ) -> Result<Vec<StagedFile>, ServerFnError> {
-    let subdir = base_subdir(payload.media_type);
-    let slug = slugify(&payload.title);
-    let base = state.config.storage.media_root.join(subdir).join(&slug);
+    let subdir = payload.section_slug.clone();
+    let raw_slug = slugify(&payload.title);
+    let slug = if raw_slug.is_empty() {
+        new_storage_token()
+    } else {
+        raw_slug
+    };
+    let base = state.config.storage.media_root.join(&subdir).join(&slug);
     tokio::fs::create_dir_all(&base)
         .await
         .map_err(|e| ServerFnError::new(format!("mkdir: {e}")))?;
 
-    let targets = targets_for(payload);
+    let targets = targets_for(payload, kind);
     let conversion_count = targets.iter().filter(|t| t.is_some()).count();
 
     let mut written: Vec<PathBuf> = Vec::new();
@@ -76,12 +73,10 @@ pub async fn stage_files(
                 .unwrap_or(&file.filename)
                 .to_string();
             let safe_stem = sanitize_filename(&stem);
-
             let token = new_storage_token();
 
             let raw_rel = format!("{subdir}/{slug}/{safe_stem}-{token}.{ext}");
             let raw_abs = state.config.storage.media_root.join(&raw_rel);
-
             tokio::fs::write(&raw_abs, &file.bytes)
                 .await
                 .map_err(|e| ServerFnError::new(format!("write {}: {e}", raw_abs.display())))?;
@@ -125,7 +120,6 @@ pub async fn stage_files(
                 .await
                 .map(|m| m.len())
                 .unwrap_or(0);
-
             staged.push(StagedFile {
                 rel: out_rel,
                 duration: total_secs.round() as i64,
@@ -143,6 +137,5 @@ pub async fn stage_files(
         }
         return Err(e);
     }
-
     Ok(staged)
 }

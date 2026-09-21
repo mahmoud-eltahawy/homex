@@ -25,6 +25,7 @@ pub enum ConversionStatus {
 
 #[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {
+    use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     use crate::app::server::convert::{Job, JobPhase};
     use crate::app::server::upload::{
@@ -34,10 +35,19 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
 
     let state: AppState = expect_context();
     let payload = parse_upload_multipart(data).await?;
-    validate_extensions(&payload)?;
 
-    if !needs_conversion(&payload) {
-        let msg = process_upload(payload, &state, None).await?;
+    let kind_str: String = sqlx::query_scalar("SELECT media_kind FROM sections WHERE slug = ?")
+        .bind(&payload.section_slug)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .ok_or_else(|| ServerFnError::new("section not found"))?;
+    let kind = MediaKind::try_from(kind_str.as_str()).map_err(ServerFnError::new)?;
+
+    validate_extensions(&payload, kind)?;
+
+    if !needs_conversion(&payload, kind) {
+        let msg = process_upload(payload, &state, kind, None).await?;
         return Ok(UploadResult {
             success: true,
             message: msg,
@@ -61,7 +71,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
     let job_id_bg = job_id.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = process_upload(payload, &state_bg, Some(&job_id_bg)).await {
+        if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id_bg)).await {
             crate::app::server::convert::job_set_phase(
                 &state_bg.jobs,
                 Some(&job_id_bg),

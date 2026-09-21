@@ -15,7 +15,7 @@ pub use validate::{needs_conversion, validate_extensions};
 
 use leptos::prelude::ServerFnError;
 
-use crate::app::model::MediaType;
+use crate::app::model::MediaKind;
 use crate::app::server::convert::{JobPhase, job_set_phase};
 use crate::app::server::{AppState, Jobs};
 
@@ -28,13 +28,18 @@ pub fn schedule_job_eviction(jobs: Jobs, job_id: String) {
     });
 }
 
+fn non_empty(s: &str) -> Option<&str> {
+    if s.is_empty() { None } else { Some(s) }
+}
+
 pub async fn process_upload(
     payload: UploadPayload,
     state: &AppState,
+    kind: MediaKind,
     job_id: Option<&str>,
 ) -> Result<String, ServerFnError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
-    let staged = files::stage_files(&payload, state, job_id).await?;
+    let staged = files::stage_files(&payload, state, kind, job_id).await?;
 
     job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
     let file_rows = persist::insert_files(&state.db, &staged).await?;
@@ -45,15 +50,37 @@ pub async fn process_upload(
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    let entity_id = match payload.media_type {
-        MediaType::Movie => persist::persist_movie(&mut tx, &payload, &file_rows).await?,
-        MediaType::Series => persist::persist_series(&mut tx, &payload, &file_rows).await?,
-        MediaType::AudioGroup => {
-            persist::persist_audio_group(&mut tx, &payload, &file_rows).await?
+    let collection_id: i64 = match payload.collection_id {
+        Some(id) => id,
+        None => {
+            let section_id: i64 = sqlx::query_scalar("SELECT id FROM sections WHERE slug=?")
+                .bind(&payload.section_slug)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ServerFnError::new(e.to_string()))?;
+            sqlx::query_scalar(
+                "INSERT INTO collections (section_id, title, description, position) \
+                 VALUES (?, ?, ?, (SELECT COALESCE(MAX(position)+1,0) FROM collections WHERE section_id=?)) \
+                 RETURNING id",
+            )
+            .bind(section_id)
+            .bind(&payload.title)
+            .bind(non_empty(&payload.description))
+            .bind(section_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?
         }
     };
 
-    persist::attach_poster(&mut tx, &payload, entity_id, &state.config.storage.data_dir).await?;
+    persist::insert_items(&mut tx, collection_id, payload.season_number, &file_rows).await?;
+    persist::attach_poster(
+        &mut tx,
+        &payload,
+        collection_id,
+        &state.config.storage.data_dir,
+    )
+    .await?;
 
     tx.commit()
         .await

@@ -1,11 +1,6 @@
 use crate::app::{
-    audio::{detail::AudioGroupDetailPage, song::AudioSongDetailPage},
-    home::HomePage,
-    layout::Layout,
-    listing::{AudioGroupListingPage, MovieListingPage, SeriesListingPage},
-    movies::detail::MovieDetailPage,
-    series::details::SeriesDetailPage,
-    settings::SettingsPage,
+    collection_detail::CollectionDetailPage, home::HomePage, layout::Layout,
+    section_listing::SectionListingPage, settings::SettingsPage,
 };
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
@@ -15,29 +10,28 @@ use leptos_router::{
     path,
 };
 
-mod audio;
+mod collection_detail;
+mod collections;
+mod home;
+mod layout;
+mod section_listing;
+mod sections;
+mod settings;
+
 mod common;
 pub mod detail;
-mod home;
 pub mod icons;
 mod inline_edit;
-mod layout;
-mod listing;
-mod media_api;
 mod media_player;
 mod model;
-mod movies;
 mod pagination;
 mod resource_view;
 mod route_params;
 mod search;
-mod series;
 #[cfg(feature = "ssr")]
 pub mod server;
-mod settings;
 mod upload_api;
 mod upload_job;
-mod view_schema;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -66,42 +60,10 @@ pub fn App() -> impl IntoView {
         <Router>
             <Routes fallback=|| "Page not found.".into_view()>
                 <ParentRoute path=path!("") view=Layout>
-                    <Route
-                        path=path!("/")
-                        view={Lazy::<HomePage>::new()}
-                    />
-                    <Route
-                        path=path!("/series/detail/:id")
-                        view={Lazy::<SeriesDetailPage>::new()}
-                    />
-                    <Route
-                        path=path!("/movie/detail/:id")
-                        view={Lazy::<MovieDetailPage>::new()}
-                    />
-                    <Route
-                        path=path!("/movie")
-                        view={Lazy::<MovieListingPage>::new()}
-                    />
-                    <Route
-                        path=path!("/series")
-                        view={Lazy::<SeriesListingPage>::new()}
-                    />
-                    <Route
-                        path=path!("/audio")
-                        view={Lazy::<AudioGroupListingPage>::new()}
-                    />
-                    <Route
-                        path=path!("/settings")
-                        view={Lazy::<SettingsPage>::new()}
-                    />
-                    <Route
-                        path=path!("/audio/detail/:id")
-                        view={Lazy::<AudioGroupDetailPage>::new()}
-                    />
-                    <Route
-                        path=path!("/audio/detail/:id/song/:song_id")
-                        view={Lazy::<AudioSongDetailPage>::new()}
-                    />
+                    <Route path=path!("/")            view={Lazy::<HomePage>::new()}/>
+                    <Route path=path!("/s/:slug")     view={Lazy::<SectionListingPage>::new()}/>
+                    <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
+                    <Route path=path!("/settings")    view={Lazy::<SettingsPage>::new()}/>
                 </ParentRoute>
             </Routes>
         </Router>

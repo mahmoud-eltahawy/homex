@@ -1,3 +1,4 @@
+use leptos::either::Either;
 use leptos::html;
 use leptos::prelude::*;
 use web_sys::HtmlInputElement;
@@ -252,6 +253,8 @@ pub fn EditableTextArea(
 
 // ─── Poster (upload/replace inline) ─────────────────────────────────────────
 
+// ─── Poster (upload/replace inline) ─────────────────────────────────────────
+
 #[component]
 pub fn EditablePoster(
     src: Signal<Option<String>>,
@@ -279,34 +282,34 @@ pub fn EditablePoster(
         let input_id_for_label = input_id;
         move || {
             edit_mode.get().then_some(view! {
-            <input
-                type="file"
-                id=input_id_for_input.clone()
-                class="hidden"
-                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                on:change=on_change
-            />
-            <label
-                for=input_id_for_label.clone()
-                class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md hover:bg-black/80 text-white text-xs font-medium cursor-pointer opacity-80 group-hover:opacity-100 transition"
-            >
-                <UploadIcon/> "تغيير الصورة"
-            </label>
-        })
+                <input
+                    type="file"
+                    id=input_id_for_input.clone()
+                    class="hidden"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    on:change=on_change
+                />
+                <label
+                    for=input_id_for_label.clone()
+                    class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md hover:bg-black/80 text-white text-xs font-medium cursor-pointer opacity-80 group-hover:opacity-100 transition"
+                >
+                    <UploadIcon/> "تغيير الصورة"
+                </label>
+            })
         }
     };
 
     view! {
         <div class="relative group w-full">
             {move || match src.get() {
-                Some(url) => view! {
+                Some(url) => Either::Left(view! {
                     <img
                         src=url
                         class="w-full rounded-2xl shadow-2xl border border-white/10 object-cover"
                         alt=""
                     />
-                }.into_any(),
-                None => placeholder.run(),
+                }),
+                None => Either::Right(placeholder.run()),
             }}
             {edit_view}
         </div>

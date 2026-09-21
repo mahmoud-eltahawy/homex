@@ -1,17 +1,6 @@
 use leptos::prelude::*;
 
 #[component]
-pub fn PosterImg(src: String) -> impl IntoView {
-    view! {
-        <img
-            src=src
-            class="w-full h-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110"
-            loading="lazy"
-        />
-    }
-}
-
-#[component]
 pub fn CardsLoading() -> impl IntoView {
     let cards = (0..5).map(|_| CardSkeleton()).collect_view();
     view! {
