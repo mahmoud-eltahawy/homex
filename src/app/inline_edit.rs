@@ -297,6 +297,40 @@ pub fn EditablePoster(
 }
 
 #[component]
+pub fn EditModeToggle(
+    edit_on: RwSignal<bool>,
+    #[prop(optional, into)] wrap_class: Option<String>,
+) -> impl IntoView {
+    let class = move || {
+        format!(
+            "{} inline-flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-md \
+             transition text-sm border {}",
+            wrap_class.as_deref().unwrap_or(""),
+            if edit_on.get() {
+                "bg-cyan-500/25 border-cyan-400/50 text-white"
+            } else {
+                "bg-white/10 border-white/10 text-gray-300 hover:bg-white/20 hover:text-white"
+            }
+        )
+    };
+
+    view! {
+        <button
+            type="button"
+            class=class
+            on:click=move |_| edit_on.update(|x| *x = !*x)
+            aria-pressed=move || edit_on.get().to_string()
+            aria-label="تبديل وضع التعديل"
+        >
+            <EditIcon/>
+            <span class="hidden sm:inline">
+                {move || if edit_on.get() { "إنهاء التعديل" } else { "تعديل" }}
+            </span>
+        </button>
+    }
+}
+
+#[component]
 pub fn FilePicker(
     #[prop(into)] id: String,
     #[prop(into)] accept: String,

@@ -1,9 +1,9 @@
-use leptos::prelude::*;
-use leptos_router::{LazyRoute, lazy_route};
-
 use crate::app::{
-    collections::{create_empty_collection, fetch_collections, fetch_collections_count},
-    common::{CardsLoading, CollectionGrid, CollectionGridProps},
+    collections::create_empty_collection,
+    common::{
+        CardsLoading, CollectionCount, CollectionGrid, CollectionGridProps, CollectionPage,
+        collections_paginated,
+    },
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
@@ -11,13 +11,16 @@ use crate::app::{
     search::SearchBar,
     sections::fetch_section_by_slug,
 };
+use leptos::prelude::*;
+use leptos_router::{LazyRoute, lazy_route};
+use server_fn::ServerFnError;
 
 const LISTING_PAGE_SIZE: usize = 18;
 
 pub struct SectionListingPage {
     section: Resource<Result<Section, ServerFnError>>,
-    collections: Resource<Result<Vec<Collection>, ServerFnError>>,
-    count: Resource<Result<usize, ServerFnError>>,
+    collections: CollectionPage,
+    count: CollectionCount,
     offset: RwSignal<usize>,
     search_query: RwSignal<Option<String>>,
 }
@@ -29,19 +32,16 @@ impl LazyRoute for SectionListingPage {
         let offset = RwSignal::new(0);
         let search_query = RwSignal::new(None);
 
-        let slug_a = slug;
-        let section = Resource::new(slug_a, fetch_section_by_slug);
+        let slug_for_section = slug;
+        let section = Resource::new(slug_for_section, fetch_section_by_slug);
 
-        let slug_b = slug;
-        let collections = Resource::new(
-            move || (slug_b(), offset.get(), search_query.get()),
-            |(s, off, q)| fetch_collections(s, off, LISTING_PAGE_SIZE, q),
-        );
-
-        let slug_c = slug;
-        let count = Resource::new(
-            move || (slug_c(), search_query.get()),
-            |(s, q)| fetch_collections_count(s, q),
+        let slug_for_fetch = slug;
+        let (collections, count) = collections_paginated(
+            slug_for_fetch,
+            offset,
+            search_query,
+            || false,
+            LISTING_PAGE_SIZE,
         );
 
         Self {

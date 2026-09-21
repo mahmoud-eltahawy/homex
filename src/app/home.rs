@@ -3,10 +3,9 @@ use leptos::prelude::*;
 use leptos_router::{LazyRoute, lazy_route};
 
 use crate::app::{
-    collections::{fetch_collections, fetch_collections_count},
-    common::{CardsLoading, CollectionGrid, EmptyState},
-    icons::{DeleteIcon, EditIcon, ViewAllIcon, icon_for},
-    inline_edit::{EditableText, provide_edit_mode, use_edit_mode},
+    common::{CardsLoading, CollectionGrid, EmptyState, collections_paginated, refetch_on_success},
+    icons::{DeleteIcon, ViewAllIcon, icon_for},
+    inline_edit::{EditModeToggle, EditableText, provide_edit_mode, use_edit_mode},
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
@@ -45,7 +44,7 @@ impl LazyRoute for HomePage {
             <div class="min-h-screen bg-[#0c0b1a] text-white">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-6 flex flex-col">
                     <div class="flex justify-end mb-2">
-                        <EditToggle edit_on=edit_on/>
+                        <EditModeToggle edit_on=edit_on/>
                     </div>
                     <SearchBar search_query=search_query offset_reset=|| {} />
                     <ResourceView resource=sections view_fn=AllSections adapter=adapter/>
@@ -53,38 +52,6 @@ impl LazyRoute for HomePage {
             </div>
         }
         .into_any()
-    }
-}
-
-// ─── Edit-mode toggle ────────────────────────────────────────────────────
-
-#[component]
-fn EditToggle(edit_on: RwSignal<bool>) -> impl IntoView {
-    let toggle_class = move || {
-        format!(
-            "inline-flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-md \
-             transition text-sm border {}",
-            if edit_on.get() {
-                "bg-cyan-500/25 border-cyan-400/50 text-white"
-            } else {
-                "bg-white/10 border-white/10 text-gray-300 hover:bg-white/20 hover:text-white"
-            }
-        )
-    };
-
-    view! {
-        <button
-            type="button"
-            class=toggle_class
-            on:click=move |_| edit_on.update(|x| *x = !*x)
-            aria-pressed=move || edit_on.get().to_string()
-            aria-label="تبديل وضع التعديل"
-        >
-            <EditIcon/>
-            <span class="hidden sm:inline">
-                {move || if edit_on.get() { "إنهاء التعديل" } else { "تعديل" }}
-            </span>
-        </button>
     }
 }
 
@@ -128,34 +95,23 @@ fn SectionTeaser(
     let folded = RwSignal::new(false);
     let offset = RwSignal::new(0usize);
 
-    let slug_for_items = section.slug.clone();
-    let slug_for_count = section.slug.clone();
+    let slug = section.slug.clone();
+    let slug_for_fetch = slug.clone();
 
     Effect::new(move |_| {
         let _ = search_query.get();
         offset.set(0);
     });
 
-    let items = Resource::new(
-        move || {
-            (
-                folded.get(),
-                slug_for_items.clone(),
-                offset.get(),
-                search_query.get(),
-            )
+    let (items, count) = collections_paginated(
+        {
+            let slug_for_fetch = slug_for_fetch.clone();
+            move || slug_for_fetch.clone()
         },
-        move |(is_folded, s, off, q)| async move {
-            if is_folded {
-                Ok(Vec::new())
-            } else {
-                fetch_collections(s, off, MEDIA_LIST_SIZE, q).await
-            }
-        },
-    );
-    let count = Resource::new(
-        move || (slug_for_count.clone(), search_query.get()),
-        |(s, q)| fetch_collections_count(s, q),
+        offset,
+        search_query,
+        move || folded.get(),
+        MEDIA_LIST_SIZE,
     );
 
     let order = move || if folded.get() { "1" } else { "0" };
@@ -181,11 +137,7 @@ fn SectionTeaser(
         <div style:order=order>
             <hr class="border-t border-white/5 my-10 md:my-12" />
             <section class="bg-white/5 rounded-2xl p-4 md:p-6">
-                <ResourceView
-                    resource=count
-                    view_fn=SectionHeader
-                    adapter=header_adapter
-                />
+                <ResourceView resource=count view_fn=SectionHeader adapter=header_adapter/>
                 <Show when=move || !folded.get()>
                     <ResourceView
                         resource=items
@@ -223,13 +175,8 @@ fn SectionHeader(
     let rename = Action::new_local(|(id, t): &(u64, String)| patch_section_title(*id, t.clone()));
     let delete_action = Action::new_local(|id: &u64| delete_section(*id));
 
-    Effect::new(move |_| {
-        if matches!(rename.value().get(), Some(Ok(_)))
-            || matches!(delete_action.value().get(), Some(Ok(_)))
-        {
-            sections_resource.refetch();
-        }
-    });
+    refetch_on_success(rename, sections_resource);
+    refetch_on_success(delete_action, sections_resource);
 
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
@@ -341,11 +288,12 @@ fn NewSectionForm(
         create_section(t.clone(), k.clone(), *n)
     });
 
+    refetch_on_success(create, sections_resource);
+
     Effect::new(move |_| match create.value().get() {
         Some(Ok(_)) => {
             title.set(String::new());
             error.set(None);
-            sections_resource.refetch();
         }
         Some(Err(e)) => error.set(Some(e.to_string())),
         None => {}

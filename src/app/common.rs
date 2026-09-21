@@ -1,6 +1,9 @@
+use crate::app::collections::{fetch_collections, fetch_collections_count};
 use crate::app::icons::EmptyStateIcon;
 use crate::app::model::Collection;
 use leptos::prelude::*;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 #[component]
 pub fn CardsLoading() -> impl IntoView {
@@ -70,8 +73,6 @@ pub fn CollectionGrid(collections: Vec<Collection>) -> impl IntoView {
     }
 }
 
-/// Empty state used everywhere a collection grid would go, so the "0" prompt
-/// looks consistent.
 #[component]
 pub fn EmptyState(#[prop(into)] label: String) -> impl IntoView {
     view! {
@@ -80,4 +81,50 @@ pub fn EmptyState(#[prop(into)] label: String) -> impl IntoView {
             <span class="text-white/40 text-sm">{label}</span>
         </div>
     }
+}
+
+pub fn refetch_on_success<V, A, R>(
+    action: Action<A, Result<V, ServerFnError>>,
+    resource: Resource<R>,
+) where
+    A: Send + Sync + 'static + Clone,
+    V: Send + Sync + 'static + Clone,
+    R: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
+    Effect::new(move |_| {
+        if action.value().get().is_some_and(|r| r.is_ok()) {
+            resource.refetch();
+        }
+    });
+}
+
+pub type CollectionPage = Resource<Result<Vec<Collection>, ServerFnError>>;
+pub type CollectionCount = Resource<Result<usize, ServerFnError>>;
+
+pub fn collections_paginated(
+    slug: impl Fn() -> String + Clone + Send + Sync + 'static,
+    offset: RwSignal<usize>,
+    search: RwSignal<Option<String>>,
+    skip: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    page_size: usize,
+) -> (CollectionPage, CollectionCount) {
+    let slug_items = slug.clone();
+    let items = Resource::new(
+        move || (skip(), slug_items(), offset.get(), search.get()),
+        move |(skip_now, s, off, q)| async move {
+            if skip_now {
+                Ok(Vec::new())
+            } else {
+                fetch_collections(s, off, page_size, q).await
+            }
+        },
+    );
+
+    let slug_count = slug.clone();
+    let count = Resource::new(
+        move || (slug_count(), search.get()),
+        |(s, q)| fetch_collections_count(s, q),
+    );
+
+    (items, count)
 }

@@ -9,6 +9,7 @@ use crate::app::{
         delete_item, fetch_collection_detail, fetch_items, patch_collection_field,
         patch_item_title, upload_collection_poster,
     },
+    common::refetch_on_success,
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
@@ -109,13 +110,8 @@ fn CollectionContent(
     let rename_item = Action::new_local(|(id, t): &(u64, String)| patch_item_title(*id, t.clone()));
     let delete_item_action = Action::new_local(|id: &u64| delete_item(*id));
 
-    Effect::new(move |_| {
-        if matches!(rename_item.value().get(), Some(Ok(_)))
-            || matches!(delete_item_action.value().get(), Some(Ok(_)))
-        {
-            items.refetch();
-        }
-    });
+    refetch_on_success(rename_item, items);
+    refetch_on_success(delete_item_action, items);
 
     let upload = UploadJob::new();
     Effect::new(move |_| {

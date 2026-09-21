@@ -1,6 +1,6 @@
 use crate::app::{
-    icons::{DownloadIcon, EditIcon},
-    inline_edit::provide_edit_mode,
+    icons::DownloadIcon,
+    inline_edit::{EditModeToggle, provide_edit_mode},
 };
 use leptos::{either::Either, prelude::*};
 
@@ -33,18 +33,6 @@ pub fn DetailShell(
 ) -> impl IntoView {
     let edit_on = provide_edit_mode();
 
-    let toggle_class = move || {
-        format!(
-            "absolute top-4 end-4 md:top-6 md:end-6 z-20 inline-flex items-center gap-2 \
-             px-3 py-2 rounded-xl backdrop-blur-md transition text-sm border {}",
-            if edit_on.get() {
-                "bg-cyan-500/25 border-cyan-400/50 text-white"
-            } else {
-                "bg-white/10 border-white/10 text-gray-300 hover:bg-white/20 hover:text-white"
-            }
-        )
-    };
-
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
             <div class="absolute inset-0">
@@ -55,18 +43,10 @@ pub fn DetailShell(
             </div>
             <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
                 <Show when=move || editable>
-                    <button
-                        type="button"
-                        class=toggle_class
-                        on:click=move |_| edit_on.update(|x| *x = !*x)
-                        aria-pressed=move || edit_on.get().to_string()
-                        aria-label="تبديل وضع التعديل"
-                    >
-                        <EditIcon/>
-                        <span class="hidden sm:inline">
-                            {move || if edit_on.get() { "إنهاء التعديل" } else { "تعديل" }}
-                        </span>
-                    </button>
+                    <EditModeToggle
+                        edit_on=edit_on
+                        wrap_class="absolute top-4 end-4 md:top-6 md:end-6 z-20".to_string()
+                    />
                 </Show>
                 {children()}
             </div>
