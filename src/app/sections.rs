@@ -1,6 +1,9 @@
 use crate::app::model::Section;
 use leptos::prelude::*;
 
+#[cfg(feature = "ssr")]
+use crate::app::server::SqlErr;
+
 #[server]
 pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
     use crate::app::model::MediaKind;
@@ -23,9 +26,8 @@ pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
     "SELECT s.id, s.slug, s.title, s.media_kind, s.nested, s.position, \
                 (SELECT COUNT(*) FROM collections c WHERE c.section_id = s.id) AS collections_count \
          FROM sections s ORDER BY s.position, s.id",
-)
-.fetch_all(&state.db).await
-.map_err(|e| ServerFnError::new(e.to_string()))?;
+    )
+    .fetch_all(&state.db).await.srv()?;
 
     Ok(rows
         .into_iter()
@@ -61,11 +63,10 @@ pub async fn fetch_section_by_slug(slug: String) -> Result<Section, ServerFnErro
     "SELECT s.id, s.slug, s.title, s.media_kind, s.nested, s.position, \
                 (SELECT COUNT(*) FROM collections c WHERE c.section_id = s.id) AS collections_count \
          FROM sections s WHERE s.slug = ?",
-)
-.bind(&slug)
-.fetch_optional(&state.db).await
-.map_err(|e| ServerFnError::new(e.to_string()))?
-.ok_or_else(|| ServerFnError::new("section not found"))?;
+    )
+    .bind(&slug)
+    .fetch_optional(&state.db).await.srv()?
+    .ok_or_else(|| ServerFnError::new("section not found"))?;
 
     Ok(Section {
         id: r.id as u64,
@@ -140,7 +141,7 @@ pub async fn create_section(
         .await;
 
         match res {
-            Ok(id) => return Ok(id as u64),
+            Ok(id) => return Ok(id),
             Err(sqlx::Error::Database(e)) if e.is_unique_violation() && attempt < 3 => {
                 continue;
             }
@@ -169,7 +170,7 @@ pub async fn update_section(
         .bind(id as i64)
         .execute(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
     Ok(())
 }
 
@@ -181,6 +182,6 @@ pub async fn delete_section(id: u64) -> Result<(), ServerFnError> {
         .bind(id as i64)
         .execute(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
     Ok(())
 }

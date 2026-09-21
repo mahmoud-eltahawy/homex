@@ -3,7 +3,7 @@ use leptos_router::{LazyRoute, lazy_route};
 
 use crate::app::{
     collections::{create_empty_collection, fetch_collections, fetch_collections_count},
-    common::CardsLoading,
+    common::{CardsLoading, CollectionGrid, CollectionGridProps},
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
@@ -97,30 +97,13 @@ fn SectionListingBody(
                 <CreateNewButton section_slug=slug label=new_label/>
             </div>
             <SearchBar search_query offset_reset=move || offset.set(0)/>
-            <ResourceView resource=collections view_fn=CollectionGrid
-                adapter=grid_adapter fallback=CardsLoading/>
+            <ResourceView
+                resource=collections
+                view_fn=CollectionGrid
+                adapter=grid_adapter
+                fallback=CardsLoading
+            />
             <ResourceView resource=count view_fn=PaginationControls adapter=pag_adapter/>
-        </div>
-    }
-}
-
-#[component]
-fn CollectionGrid(collections: Vec<Collection>) -> impl IntoView {
-    view! {
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-            <For each=move || collections.clone() key=|c| c.id let:c>
-                <a href=format!("/s/{}/{}", c.section_slug, c.id)
-                    class="group rounded-2xl overflow-hidden bg-[#1a1a24]/80 border border-white/5 hover:border-cyan-400/40 transition">
-                    <div class="aspect-[2/3] bg-white/5 overflow-hidden">
-                        {c.poster.clone().map(|p| view! {
-                            <img src=p class="w-full h-full object-cover group-hover:scale-105 transition"/>
-                        })}
-                    </div>
-                    <div class="p-3">
-                        <div class="text-sm text-white truncate">{c.title.clone()}</div>
-                    </div>
-                </a>
-            </For>
         </div>
     }
 }

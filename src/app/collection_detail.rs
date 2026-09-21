@@ -161,12 +161,7 @@ fn CollectionContent(
         MediaKind::Video => Either::Left(MovieIcon()),
         MediaKind::Audio => Either::Right(AudioIcon()),
     };
-    let badge_label: &'static str = match (section.media_kind, section.nested) {
-        (MediaKind::Video, false) => "فيديو",
-        (MediaKind::Video, true) => "مسلسل",
-        (MediaKind::Audio, false) => "مقطع صوتي",
-        (MediaKind::Audio, true) => "مجموعة صوتية",
-    };
+    let badge_label = section.badge_label();
 
     let placeholder = ViewFn::from(move || {
         if is_audio {

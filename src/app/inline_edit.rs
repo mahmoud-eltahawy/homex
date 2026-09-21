@@ -252,9 +252,6 @@ pub fn EditableTextArea(
 }
 
 // ─── Poster (upload/replace inline) ─────────────────────────────────────────
-
-// ─── Poster (upload/replace inline) ─────────────────────────────────────────
-
 #[component]
 pub fn EditablePoster(
     src: Signal<Option<String>>,
@@ -262,39 +259,22 @@ pub fn EditablePoster(
     on_file: Callback<web_sys::File>,
     #[prop(into)] input_id: String,
 ) -> impl IntoView {
-    let on_change = move |ev: web_sys::Event| {
-        let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-        else {
-            return;
-        };
-        let Some(files) = input.files() else { return };
-        let Some(file) = files.get(0) else { return };
-        input.set_value("");
-        on_file.run(file);
-    };
-
     let edit_mode = use_edit_mode();
 
     let edit_view = {
         let input_id_for_input = input_id.clone();
-        let input_id_for_label = input_id;
         move || {
             edit_mode.get().then_some(view! {
-                <input
-                    type="file"
+                <FilePicker
                     id=input_id_for_input.clone()
-                    class="hidden"
                     accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                    on:change=on_change
-                />
-                <label
-                    for=input_id_for_label.clone()
                     class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md hover:bg-black/80 text-white text-xs font-medium cursor-pointer opacity-80 group-hover:opacity-100 transition"
+                    on_files=Callback::new(move |files : Vec<web_sys::File>| {
+                        if let Some(f) = files.into_iter().next() { on_file.run(f); }
+                    })
                 >
                     <UploadIcon/> "تغيير الصورة"
-                </label>
+                </FilePicker>
             })
         }
     };
@@ -313,5 +293,47 @@ pub fn EditablePoster(
             }}
             {edit_view}
         </div>
+    }
+}
+
+#[component]
+pub fn FilePicker(
+    #[prop(into)] id: String,
+    #[prop(into)] accept: String,
+    #[prop(default = false)] multiple: bool,
+    #[prop(into)] class: String,
+    on_files: Callback<Vec<web_sys::File>>,
+    children: Children,
+) -> impl IntoView {
+    let on_change = move |ev: web_sys::Event| {
+        let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+        else {
+            return;
+        };
+        let Some(list) = input.files() else { return };
+        let mut out = Vec::with_capacity(list.length() as usize);
+        for i in 0..list.length() {
+            if let Some(f) = list.get(i) {
+                out.push(f.unchecked_into::<web_sys::File>());
+            }
+        }
+        input.set_value("");
+        on_files.run(out);
+    };
+
+    view! {
+        <input
+            type="file"
+            id=id.clone()
+            class="hidden"
+            multiple=multiple
+            accept=accept
+            on:change=on_change
+        />
+        <label for=id class=class>
+            {children()}
+        </label>
     }
 }

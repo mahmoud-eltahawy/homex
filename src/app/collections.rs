@@ -1,6 +1,9 @@
 use crate::app::model::{Collection, Item};
 use leptos::prelude::*;
 
+#[cfg(feature = "ssr")]
+use crate::app::server::SqlErr;
+
 #[server]
 pub async fn fetch_collections(
     section_slug: String,
@@ -9,6 +12,7 @@ pub async fn fetch_collections(
     search_query: Option<String>,
 ) -> Result<Vec<Collection>, ServerFnError> {
     use crate::app::server::AppState;
+
     let state: AppState = expect_context();
 
     #[derive(sqlx::FromRow)]
@@ -36,7 +40,7 @@ pub async fn fetch_collections(
     .bind(offset as i64)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .srv()?;
 
     Ok(rows
         .into_iter()
@@ -58,6 +62,7 @@ pub async fn fetch_collections_count(
     search_query: Option<String>,
 ) -> Result<usize, ServerFnError> {
     use crate::app::server::AppState;
+
     let state: AppState = expect_context();
     let n: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM collections c JOIN sections s ON s.id = c.section_id \
@@ -67,7 +72,7 @@ pub async fn fetch_collections_count(
     .bind(&search_query)
     .fetch_one(&state.db)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .srv()?;
     Ok(n as usize)
 }
 
@@ -100,7 +105,7 @@ pub async fn fetch_collection_detail(
     .bind(collection_id as i64)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?
+    .srv()?
     .ok_or_else(|| ServerFnError::new("collection not found"))?;
 
     Ok(Collection {
@@ -144,7 +149,7 @@ pub async fn fetch_items(collection_id: u64) -> Result<Vec<Item>, ServerFnError>
     .bind(collection_id as i64)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .srv()?;
 
     Ok(rows
         .into_iter()
@@ -174,7 +179,7 @@ pub async fn create_empty_collection(section_slug: String) -> Result<u64, Server
         .bind(&section_slug)
         .fetch_one(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
 
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO collections (section_id, title, position) \
@@ -186,7 +191,7 @@ pub async fn create_empty_collection(section_slug: String) -> Result<u64, Server
     .bind(section_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .srv()?;
     Ok(id as u64)
 }
 
@@ -209,7 +214,7 @@ pub async fn patch_collection_field(
         .bind(id as i64)
         .execute(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
     Ok(())
 }
 
@@ -227,7 +232,7 @@ pub async fn patch_item_title(id: u64, title: String) -> Result<(), ServerFnErro
         .bind(id as i64)
         .execute(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
     Ok(())
 }
 
@@ -239,7 +244,7 @@ pub async fn delete_collection(id: u64) -> Result<(), ServerFnError> {
         .bind(id as i64)
         .execute(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
     Ok(())
 }
 
@@ -251,7 +256,7 @@ pub async fn delete_item(id: u64) -> Result<(), ServerFnError> {
         .bind(id as i64)
         .execute(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
     Ok(())
 }
 
@@ -301,6 +306,6 @@ pub async fn upload_collection_poster(
         .bind(id)
         .execute(&state.db)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+        .srv()?;
     Ok(url)
 }

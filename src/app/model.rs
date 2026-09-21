@@ -17,10 +17,16 @@ pub enum MediaKind {
 
 impl MediaKind {
     pub fn as_str(self) -> &'static str {
-        match self { Self::Video => "video", Self::Audio => "audio" }
+        match self {
+            Self::Video => "video",
+            Self::Audio => "audio",
+        }
     }
     pub fn label(self) -> &'static str {
-        match self { Self::Video => "فيديو", Self::Audio => "صوت" }
+        match self {
+            Self::Video => "فيديو",
+            Self::Audio => "صوت",
+        }
     }
 }
 
@@ -48,17 +54,24 @@ pub struct Section {
 }
 
 impl Section {
-    pub fn href(&self) -> String { format!("/s/{}", self.slug) }
-    pub fn detail_href(&self, collection_id: u64) -> String {
-        format!("/s/{}/{}", self.slug, collection_id)
+    pub fn href(&self) -> String {
+        format!("/s/{}", self.slug)
     }
-    /// label for the "create new" button inside the section page
     pub fn new_label(&self) -> &'static str {
         match (self.media_kind, self.nested) {
             (MediaKind::Video, false) => "إضافة فيديو جديد",
-            (MediaKind::Video, true)  => "إضافة مسلسل جديد",
+            (MediaKind::Video, true) => "إضافة مسلسل جديد",
             (MediaKind::Audio, false) => "إضافة مقطع صوتي جديد",
-            (MediaKind::Audio, true)  => "إضافة مجموعة صوتية جديدة",
+            (MediaKind::Audio, true) => "إضافة مجموعة صوتية جديدة",
+        }
+    }
+
+    pub fn badge_label(&self) -> &'static str {
+        match (self.media_kind, self.nested) {
+            (MediaKind::Video, false) => "فيديو",
+            (MediaKind::Video, true) => "مسلسل",
+            (MediaKind::Audio, false) => "مقطع صوتي",
+            (MediaKind::Audio, true) => "مجموعة صوتية",
         }
     }
 }
@@ -72,6 +85,12 @@ pub struct Collection {
     pub poster: Option<String>,
     pub description: Option<String>,
     pub items_count: u32,
+}
+
+impl Collection {
+    pub fn href(&self) -> String {
+        format!("/s/{}/{}", self.section_slug, self.id)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -88,7 +107,9 @@ pub struct Item {
 
 impl Item {
     pub fn display_title(&self) -> String {
-        self.title.clone().unwrap_or_else(|| format!("المقطع {}", self.number + 1))
+        self.title
+            .clone()
+            .unwrap_or_else(|| format!("المقطع {}", self.number + 1))
     }
     pub fn href(&self, section_slug: &str) -> String {
         format!(
