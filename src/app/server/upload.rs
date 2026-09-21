@@ -28,16 +28,14 @@ pub fn schedule_job_eviction(jobs: Jobs, job_id: String) {
     });
 }
 
-fn non_empty(s: &str) -> Option<&str> {
-    if s.is_empty() { None } else { Some(s) }
-}
-
 pub async fn process_upload(
     payload: UploadPayload,
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
 ) -> Result<String, ServerFnError> {
+    let collection_id = payload.collection_id;
+
     job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
     let staged = files::stage_files(&payload, state, kind, job_id).await?;
 
@@ -49,30 +47,6 @@ pub async fn process_upload(
         .begin()
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    let collection_id: i64 = match payload.collection_id {
-        Some(id) => id,
-        None => {
-            let section_id: i64 = sqlx::query_scalar("SELECT id FROM sections WHERE slug=?")
-                .bind(&payload.section_slug)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| ServerFnError::new(e.to_string()))?;
-            sqlx::query_scalar(
-                "INSERT INTO collections (section_id, title, description, position) \
-                 VALUES (?, ?, ?, (SELECT COALESCE(MAX(position)+1,0) FROM collections WHERE section_id=?)) \
-                 RETURNING id",
-            )
-            .bind(section_id)
-            .bind(&payload.title)
-            .bind(non_empty(&payload.description))
-            .bind(section_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?
-        }
-    };
-
     persist::insert_items(&mut tx, collection_id, payload.season_number, &file_rows).await?;
     persist::attach_poster(
         &mut tx,
@@ -81,7 +55,6 @@ pub async fn process_upload(
         &state.config.storage.data_dir,
     )
     .await?;
-
     tx.commit()
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;

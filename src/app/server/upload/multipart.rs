@@ -10,7 +10,7 @@ pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload
     let mut title = String::new();
     let mut section_slug = String::new();
     let mut description = String::new();
-    let mut collection_id: Option<i64> = None;
+    let mut collection_id: i64 = 0;
     let mut season_number: Option<i64> = None;
 
     let mut files: BTreeMap<usize, (String, Vec<u8>)> = BTreeMap::new();
@@ -43,7 +43,7 @@ pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload
                 continue;
             }
             "collection_id" => {
-                collection_id = field.text().await?.parse().ok();
+                collection_id = field.text().await?.parse()?;
                 continue;
             }
             "season_number" => {

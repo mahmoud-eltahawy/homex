@@ -1,6 +1,6 @@
 pub struct UploadPayload {
     pub section_slug: String,
-    pub collection_id: Option<i64>, // None → create new collection
+    pub collection_id: i64,
     pub title: String,
     pub description: String,
     pub season_number: Option<i64>,

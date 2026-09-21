@@ -271,8 +271,6 @@ fn AppendItems(
         let fd = web_sys::FormData::new().unwrap();
         let _ = fd.append_with_str("section_slug", &slug_for_click);
         let _ = fd.append_with_str("collection_id", &collection_id.to_string());
-        let _ = fd.append_with_str("title", "");
-        let _ = fd.append_with_str("description", "");
 
         for i in 0..files.length() {
             if let Some(f) = files.get(i) {
