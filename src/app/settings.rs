@@ -14,11 +14,9 @@ impl LazyRoute for SettingsPage {
     fn view(_this: Self) -> AnyView {
         let sections = Resource::new(|| (), |_| fetch_sections());
 
-        let create = Action::new_local(
-            |(slug, title, kind, nested): &(String, String, String, bool)| {
-                create_section(slug.clone(), title.clone(), kind.clone(), *nested)
-            },
-        );
+        let create = Action::new_local(|(title, kind, nested): &(String, String, bool)| {
+            create_section(title.clone(), kind.clone(), *nested)
+        });
         let delete_action = Action::new_local(|id: &u64| delete_section(*id));
 
         Effect::new(move |_| {
@@ -32,22 +30,19 @@ impl LazyRoute for SettingsPage {
             }
         });
 
-        let slug = RwSignal::new(String::new());
         let title = RwSignal::new(String::new());
         let kind = RwSignal::new("video".to_string());
         let nested = RwSignal::new(false);
 
         let submit = move |ev: web_sys::SubmitEvent| {
             ev.prevent_default();
-            let s = slug.get_untracked();
             let t = title.get_untracked();
             let k = kind.get_untracked();
             let n = nested.get_untracked();
-            if s.is_empty() || t.is_empty() {
+            if t.is_empty() {
                 return;
             }
-            create.dispatch((s, t, k, n));
-            slug.set(String::new());
+            create.dispatch((t, k, n));
             title.set(String::new());
         };
 
@@ -58,21 +53,20 @@ impl LazyRoute for SettingsPage {
 
                 <form on:submit=submit
                     class="bg-white/5 border border-white/10 rounded-2xl p-4 mb-8 flex flex-wrap gap-3 items-end">
-                    <label class="flex flex-col text-sm">
-                        <span class="mb-1">"المعرّف (slug)"</span>
-                        <input type="text" prop:value=move || slug.get()
-                            on:input=move |e| slug.set(event_target_value(&e))
-                            class="bg-white/10 rounded-lg px-3 py-1.5 text-white min-w-32"/>
-                    </label>
-                    <label class="flex flex-col text-sm">
-                        <span class="mb-1">"العنوان"</span>
-                        <input type="text" prop:value=move || title.get()
+                    <label class="flex flex-col text-sm flex-1 min-w-48">
+                        <span class="mb-1">"الاسم"</span>
+                        <input
+                            type="text"
+                            prop:value=move || title.get()
                             on:input=move |e| title.set(event_target_value(&e))
-                            class="bg-white/10 rounded-lg px-3 py-1.5 text-white min-w-32"/>
+                            placeholder="أفلام، مسلسلات، ألبومات..."
+                            class="bg-white/10 rounded-lg px-3 py-1.5 text-white w-full"
+                        />
                     </label>
                     <label class="flex flex-col text-sm">
                         <span class="mb-1">"النوع"</span>
-                        <select prop:value=move || kind.get()
+                        <select
+                            prop:value=move || kind.get()
                             on:change=move |e| kind.set(event_target_value(&e))
                             class="bg-white/10 rounded-lg px-3 py-1.5 text-white">
                             <option value="video">"فيديو"</option>
@@ -80,11 +74,15 @@ impl LazyRoute for SettingsPage {
                         </select>
                     </label>
                     <label class="flex items-center gap-2 text-sm pb-2">
-                        <input type="checkbox" prop:checked=move || nested.get()
-                            on:change=move |e| nested.set(event_target_checked(&e))/>
+                        <input
+                            type="checkbox"
+                            prop:checked=move || nested.get()
+                            on:change=move |e| nested.set(event_target_checked(&e))
+                        />
                         <span>"مجموعات"</span>
                     </label>
-                    <button type="submit"
+                    <button
+                        type="submit"
                         class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold text-sm">
                         "إضافة قسم"
                     </button>
@@ -102,23 +100,23 @@ impl LazyRoute for SettingsPage {
                             <ul class="space-y-2">
                                 <For each=move || list.clone() key=|s| s.id let:section>
                                     <li class="flex items-center justify-between bg-white/5 rounded-xl px-4 py-3">
-                                        <div>
-                                            <div class="font-bold">{section.title.clone()}</div>
+                                        <div class="min-w-0">
+                                            <div class="font-bold truncate">{section.title.clone()}</div>
                                             <div class="text-xs text-gray-400">
                                                 {format!(
-                                                    "/s/{} — {} — {}",
+                                                    "{} · {} · {}",
+                                                    section.media_kind.label(),
+                                                    if section.nested { "مجموعات" } else { "مفرد" },
                                                     section.slug,
-                                                    section.media_kind.as_str(),
-                                                    if section.nested { "مجموعات" } else { "مفرد" }
                                                 )}
                                             </div>
                                         </div>
                                         <button
                                             on:click={
                                                 let id = section.id;
-                                                move |_| {delete_action.dispatch(id);}
+                                                move |_| { delete_action.dispatch(id); }
                                             }
-                                            class="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm">
+                                            class="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm shrink-0 ms-3">
                                             "حذف"
                                         </button>
                                     </li>
