@@ -288,10 +288,8 @@ pub fn EditablePoster(
 }
 
 #[component]
-pub fn EditModeToggle(
-    edit_on: RwSignal<bool>,
-    #[prop(optional, into)] wrap_class: Option<String>,
-) -> impl IntoView {
+pub fn EditModeToggle(#[prop(optional, into)] wrap_class: Option<String>) -> impl IntoView {
+    let edit_on = use_edit_mode();
     let class = move || {
         format!(
             "{} inline-flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-md \

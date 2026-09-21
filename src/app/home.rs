@@ -5,7 +5,7 @@ use leptos_router::{LazyRoute, lazy_route};
 use crate::app::{
     common::{CardsLoading, CollectionGrid, EmptyState, collections_paginated, refetch_on_success},
     icons::{DeleteIcon, ViewAllIcon, icon_for},
-    inline_edit::{EditModeToggle, EditableText, use_edit_mode},
+    inline_edit::{EditableText, use_edit_mode},
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
@@ -32,7 +32,6 @@ impl LazyRoute for HomePage {
     fn view(this: Self) -> AnyView {
         let search_query = this.search_query;
         let sections = this.sections;
-        let edit_on = use_edit_mode();
 
         let adapter = move |value: Vec<Section>| AllSectionsProps {
             sections: value,
@@ -43,9 +42,6 @@ impl LazyRoute for HomePage {
         view! {
             <div class="min-h-screen bg-[#0c0b1a] text-white">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-6 flex flex-col">
-                    <div class="flex justify-end mb-2">
-                        <EditModeToggle edit_on=edit_on/>
-                    </div>
                     <SearchBar search_query=search_query offset_reset=|| {} />
                     <ResourceView resource=sections view_fn=AllSections adapter=adapter/>
                 </div>

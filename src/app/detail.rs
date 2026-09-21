@@ -1,7 +1,4 @@
-use crate::app::{
-    icons::DownloadIcon,
-    inline_edit::{EditModeToggle, use_edit_mode},
-};
+use crate::app::icons::DownloadIcon;
 use leptos::{either::Either, prelude::*};
 
 #[component]
@@ -26,13 +23,7 @@ pub fn Poster(
 }
 
 #[component]
-pub fn DetailShell(
-    #[prop(into)] poster: Option<String>,
-    #[prop(default = true)] editable: bool,
-    children: Children,
-) -> impl IntoView {
-    let edit_on = use_edit_mode();
-
+pub fn DetailShell(#[prop(into)] poster: Option<String>, children: Children) -> impl IntoView {
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
             <div class="absolute inset-0">
@@ -42,12 +33,6 @@ pub fn DetailShell(
                 <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
             </div>
             <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
-                <Show when=move || editable>
-                    <EditModeToggle
-                        edit_on=edit_on
-                        wrap_class="absolute top-4 end-4 md:top-6 md:end-6 z-20".to_string()
-                    />
-                </Show>
                 {children()}
             </div>
         </div>

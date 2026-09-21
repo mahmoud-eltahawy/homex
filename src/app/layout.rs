@@ -1,5 +1,6 @@
 use crate::app::{
     icons::{AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, XIcon},
+    inline_edit::{EditMode, EditModeToggle},
     model::{MediaKind, Section},
     sections::fetch_sections,
 };
@@ -30,6 +31,9 @@ fn section_icon(kind: MediaKind) -> Either<impl IntoView, impl IntoView> {
 #[component]
 fn Navbar() -> impl IntoView {
     let mobile_open = RwSignal::new(false);
+    let edit_on = RwSignal::new(false);
+    provide_context(EditMode(edit_on));
+
     view! {
         <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -37,6 +41,7 @@ fn Navbar() -> impl IntoView {
                     <Brand/>
                     <DesktopNavLinks/>
                     <MobileMenuButton open=mobile_open/>
+                    <EditModeToggle/>
                 </div>
             </div>
             <MobileMenu open=mobile_open/>
