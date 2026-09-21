@@ -83,12 +83,11 @@ fn CollectionContent(
     let section_slug = section.slug.clone();
     let is_audio = matches!(section.media_kind, MediaKind::Audio);
 
-    // ── Reactive local state for the hero ────────────────────────────────
     let title = RwSignal::new(collection.title.clone());
     let description = RwSignal::new(collection.description.clone().unwrap_or_default());
     let poster = RwSignal::new(collection.poster.clone());
 
-    // ── Actions ──────────────────────────────────────────────────────────
+    // ── Actions ───────────────────────────────────────────────────────────
     let patch = Action::new_local(|(id, field, value): &(u64, String, Option<String>)| {
         patch_collection_field(*id, field.clone(), value.clone())
     });
@@ -105,7 +104,7 @@ fn CollectionContent(
         }
     });
 
-    // ── Upload job (append more files) ───────────────────────────────────
+    // ── Append-more-files upload job ──────────────────────────────────────
     let upload = UploadJob::new();
     Effect::new(move |_| {
         if upload.done_tick.get() > 0 {
@@ -113,7 +112,7 @@ fn CollectionContent(
         }
     });
 
-    // ── Commit callbacks for the hero ────────────────────────────────────
+    // ── Commit callbacks ──────────────────────────────────────────────────
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
         patch.dispatch((collection_id, "title".into(), Some(v)));
@@ -138,7 +137,6 @@ fn CollectionContent(
         }
     });
 
-    // ── Playlist callbacks ───────────────────────────────────────────────
     let on_rename = Callback::new(move |(id, t): (u64, String)| {
         rename_item.dispatch((id, t));
     });
@@ -146,7 +144,7 @@ fn CollectionContent(
         delete_item_action.dispatch(id);
     });
 
-    // ── Derived view pieces ──────────────────────────────────────────────
+    // ── Derived view values ───────────────────────────────────────────────
     let poster_for_shell = poster.get_untracked();
     let icon = match section.media_kind {
         MediaKind::Video => Either::Left(MovieIcon()),
@@ -159,7 +157,7 @@ fn CollectionContent(
         (MediaKind::Audio, true) => "مجموعة صوتية",
     };
 
-    // ViewFn — a re-runnable closure that rebuilds the placeholder on demand.
+    // ViewFn — re-runnable placeholder that picks the right SVG.
     let placeholder = ViewFn::from(move || {
         if is_audio {
             view! { <MusicPosterSvg/> }.into_any()
@@ -170,13 +168,13 @@ fn CollectionContent(
 
     let playlist_adapter = {
         let section_slug = section_slug.clone();
-        let title = title.get_untracked();
-        let poster = poster.get_untracked();
+        let title_snapshot = title.get_untracked();
+        let poster_snapshot = poster.get_untracked();
         move |list: Vec<Item>| PlaylistProps {
             items: list,
             audio: is_audio,
-            artwork: poster.clone(),
-            playlist_title: title.clone(),
+            artwork: poster_snapshot.clone(),
+            playlist_title: title_snapshot.clone(),
             section_slug: section_slug.clone(),
             on_rename,
             on_delete,
@@ -218,7 +216,11 @@ fn CollectionContent(
                         class="text-gray-300 leading-relaxed text-base sm:text-lg"
                     />
                 </div>
-                <AppendItems upload=upload section_slug=section_slug.clone() collection_id=collection_id/>
+                <AppendItems
+                    upload=upload
+                    section_slug=section_slug.clone()
+                    collection_id=collection_id
+                />
             </DetailHero>
 
             <div class="mt-10">
@@ -232,7 +234,7 @@ fn CollectionContent(
     }
 }
 
-// ─── Append-more-files widget ────────────────────────────────────────────
+// ─── Append-more-files widget (edit-mode only) ───────────────────────────
 
 #[component]
 fn AppendItems(
@@ -247,7 +249,7 @@ fn AppendItems(
     let upload_status = upload.status;
     let upload_error = upload.error();
 
-    // Callback is Copy → the child closure of <Show> stays `Fn`.
+    // Callback is Copy — keeps the Show child closure as `Fn`.
     let slug_for_click = section_slug.clone();
     let on_files = Callback::new(move |ev: web_sys::Event| {
         let Some(input) = ev
@@ -319,7 +321,7 @@ fn AppendItems(
     }
 }
 
-// ─── Playlist renderer ───────────────────────────────────────────────────
+// ─── Playlist (with rename + delete wired to edit mode) ──────────────────
 
 #[component]
 fn Playlist(
@@ -334,7 +336,7 @@ fn Playlist(
     if items.is_empty() {
         return Either::Left(view! {
             <div class="py-12 text-center text-gray-500 text-sm">
-                "لا توجد ملفات في هذه المجموعة بعد. اضغط على «تعديل» ثم «إضافة ملفات»."
+                "لا توجد ملفات بعد. اضغط «تعديل» ثم «إضافة ملفات»."
             </div>
         });
     }
@@ -342,8 +344,7 @@ fn Playlist(
     let media_items: Vec<MediaItem> = items
         .iter()
         .map(|it| {
-            let title = it.display_title();
-            let mut mi = MediaItem::new(it.id, title, it.file.path.clone());
+            let mut mi = MediaItem::new(it.id, it.display_title(), it.file.path.clone());
             if let Some(season) = it.season_number {
                 mi = mi.with_subtitle(format!("S{season:02}"));
             }
@@ -351,7 +352,8 @@ fn Playlist(
         })
         .collect();
 
-    let _ = section_slug; // reserved for future per-item permalinks
+    // Reserved for future per-item permalinks.
+    let _ = section_slug;
 
     Either::Right(view! {
         <MediaPlayer
