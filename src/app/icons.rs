@@ -1,45 +1,5 @@
 use crate::app::model::MediaKind;
-use leptos::{either::Either, prelude::*};
-
-// ─── Tooltip & Icon Wrappers (unchanged from your polished version) ───────
-
-#[component]
-fn Tooltip(
-    children: Children,
-    #[prop(optional)] text: Option<&'static str>,
-    #[prop(default = TooltipPosition::Bottom)] position: TooltipPosition,
-) -> impl IntoView {
-    let position_class = match position {
-        TooltipPosition::Top => "bottom-full left-1/2 -translate-x-1/2 mb-2",
-        TooltipPosition::Bottom => "top-full left-1/2 -translate-x-1/2 mt-2",
-        TooltipPosition::Left => "right-full top-1/2 -translate-y-1/2 mr-2",
-        TooltipPosition::Right => "left-full top-1/2 -translate-y-1/2 ml-2",
-    };
-
-    view! {
-        <div class="relative inline-flex group">
-            {children()}
-            {text.map(|txt| view! {
-                <span class=format!(
-                    "absolute {} px-2 py-1 rounded-md bg-gray-900 text-white text-xs font-medium \
-                     opacity-0 group-hover:opacity-100 transition-opacity duration-200 \
-                     pointer-events-none whitespace-nowrap border border-white/10 shadow-lg z-50",
-                    position_class
-                )>
-                    {txt}
-                </span>
-            })}
-        </div>
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum TooltipPosition {
-    Top,
-    Bottom,
-    Left,
-    Right,
-}
+use leptos::prelude::*;
 
 #[component]
 fn Icon(
@@ -48,9 +8,8 @@ fn Icon(
     #[prop(into)] label: String,
     #[prop(default = false)] filled: bool,
     #[prop(default = "1.5")] stroke_width: &'static str,
-    #[prop(optional)] tooltip: Option<&'static str>,
 ) -> impl IntoView {
-    let svg = view! {
+    view! {
         <svg
             xmlns="http://www.w3.org/2000/svg"
             class=class
@@ -65,16 +24,6 @@ fn Icon(
         >
             {children()}
         </svg>
-    };
-
-    if let Some(txt) = tooltip {
-        Either::Left(view! {
-            <Tooltip text=txt>
-                {svg}
-            </Tooltip>
-        })
-    } else {
-        Either::Right(svg)
     }
 }
 
@@ -83,7 +32,7 @@ fn Icon(
 #[component]
 pub fn SearchIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Search" tooltip="Search">
+        <Icon class="h-5 w-5" label="Search">
             <circle cx="11" cy="11" r="7" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
             <circle cx="8.5" cy="8.5" r="0.5" fill="currentColor" />
@@ -94,7 +43,7 @@ pub fn SearchIcon() -> impl IntoView {
 #[component]
 pub fn DownloadIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Download" tooltip="Download">
+        <Icon class="h-5 w-5" label="Download" >
             <path d="M12 3v12" />
             <polyline points="7 10 12 15 17 10" />
             <path d="M5 21h14" />
@@ -106,7 +55,7 @@ pub fn DownloadIcon() -> impl IntoView {
 #[component]
 pub fn PlayIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6" label="Play" tooltip="Play">
+        <Icon class="h-6 w-6" label="Play" >
             <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" stroke="none" />
             <polygon points="7 6 17 12 7 18" fill="none" stroke="rgba(255,255,255,0.3)" />
         </Icon>
@@ -116,7 +65,7 @@ pub fn PlayIcon() -> impl IntoView {
 #[component]
 pub fn PauseIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6" label="Pause" tooltip="Pause">
+        <Icon class="h-6 w-6" label="Pause" >
             <rect x="6" y="4" width="4" height="16" rx="1" />
             <rect x="14" y="4" width="4" height="16" rx="1" />
             <line x1="6" y1="12" x2="10" y2="12" stroke="currentColor" opacity="0.5" />
@@ -128,7 +77,7 @@ pub fn PauseIcon() -> impl IntoView {
 #[component]
 pub fn ClockIcon() -> impl IntoView {
     view! {
-        <Icon class="h-4 w-4" label="Clock" tooltip="Clock">
+        <Icon class="h-4 w-4" label="Clock" >
             <circle cx="12" cy="12" r="9" />
             <polyline points="12 7 12 12 15 15" />
             <circle cx="12" cy="12" r="1" fill="currentColor" />
@@ -139,7 +88,7 @@ pub fn ClockIcon() -> impl IntoView {
 #[component]
 pub fn DeleteIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Delete" tooltip="Delete">
+        <Icon class="h-5 w-5" label="Delete" >
             <path d="M3 6h18" />
             <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
             <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -152,7 +101,7 @@ pub fn DeleteIcon() -> impl IntoView {
 #[component]
 pub fn VolumeIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Volume" tooltip="Volume">
+        <Icon class="h-5 w-5" label="Volume" >
             <path d="M11 5L6 9H2v6h4l5 4V5z" />
             <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
             <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
@@ -163,7 +112,7 @@ pub fn VolumeIcon() -> impl IntoView {
 #[component]
 pub fn MuteIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Mute" tooltip="Mute">
+        <Icon class="h-5 w-5" label="Mute" >
             <path d="M11 5L6 9H2v6h4l5 4V5z" />
             <line x1="23" y1="9" x2="17" y2="15" />
             <line x1="17" y1="9" x2="23" y2="15" />
@@ -174,7 +123,7 @@ pub fn MuteIcon() -> impl IntoView {
 #[component]
 pub fn FullscreenIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Full Screen" tooltip="Full Screen">
+        <Icon class="h-5 w-5" label="Full Screen" >
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
             <path d="M12 8v8M8 12h8" opacity="0.5" />
         </Icon>
@@ -184,7 +133,7 @@ pub fn FullscreenIcon() -> impl IntoView {
 #[component]
 pub fn FullscreenExitIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Full Screen Exit" tooltip="Full Screen Exit">
+        <Icon class="h-5 w-5" label="Full Screen Exit" >
             <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
             <path d="M12 8v8M8 12h8" opacity="0.5" />
         </Icon>
@@ -194,7 +143,7 @@ pub fn FullscreenExitIcon() -> impl IntoView {
 #[component]
 pub fn XIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Cancel" tooltip="Cancel">
+        <Icon class="h-5 w-5" label="Cancel" >
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
         </Icon>
@@ -205,7 +154,7 @@ pub fn XIcon() -> impl IntoView {
 pub fn MovieIcon() -> impl IntoView {
     // Clapperboard – universally recognized symbol for film
     view! {
-        <Icon class="w-6 h-6 text-amber-400" label="Movie" tooltip="Movie" filled=true>
+        <Icon class="w-6 h-6 text-amber-400" label="Movie"  filled=true>
             <path d="M4 5h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
             <path d="M3 10h18" stroke="#0c0b1a" stroke-width="2" />
             <path d="M6 5v5M10 5v5M14 5v5M18 5v5" stroke="#0c0b1a" stroke-width="2" />
@@ -218,7 +167,7 @@ pub fn MovieIcon() -> impl IntoView {
 pub fn SeriesIcon() -> impl IntoView {
     // Retro TV – universally recognized for television series
     view! {
-        <Icon class="w-6 h-6 text-purple-400" label="Series" tooltip="Series" filled=true>
+        <Icon class="w-6 h-6 text-purple-400" label="Series"  filled=true>
             <rect x="3" y="4" width="18" height="13" rx="2" />
             <path d="M8 20h8l-1-3H9z" fill="currentColor" />
             <path d="M10 8h4v3h-4z" fill="#0c0b1a" />
@@ -231,7 +180,7 @@ pub fn SeriesIcon() -> impl IntoView {
 pub fn AudioIcon() -> impl IntoView {
     // Headphones – global audio symbol
     view! {
-        <Icon class="w-6 h-6 text-cyan-400" label="Audio" tooltip="Audio" filled=true>
+        <Icon class="w-6 h-6 text-cyan-400" label="Audio"  filled=true>
             <path d="M4 13v-1a8 8 0 1 1 16 0v1" />
             <path d="M4 13a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h2v-5H4zM20 13a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2v-5h2z" />
             <rect x="6" y="14" width="12" height="4" rx="1" fill="#0c0b1a" />
@@ -253,7 +202,7 @@ pub fn EmptyStateIcon() -> impl IntoView {
 #[component]
 pub fn ViewAllIcon() -> impl IntoView {
     view! {
-        <Icon class="w-5 h-5 text-gray-400 group-hover:text-white transition-colors" label="Show All" tooltip="Show All" filled=true>
+        <Icon class="w-5 h-5 text-gray-400 group-hover:text-white transition-colors" label="Show All"  filled=true>
             <rect x="3" y="3" width="7" height="7" rx="1" />
             <rect x="14" y="3" width="7" height="7" rx="1" />
             <rect x="3" y="14" width="7" height="7" rx="1" />
@@ -269,7 +218,7 @@ pub fn ViewAllIcon() -> impl IntoView {
 #[component]
 pub fn PrevPageIcon() -> impl IntoView {
     view! {
-        <Icon class="w-5 h-5" label="Previous" tooltip="Previous">
+        <Icon class="w-5 h-5" label="Previous" >
             <polyline points="9 6 15 12 9 18" />
         </Icon>
     }
@@ -278,7 +227,7 @@ pub fn PrevPageIcon() -> impl IntoView {
 #[component]
 pub fn NextPageIcon() -> impl IntoView {
     view! {
-        <Icon class="w-5 h-5" label="Next" tooltip="Next">
+        <Icon class="w-5 h-5" label="Next" >
             <polyline points="15 6 9 12 15 18" />
         </Icon>
     }
@@ -287,7 +236,7 @@ pub fn NextPageIcon() -> impl IntoView {
 #[component]
 pub fn LoadingIcon() -> impl IntoView {
     view! {
-        <Icon class="h-8 w-8 animate-spin text-cyan-400" label="Loading" tooltip="Loading">
+        <Icon class="h-8 w-8 animate-spin text-cyan-400" label="Loading" >
             <circle cx="12" cy="12" r="10" stroke-dasharray="70 200" stroke-dashoffset="0" />
             <circle cx="12" cy="12" r="2" fill="currentColor" />
         </Icon>
@@ -297,7 +246,7 @@ pub fn LoadingIcon() -> impl IntoView {
 #[component]
 pub fn RetryIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6 text-gray-400 hover:text-white transition-colors" label="Retry" tooltip="Retry">
+        <Icon class="h-6 w-6 text-gray-400 hover:text-white transition-colors" label="Retry" >
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1.03 6.36 2.36L21 8" />
             <polyline points="21 3 21 8 16 8" />
         </Icon>
@@ -307,7 +256,7 @@ pub fn RetryIcon() -> impl IntoView {
 #[component]
 pub fn ErrorIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6 text-red-400" label="Something Went Wrong" tooltip="Something Went Wrong">
+        <Icon class="h-6 w-6 text-red-400" label="Something Went Wrong" >
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
             <circle cx="12" cy="16" r="0.5" fill="currentColor" />
@@ -335,7 +284,7 @@ pub fn MediaCubeLogo() -> impl IntoView {
 #[component]
 pub fn SettingsIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5 text-gray-400 hover:text-white transition-colors" label="Settings" tooltip="Settings">
+        <Icon class="h-5 w-5 text-gray-400 hover:text-white transition-colors" label="Settings" >
             <circle cx="12" cy="12" r="3" />
             <path d="M12 1v3M12 20v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M1 12h3M20 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" />
             <circle cx="12" cy="12" r="0.5" fill="currentColor" />
@@ -346,7 +295,7 @@ pub fn SettingsIcon() -> impl IntoView {
 #[component]
 pub fn UploadIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5 text-gray-400 hover:text-white transition-colors" label="Upload" tooltip="Upload">
+        <Icon class="h-5 w-5 text-gray-400 hover:text-white transition-colors" label="Upload" >
             <path d="M4 14.9A7 7 0 0 1 7 4.1a7 7 0 0 1 12.7 2.1A5 5 0 0 1 19 16h-5" />
             <polyline points="12 12 12 20 9 17 12 12 15 17" />
         </Icon>
@@ -525,7 +474,7 @@ pub fn MusicPosterSvg() -> impl IntoView {
 #[component]
 pub fn MenuIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6" label="القائمة" tooltip="القائمة">
+        <Icon class="h-6 w-6" label="القائمة" >
             <line x1="4" y1="6" x2="20" y2="6" />
             <line x1="4" y1="12" x2="20" y2="12" />
             <line x1="4" y1="18" x2="20" y2="18" />
@@ -536,7 +485,7 @@ pub fn MenuIcon() -> impl IntoView {
 #[component]
 pub fn EditIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="تعديل" tooltip="تعديل">
+        <Icon class="h-5 w-5" label="تعديل" >
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
         </Icon>
