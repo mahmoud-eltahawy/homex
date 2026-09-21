@@ -10,7 +10,7 @@ use crate::app::{
         patch_item_title, upload_collection_poster,
     },
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
-    icons::{AudioIcon, ClockIcon, MovieIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon},
+    icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
     media_player::{MediaItem, MediaPlayer},
     model::{Collection, Item, MediaKind, Section},
@@ -93,6 +93,11 @@ fn CollectionContent(
     let collection_id = collection.id;
     let section_slug = section.slug.clone();
     let is_audio = matches!(section.media_kind, MediaKind::Audio);
+    let is_series = section.nested && !is_audio;
+
+    // Selected season lives here so the upload widget and the playlist share it.
+    // `None` means "no season chosen yet" — initialised below when items load.
+    let selected_season = RwSignal::new(None::<i64>);
 
     let title = RwSignal::new(collection.title.clone());
     let description = RwSignal::new(collection.description.clone().unwrap_or_default());
@@ -157,10 +162,7 @@ fn CollectionContent(
 
     // ── Derived view values ───────────────────────────────────────────────
     let poster_for_shell = poster.get_untracked();
-    let icon = match section.media_kind {
-        MediaKind::Video => Either::Left(MovieIcon()),
-        MediaKind::Audio => Either::Right(AudioIcon()),
-    };
+    let icon = icon_for(section.media_kind);
     let badge_label = section.badge_label();
 
     let placeholder = ViewFn::from(move || {
@@ -178,6 +180,8 @@ fn CollectionContent(
         move |list: Vec<Item>| PlaylistProps {
             items: list,
             audio: is_audio,
+            is_series,
+            selected_season,
             artwork: poster_snapshot.clone(),
             playlist_title: title_snapshot.clone(),
             section_slug: section_slug.clone(),
@@ -226,6 +230,9 @@ fn CollectionContent(
                     upload=upload
                     section_slug=section_slug.clone()
                     collection_id=collection_id
+                    is_audio=is_audio
+                    is_series=is_series
+                    selected_season=selected_season
                 />
             </DetailHero>
 
@@ -247,6 +254,9 @@ fn AppendItems(
     upload: UploadJob,
     #[prop(into)] section_slug: String,
     collection_id: u64,
+    is_audio: bool,
+    is_series: bool,
+    selected_season: RwSignal<Option<i64>>,
 ) -> impl IntoView {
     let input_id = format!("append-input-{collection_id}");
     let input_id: &'static str = input_id.leak();
@@ -254,6 +264,12 @@ fn AppendItems(
     let upload_pending = upload.pending;
     let upload_status = upload.status;
     let upload_error = upload.error();
+
+    let accept: &'static str = if is_audio {
+        ".mp3,.m4a,.flac,.wav,.ogg,.opus,.aac"
+    } else {
+        ".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts"
+    };
 
     let slug_for_click = section_slug.clone();
     let on_files = Callback::new(move |ev: web_sys::Event| {
@@ -271,6 +287,11 @@ fn AppendItems(
         let fd = web_sys::FormData::new().unwrap();
         let _ = fd.append_with_str("section_slug", &slug_for_click);
         let _ = fd.append_with_str("collection_id", &collection_id.to_string());
+
+        // For series, tell the server which season these episodes belong to.
+        if is_series && let Some(season) = selected_season.get_untracked() {
+            let _ = fd.append_with_str("season_number", &season.to_string());
+        }
 
         for i in 0..files.length() {
             if let Some(f) = files.get(i) {
@@ -303,14 +324,23 @@ fn AppendItems(
                     id=input_id
                     class="hidden"
                     multiple
-                    accept=".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac"
+                    accept=accept
                     on:change=move |ev| on_files.run(ev)
                 />
                 <label
                     for=input_id
                     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-300 text-sm font-medium cursor-pointer transition"
                 >
-                    <UploadIcon/> "إضافة ملفات"
+                    <UploadIcon/>
+                    {if is_series {
+                        let season_label = selected_season
+                            .get_untracked()
+                            .map(|s| format!(" إلى الموسم {s}"))
+                            .unwrap_or_default();
+                        format!("إضافة حلقات{season_label}")
+                    } else {
+                        "إضافة ملفات".to_string()
+                    }}
                 </label>
                 <Show when=move || upload_pending.get()>
                     <span class="text-cyan-300 text-sm">"جاري الرفع..."</span>
@@ -324,12 +354,14 @@ fn AppendItems(
     }
 }
 
-// ─── Playlist (season selector + per-item download) ──────────────────────
+// ─── Playlist ────────────────────────────────────────────────────────────
 
 #[component]
 fn Playlist(
     items: Vec<Item>,
     audio: bool,
+    is_series: bool,
+    selected_season: RwSignal<Option<i64>>,
     artwork: Option<String>,
     playlist_title: String,
     section_slug: String,
@@ -337,45 +369,51 @@ fn Playlist(
     on_rename: Callback<(u64, String)>,
     on_delete: Callback<u64>,
 ) -> impl IntoView {
-    if items.is_empty() {
-        return Either::Left(view! {
-            <div class="py-12 text-center text-gray-500 text-sm">
-                "لا توجد ملفات بعد. اضغط «تعديل» ثم «إضافة ملفات»."
-            </div>
-        });
-    }
-
-    // Distinct season numbers, sorted.
-    let seasons: Vec<i64> = items
+    // All season numbers present in the DB (empty for flat sections).
+    let all_seasons: Vec<i64> = items
         .iter()
         .filter_map(|i| i.season_number)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let has_seasons = seasons.len() > 1;
 
-    // If the permalink points at an item, open its season first.
-    let initial_season = initial_item_id
-        .and_then(|target| items.iter().find(|it| it.id == target))
-        .and_then(|it| it.season_number)
-        .or_else(|| seasons.first().copied());
+    // Initialise the selected season exactly once. Prefer the season of the
+    // permalinked item, else the first existing season, else season 1 for
+    // a fresh series.
+    if selected_season.get_untracked().is_none() {
+        let initial = initial_item_id
+            .and_then(|target| items.iter().find(|it| it.id == target))
+            .and_then(|it| it.season_number)
+            .or_else(|| all_seasons.first().copied())
+            .or(if is_series { Some(1) } else { None });
+        selected_season.set(initial);
+    }
 
-    let selected_season = RwSignal::new(initial_season);
-
-    // Body re-runs whenever the selected season changes, remounting MediaPlayer
-    // so its internal `current_idx` gets the correct initial value.
+    let items_for_body = items.clone();
     let body = move || {
-        let current_season = selected_season.get();
+        let current = selected_season.get();
 
-        let filtered: Vec<Item> = items
-            .iter()
-            .filter(|it| match (current_season, it.season_number) {
-                (Some(s), Some(n)) => s == n,
-                (Some(_), None) => false,
-                (None, _) => true,
-            })
-            .cloned()
-            .collect();
+        // Filter by selected season for series; flat sections show everything.
+        let filtered: Vec<Item> = if is_series {
+            items_for_body
+                .iter()
+                .filter(|it| it.season_number == current)
+                .cloned()
+                .collect()
+        } else {
+            items_for_body.clone()
+        };
+
+        if filtered.is_empty() {
+            let msg = if is_series {
+                "لا توجد حلقات في هذا الموسم بعد. اضغط «تعديل» ثم «إضافة حلقات»."
+            } else {
+                "لا توجد ملفات بعد. اضغط «تعديل» ثم «إضافة ملفات»."
+            };
+            return Either::Left(view! {
+                <div class="py-12 text-center text-gray-500 text-sm">{msg}</div>
+            });
+        }
 
         let initial_index = initial_item_id
             .and_then(|target| filtered.iter().position(|it| it.id == target))
@@ -392,40 +430,7 @@ fn Playlist(
             })
             .collect();
 
-        let selector = if has_seasons {
-            let seasons = seasons.clone();
-            Some(view! {
-                <div class="flex items-center gap-2 mb-4">
-                    <span class="text-gray-300 text-sm">"الموسم:"</span>
-                    <select
-                        class="bg-white/10 backdrop-blur-md text-white rounded-xl py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                        prop:value=move || {
-                            selected_season.get().map(|v| v.to_string()).unwrap_or_default()
-                        }
-                        on:change=move |ev| {
-                            if let Some(sel) = ev
-                                .target()
-                                .and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok())
-                                && let Ok(v) = sel.value().parse::<i64>()
-                            {
-                                selected_season.set(Some(v));
-                            }
-                        }
-                    >
-                        <For each=move || seasons.clone() key=|s| *s let:season>
-                            <option value=season.to_string()>
-                                {format!("الموسم {}", season)}
-                            </option>
-                        </For>
-                    </select>
-                </div>
-            })
-        } else {
-            None
-        };
-
-        view! {
-            {selector}
+        Either::Right(view! {
             <MediaPlayer
                 items=media_items.into()
                 initial_index=initial_index
@@ -436,11 +441,85 @@ fn Playlist(
                 on_delete=on_delete
                 show_download=true
             />
+        })
+    };
+
+    let selector = is_series.then(|| {
+        view! { <SeasonBar seasons=all_seasons.clone() selected_season=selected_season/> }
+    });
+
+    let _ = section_slug;
+
+    view! {
+        {selector}
+        {body}
+    }
+}
+
+// ─── Season bar (selector + "new season" button) ─────────────────────────
+
+#[component]
+fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl IntoView {
+    // Add a new season = highest existing number + 1.
+    let add_season = {
+        let seasons = seasons.clone();
+        move |_| {
+            let max = seasons.iter().copied().max().unwrap_or(0);
+            selected_season.set(Some(max + 1));
         }
     };
 
-    // Reserved for future per-item permalink generation in the parent.
-    let _ = section_slug;
+    // Dropdown options: existing seasons, plus the current selection if it's a
+    // freshly-created season that doesn't have any files yet.
+    let options = {
+        let list = seasons.clone();
+        move || {
+            let mut list = list.clone();
+            if let Some(cur) = selected_season.get()
+                && !list.contains(&cur)
+            {
+                list.push(cur);
+                list.sort();
+            }
+            if list.is_empty() {
+                list.push(1);
+            }
+            list
+        }
+    };
 
-    Either::Right(view! { {body} })
+    view! {
+        <div class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="text-gray-300 text-sm">"الموسم:"</span>
+            <select
+                class="bg-white/10 backdrop-blur-md text-white rounded-xl py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                prop:value=move || {
+                    selected_season.get().map(|v| v.to_string()).unwrap_or_default()
+                }
+                on:change=move |ev| {
+                    if let Some(sel) = ev
+                        .target()
+                        .and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok())
+                        && let Ok(v) = sel.value().parse::<i64>()
+                    {
+                        selected_season.set(Some(v));
+                    }
+                }
+            >
+                <For each=options key=|s| *s let:season>
+                    <option value=season.to_string()>
+                        {format!("الموسم {}", season)}
+                    </option>
+                </For>
+            </select>
+            <button
+                type="button"
+                on:click=add_season
+                class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm transition"
+                aria-label="إضافة موسم جديد"
+            >
+                "+ موسم"
+            </button>
+        </div>
+    }
 }

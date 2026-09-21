@@ -1,3 +1,4 @@
+use crate::app::model::MediaKind;
 use leptos::{either::Either, prelude::*};
 
 // ─── Tooltip & Icon Wrappers (unchanged from your polished version) ───────
@@ -539,5 +540,12 @@ pub fn EditIcon() -> impl IntoView {
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
         </Icon>
+    }
+}
+
+pub fn icon_for(kind: MediaKind) -> AnyView {
+    match kind {
+        MediaKind::Video => view! { <MovieIcon/> }.into_any(),
+        MediaKind::Audio => view! { <AudioIcon/> }.into_any(),
     }
 }
