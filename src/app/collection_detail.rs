@@ -95,15 +95,12 @@ fn CollectionContent(
     let is_audio = matches!(section.media_kind, MediaKind::Audio);
     let is_series = section.nested && !is_audio;
 
-    // Selected season lives here so the upload widget and the playlist share it.
-    // `None` means "no season chosen yet" — initialised below when items load.
     let selected_season = RwSignal::new(None::<i64>);
 
     let title = RwSignal::new(collection.title.clone());
     let description = RwSignal::new(collection.description.clone().unwrap_or_default());
     let poster = RwSignal::new(collection.poster.clone());
 
-    // ── Actions ───────────────────────────────────────────────────────────
     let patch = Action::new_local(|(id, field, value): &(u64, String, Option<String>)| {
         patch_collection_field(*id, field.clone(), value.clone())
     });
@@ -120,7 +117,6 @@ fn CollectionContent(
         }
     });
 
-    // ── Append-more-files upload job ──────────────────────────────────────
     let upload = UploadJob::new();
     Effect::new(move |_| {
         if upload.done_tick.get() > 0 {
@@ -128,7 +124,6 @@ fn CollectionContent(
         }
     });
 
-    // ── Commit callbacks ──────────────────────────────────────────────────
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
         patch.dispatch((collection_id, "title".into(), Some(v)));
@@ -160,7 +155,6 @@ fn CollectionContent(
         delete_item_action.dispatch(id);
     });
 
-    // ── Derived view values ───────────────────────────────────────────────
     let poster_for_shell = poster.get_untracked();
     let icon = icon_for(section.media_kind);
     let badge_label = section.badge_label();
@@ -247,8 +241,6 @@ fn CollectionContent(
     }
 }
 
-// ─── Append-more-files widget (edit-mode only) ───────────────────────────
-
 #[component]
 fn AppendItems(
     upload: UploadJob,
@@ -288,7 +280,6 @@ fn AppendItems(
         let _ = fd.append_with_str("section_slug", &slug_for_click);
         let _ = fd.append_with_str("collection_id", &collection_id.to_string());
 
-        // For series, tell the server which season these episodes belong to.
         if is_series && let Some(season) = selected_season.get_untracked() {
             let _ = fd.append_with_str("season_number", &season.to_string());
         }
@@ -316,6 +307,18 @@ fn AppendItems(
 
     let edit_on = use_edit_mode();
 
+    let upload_button_label = move || {
+        if is_series {
+            let season_label = selected_season
+                .get()
+                .map(|s| format!(" إلى الموسم {s}"))
+                .unwrap_or_default();
+            format!("إضافة حلقات{season_label}")
+        } else {
+            "إضافة ملفات".to_string()
+        }
+    };
+
     view! {
         <Show when=move || edit_on.get()>
             <div class="mt-6 flex items-center gap-3 flex-wrap">
@@ -332,15 +335,7 @@ fn AppendItems(
                     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-300 text-sm font-medium cursor-pointer transition"
                 >
                     <UploadIcon/>
-                    {if is_series {
-                        let season_label = selected_season
-                            .get_untracked()
-                            .map(|s| format!(" إلى الموسم {s}"))
-                            .unwrap_or_default();
-                        format!("إضافة حلقات{season_label}")
-                    } else {
-                        "إضافة ملفات".to_string()
-                    }}
+                    {upload_button_label}
                 </label>
                 <Show when=move || upload_pending.get()>
                     <span class="text-cyan-300 text-sm">"جاري الرفع..."</span>
@@ -353,8 +348,6 @@ fn AppendItems(
         </Show>
     }
 }
-
-// ─── Playlist ────────────────────────────────────────────────────────────
 
 #[component]
 fn Playlist(
@@ -369,7 +362,6 @@ fn Playlist(
     on_rename: Callback<(u64, String)>,
     on_delete: Callback<u64>,
 ) -> impl IntoView {
-    // All season numbers present in the DB (empty for flat sections).
     let all_seasons: Vec<i64> = items
         .iter()
         .filter_map(|i| i.season_number)
@@ -377,9 +369,6 @@ fn Playlist(
         .into_iter()
         .collect();
 
-    // Initialise the selected season exactly once. Prefer the season of the
-    // permalinked item, else the first existing season, else season 1 for
-    // a fresh series.
     if selected_season.get_untracked().is_none() {
         let initial = initial_item_id
             .and_then(|target| items.iter().find(|it| it.id == target))
@@ -393,7 +382,6 @@ fn Playlist(
     let body = move || {
         let current = selected_season.get();
 
-        // Filter by selected season for series; flat sections show everything.
         let filtered: Vec<Item> = if is_series {
             items_for_body
                 .iter()
@@ -456,11 +444,10 @@ fn Playlist(
     }
 }
 
-// ─── Season bar (selector + "new season" button) ─────────────────────────
-
 #[component]
 fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl IntoView {
-    // Add a new season = highest existing number + 1.
+    let edit_on = use_edit_mode();
+
     let add_season = {
         let seasons = seasons.clone();
         move |_| {
@@ -469,8 +456,6 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
         }
     };
 
-    // Dropdown options: existing seasons, plus the current selection if it's a
-    // freshly-created season that doesn't have any files yet.
     let options = {
         let list = seasons.clone();
         move || {
@@ -486,6 +471,19 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
             }
             list
         }
+    };
+
+    let add_button = move || {
+        edit_on.get().then(|| view! {
+            <button
+                type="button"
+                on:click=add_season.clone()
+                class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm transition"
+                aria-label="إضافة موسم جديد"
+            >
+                "+ موسم"
+            </button>
+        })
     };
 
     view! {
@@ -512,14 +510,7 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
                     </option>
                 </For>
             </select>
-            <button
-                type="button"
-                on:click=add_season
-                class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm transition"
-                aria-label="إضافة موسم جديد"
-            >
-                "+ موسم"
-            </button>
+            {add_button}
         </div>
     }
 }
