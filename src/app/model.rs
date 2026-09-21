@@ -44,7 +44,6 @@ pub struct Movie {
     pub title: String,
     pub poster: Option<String>,
     pub description: Option<String>,
-    pub chapters: Vec<MovieChapter>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

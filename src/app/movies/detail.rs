@@ -41,7 +41,6 @@ pub async fn fetch_movie_detail(id: u64) -> Result<Movie, ServerFnError> {
         title: m.title,
         poster: m.poster,
         description: m.description,
-        chapters: vec![], // chapters are fetched separately
     })
 }
 
