@@ -1,6 +1,6 @@
 use crate::app::{
     icons::DownloadIcon,
-    inline_edit::{EditModeToggle, provide_edit_mode},
+    inline_edit::{EditModeToggle, use_edit_mode},
 };
 use leptos::{either::Either, prelude::*};
 
@@ -31,7 +31,7 @@ pub fn DetailShell(
     #[prop(default = true)] editable: bool,
     children: Children,
 ) -> impl IntoView {
-    let edit_on = provide_edit_mode();
+    let edit_on = use_edit_mode();
 
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">

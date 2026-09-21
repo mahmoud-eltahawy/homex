@@ -1,5 +1,5 @@
 use crate::app::{
-    collection_detail::CollectionDetailPage, home::HomePage, layout::Layout,
+    collection_detail::CollectionDetailPage, home::HomePage, inline_edit::EditMode, layout::Layout,
     section_listing::SectionListingPage,
 };
 use leptos::prelude::*;
@@ -53,6 +53,8 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
+    let signal = RwSignal::new(false);
+    provide_context(EditMode(signal));
     view! {
         <Stylesheet id="leptos" href="/pkg/homex.css"/>
         <Title text="HomeX"/>

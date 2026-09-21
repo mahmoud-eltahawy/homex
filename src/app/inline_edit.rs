@@ -18,17 +18,8 @@ const BTN_X: &str =
 #[derive(Clone, Copy)]
 pub struct EditMode(pub RwSignal<bool>);
 
-pub fn provide_edit_mode() -> RwSignal<bool> {
-    let signal = RwSignal::new(false);
-    provide_context(EditMode(signal));
-    signal
-}
-
-pub fn use_edit_mode() -> Signal<bool> {
-    match use_context::<EditMode>() {
-        Some(EditMode(s)) => Signal::derive(move || s.get()),
-        None => Signal::derive(|| true),
-    }
+pub fn use_edit_mode() -> RwSignal<bool> {
+    expect_context::<EditMode>().0
 }
 
 pub fn collapse_when_locked(editing: RwSignal<bool>) {
