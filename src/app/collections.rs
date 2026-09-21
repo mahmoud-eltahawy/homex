@@ -1,4 +1,4 @@
-use crate::app::model::{Collection, Item, MediaFile};
+use crate::app::model::{Collection, Item};
 use leptos::prelude::*;
 
 #[server]
@@ -118,6 +118,7 @@ pub async fn fetch_collection_detail(
 pub async fn fetch_items(collection_id: u64) -> Result<Vec<Item>, ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
+    use crate::app::model::MediaFile;
 
     #[derive(sqlx::FromRow)]
     struct Row {

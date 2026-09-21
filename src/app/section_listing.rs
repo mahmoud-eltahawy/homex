@@ -30,7 +30,7 @@ impl LazyRoute for SectionListingPage {
         let search_query = RwSignal::new(None);
 
         let slug_a = slug;
-        let section = Resource::new(move || slug_a(), fetch_section_by_slug);
+        let section = Resource::new(slug_a, fetch_section_by_slug);
 
         let slug_b = slug;
         let collections = Resource::new(

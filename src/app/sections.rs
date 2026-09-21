@@ -1,9 +1,11 @@
-use crate::app::model::{MediaKind, Section};
+use crate::app::model::Section;
 use leptos::prelude::*;
 
 #[server]
 pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
+    use crate::app::model::MediaKind;
     use crate::app::server::AppState;
+
     let state: AppState = expect_context();
 
     #[derive(sqlx::FromRow)]
@@ -41,6 +43,7 @@ pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
 
 #[server]
 pub async fn fetch_section_by_slug(slug: String) -> Result<Section, ServerFnError> {
+    use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     let state: AppState = expect_context();
 
@@ -82,6 +85,7 @@ pub async fn create_section(
     media_kind: String,
     nested: bool,
 ) -> Result<u64, ServerFnError> {
+    use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     let state: AppState = expect_context();
 
@@ -117,6 +121,7 @@ pub async fn update_section(
     media_kind: String,
     nested: bool,
 ) -> Result<(), ServerFnError> {
+    use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     let state: AppState = expect_context();
     MediaKind::try_from(media_kind.as_str()).map_err(ServerFnError::new)?;
