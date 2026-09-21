@@ -4,7 +4,7 @@ use leptos::prelude::*;
 #[cfg(feature = "ssr")]
 use crate::app::server::{
     SqlErr,
-    db::{self, CollectionField},
+    db::{self},
 };
 
 #[server]
@@ -78,8 +78,7 @@ pub async fn patch_collection_field(
 ) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    let f = CollectionField::parse(&field).ok_or_else(|| ServerFnError::new("حقل غير مسموح"))?;
-    db::update_collection_field(&state.db, id as i64, f, value.as_deref())
+    db::update_collection_by_field(&state.db, id as i64, &field, value.as_deref())
         .await
         .srv()?;
     Ok(())
@@ -155,7 +154,7 @@ pub async fn upload_collection_poster(
     )
     .await?;
 
-    db::update_collection_field(&state.db, id, CollectionField::Poster, Some(&url))
+    db::update_collection_poster(&state.db, id, Some(&url))
         .await
         .srv()?;
     Ok(url)

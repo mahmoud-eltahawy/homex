@@ -1,0 +1,6 @@
+#!/usr/bin/sh
+
+# cargo binstall sqlx-cli
+export DATABASE_URL="sqlite://$(pwd)/Downloads/homex.db"
+cargo sqlx prepare
+# git add .sqlx && git commit -m "add sqlx offline cache"

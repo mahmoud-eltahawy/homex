@@ -1,4 +1,3 @@
-use sqlx::AssertSqlSafe;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Executor, Sqlite, SqlitePool};
 use std::str::FromStr;
@@ -28,112 +27,65 @@ pub async fn init(config: &Config) -> Result<SqlitePool, Box<dyn std::error::Err
     Ok(pool)
 }
 
-// ─── Row types (private) ──────────────────────────────────────────────────
-
-#[derive(sqlx::FromRow)]
-struct SectionRow {
-    id: i64,
-    slug: String,
-    title: String,
-    media_kind: String,
-    nested: i64,
-    position: i64,
-    collections_count: i64,
-}
-
-impl SectionRow {
-    fn into_model(self) -> Section {
-        Section {
-            id: self.id as u64,
-            slug: self.slug,
-            title: self.title,
-            media_kind: MediaKind::try_from(self.media_kind.as_str()).unwrap_or(MediaKind::Video),
-            nested: self.nested != 0,
-            position: self.position,
-            collections_count: self.collections_count as u32,
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
-struct CollectionRow {
-    id: i64,
-    section_id: i64,
-    section_slug: String,
-    title: String,
-    poster: Option<String>,
-    description: Option<String>,
-    items_count: i64,
-}
-
-impl CollectionRow {
-    fn into_model(self) -> Collection {
-        Collection {
-            id: self.id as u64,
-            section_id: self.section_id as u64,
-            section_slug: self.section_slug,
-            title: self.title,
-            poster: self.poster,
-            description: self.description,
-            items_count: self.items_count as u32,
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
-struct ItemRow {
-    id: i64,
-    collection_id: i64,
-    number: i64,
-    season_number: Option<i64>,
-    title: Option<String>,
-    poster: Option<String>,
-    description: Option<String>,
-    file_id: i64,
-    size: i64,
-    dur: i64,
-}
-
-impl ItemRow {
-    fn into_model(self) -> Item {
-        Item {
-            id: self.id as u64,
-            collection_id: self.collection_id as u64,
-            number: self.number,
-            season_number: self.season_number,
-            title: self.title,
-            poster: self.poster,
-            description: self.description,
-            file: MediaFile {
-                id: self.file_id as u64,
-                path: format!("/media/{}", self.file_id),
-                size: self.size as u64,
-                duration: self.dur as u64,
-            },
-        }
-    }
-}
-
 // ─── Section queries ──────────────────────────────────────────────────────
 
-const SECTION_SELECT: &str = "\
-    SELECT s.id, s.slug, s.title, s.media_kind, s.nested, s.position, \
-           (SELECT COUNT(*) FROM collections c WHERE c.section_id = s.id) AS collections_count \
-    FROM sections s";
-
 pub async fn fetch_sections(pool: &SqlitePool) -> Result<Vec<Section>, sqlx::Error> {
-    let sql = AssertSqlSafe(format!("{SECTION_SELECT} ORDER BY s.position, s.id"));
-    let rows: Vec<SectionRow> = sqlx::query_as(sql).fetch_all(pool).await?;
-    Ok(rows.into_iter().map(SectionRow::into_model).collect())
+    let rows = sqlx::query!(
+        r#"
+        SELECT s.id, s.slug, s.title, s.media_kind, s.nested, s.position,
+               COALESCE(
+                   (SELECT COUNT(*) FROM collections c WHERE c.section_id = s.id),
+                   0
+               ) AS "collections_count!"
+        FROM sections s
+        ORDER BY s.position, s.id
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| Section {
+            id: r.id as u64,
+            slug: r.slug,
+            title: r.title,
+            media_kind: MediaKind::try_from(r.media_kind.as_str()).unwrap_or(MediaKind::Video),
+            nested: r.nested != 0,
+            position: r.position,
+            collections_count: r.collections_count as u32,
+        })
+        .collect())
 }
 
 pub async fn fetch_section_by_slug(
     pool: &SqlitePool,
     slug: &str,
 ) -> Result<Option<Section>, sqlx::Error> {
-    let sql = AssertSqlSafe(format!("{SECTION_SELECT} WHERE s.slug = ?"));
-    let row: Option<SectionRow> = sqlx::query_as(sql).bind(slug).fetch_optional(pool).await?;
-    Ok(row.map(SectionRow::into_model))
+    let row = sqlx::query!(
+        r#"
+        SELECT s.id, s.slug, s.title, s.media_kind, s.nested, s.position,
+               COALESCE(
+                   (SELECT COUNT(*) FROM collections c WHERE c.section_id = s.id),
+                   0
+               ) AS "collections_count!"
+        FROM sections s
+        WHERE s.slug = ?
+        "#,
+        slug,
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| Section {
+        id: r.id as u64,
+        slug: r.slug,
+        title: r.title,
+        media_kind: MediaKind::try_from(r.media_kind.as_str()).unwrap_or(MediaKind::Video),
+        nested: r.nested != 0,
+        position: r.position,
+        collections_count: r.collections_count as u32,
+    }))
 }
 
 pub async fn insert_section<'e, E>(
@@ -146,15 +98,18 @@ pub async fn insert_section<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query_scalar(
-        "INSERT INTO sections (slug, title, media_kind, nested, position) \
-         VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position)+1, 0) FROM sections)) \
-         RETURNING id",
+    sqlx::query_scalar!(
+        r#"
+        INSERT INTO sections (slug, title, media_kind, nested, position)
+        VALUES (?, ?, ?, ?,
+                (SELECT COALESCE(MAX(position) + 1, 0) FROM sections))
+        RETURNING id
+        "#,
+        slug,
+        title,
+        media_kind,
+        nested as i64,
     )
-    .bind(slug)
-    .bind(title)
-    .bind(media_kind)
-    .bind(nested as i64)
     .fetch_one(executor)
     .await
 }
@@ -169,34 +124,29 @@ pub async fn update_section<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query("UPDATE sections SET title=?, media_kind=?, nested=? WHERE id=?")
-        .bind(title)
-        .bind(media_kind)
-        .bind(nested as i64)
-        .bind(id)
-        .execute(executor)
-        .await
-        .map(|_| ())
+    sqlx::query!(
+        "UPDATE sections SET title = ?, media_kind = ?, nested = ? WHERE id = ?",
+        title,
+        media_kind,
+        nested as i64,
+        id,
+    )
+    .execute(executor)
+    .await
+    .map(|_| ())
 }
 
 pub async fn delete_section<'e, E>(executor: E, id: i64) -> Result<(), sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query("DELETE FROM sections WHERE id=?")
-        .bind(id)
+    sqlx::query!("DELETE FROM sections WHERE id = ?", id)
         .execute(executor)
         .await
         .map(|_| ())
 }
 
 // ─── Collection queries ───────────────────────────────────────────────────
-
-const COLLECTION_SELECT: &str = "\
-    SELECT c.id, c.section_id, s.slug AS section_slug, \
-           c.title, c.poster, c.description, \
-           (SELECT COUNT(*) FROM items i WHERE i.collection_id = c.id) AS items_count \
-    FROM collections c JOIN sections s ON s.id = c.section_id";
 
 pub async fn fetch_collections(
     pool: &SqlitePool,
@@ -205,19 +155,45 @@ pub async fn fetch_collections(
     size: usize,
     search: Option<&str>,
 ) -> Result<Vec<Collection>, sqlx::Error> {
-    let sql = AssertSqlSafe(format!(
-        "{COLLECTION_SELECT} \
-         WHERE s.slug = ?1 AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%') \
-         ORDER BY c.position, c.title LIMIT ?3 OFFSET ?4"
-    ));
-    let rows: Vec<CollectionRow> = sqlx::query_as(sql)
-        .bind(section_slug)
-        .bind(search)
-        .bind(size as i64)
-        .bind(offset as i64)
-        .fetch_all(pool)
-        .await?;
-    Ok(rows.into_iter().map(CollectionRow::into_model).collect())
+    let rows = sqlx::query!(
+        r#"
+        SELECT c.id,
+               c.section_id,
+               s.slug AS section_slug,
+               c.title,
+               c.poster,
+               c.description,
+               COALESCE(
+                   (SELECT COUNT(*) FROM items i WHERE i.collection_id = c.id),
+                   0
+               ) AS "items_count!"
+        FROM collections c
+        JOIN sections s ON s.id = c.section_id
+        WHERE s.slug = ?1
+          AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')
+        ORDER BY c.position, c.title
+        LIMIT ?3 OFFSET ?4
+        "#,
+        section_slug,
+        search,
+        size as i64,
+        offset as i64,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| Collection {
+            id: r.id as u64,
+            section_id: r.section_id as u64,
+            section_slug: r.section_slug,
+            title: r.title,
+            poster: r.poster,
+            description: r.description,
+            items_count: r.items_count as u32,
+        })
+        .collect())
 }
 
 pub async fn fetch_collections_count(
@@ -225,12 +201,17 @@ pub async fn fetch_collections_count(
     section_slug: &str,
     search: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM collections c JOIN sections s ON s.id = c.section_id \
-         WHERE s.slug = ?1 AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')",
+    sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*)
+        FROM collections c
+        JOIN sections s ON s.id = c.section_id
+        WHERE s.slug = ?1
+          AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')
+        "#,
+        section_slug,
+        search,
     )
-    .bind(section_slug)
-    .bind(search)
     .fetch_one(pool)
     .await
 }
@@ -240,88 +221,130 @@ pub async fn fetch_collection_detail(
     section_slug: &str,
     collection_id: i64,
 ) -> Result<Option<Collection>, sqlx::Error> {
-    let sql = AssertSqlSafe(format!("{COLLECTION_SELECT} WHERE s.slug = ? AND c.id = ?"));
-    let row: Option<CollectionRow> = sqlx::query_as(sql)
-        .bind(section_slug)
-        .bind(collection_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row.map(CollectionRow::into_model))
+    let row = sqlx::query!(
+        r#"
+        SELECT c.id,
+               c.section_id,
+               s.slug AS section_slug,
+               c.title,
+               c.poster,
+               c.description,
+               COALESCE(
+                   (SELECT COUNT(*) FROM items i WHERE i.collection_id = c.id),
+                   0
+               ) AS "items_count!"
+        FROM collections c
+        JOIN sections s ON s.id = c.section_id
+        WHERE s.slug = ? AND c.id = ?
+        "#,
+        section_slug,
+        collection_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| Collection {
+        id: r.id as u64,
+        section_id: r.section_id as u64,
+        section_slug: r.section_slug,
+        title: r.title,
+        poster: r.poster,
+        description: r.description,
+        items_count: r.items_count as u32,
+    }))
 }
 
 pub async fn insert_empty_collection(
     pool: &SqlitePool,
     section_slug: &str,
 ) -> Result<i64, sqlx::Error> {
-    let section_id: i64 = sqlx::query_scalar("SELECT id FROM sections WHERE slug = ?")
-        .bind(section_slug)
-        .fetch_one(pool)
-        .await?;
+    let section_id: i64 =
+        sqlx::query_scalar!("SELECT id FROM sections WHERE slug = ?", section_slug,)
+            .fetch_one(pool)
+            .await?;
 
-    sqlx::query_scalar(
-        "INSERT INTO collections (section_id, title, position) \
-         VALUES (?, 'بدون عنوان', \
-                 (SELECT COALESCE(MAX(position)+1,0) FROM collections WHERE section_id=?)) \
-         RETURNING id",
+    sqlx::query_scalar!(
+        r#"
+        INSERT INTO collections (section_id, title, position)
+        VALUES (?1, 'بدون عنوان',
+                (SELECT COALESCE(MAX(position) + 1, 0)
+                 FROM collections WHERE section_id = ?1))
+        RETURNING id AS "id!: i64"
+        "#,
+        section_id,
     )
-    .bind(section_id)
-    .bind(section_id)
     .fetch_one(pool)
     .await
 }
 
-/// Whitelisted mutable columns on `collections`. Passing this enum instead of
-/// a raw `String` means no caller can smuggle a value into the SQL text.
-#[derive(Clone, Copy)]
-pub enum CollectionField {
-    Title,
-    Description,
-    Poster,
-}
-
-impl CollectionField {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "title" => Some(Self::Title),
-            "description" => Some(Self::Description),
-            "poster" => Some(Self::Poster),
-            _ => None,
-        }
-    }
-    fn column(self) -> &'static str {
-        match self {
-            Self::Title => "title",
-            Self::Description => "description",
-            Self::Poster => "poster",
-        }
-    }
-}
-
-pub async fn update_collection_field<'e, E>(
+pub async fn update_collection_title<'e, E>(
     executor: E,
     id: i64,
-    field: CollectionField,
     value: Option<&str>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    let col = field.column();
-    let sql = AssertSqlSafe(format!("UPDATE collections SET {col} = ? WHERE id = ?"));
-    sqlx::query(sql)
-        .bind(value)
-        .bind(id)
+    sqlx::query!("UPDATE collections SET title = ? WHERE id = ?", value, id,)
         .execute(executor)
         .await
         .map(|_| ())
+}
+
+pub async fn update_collection_description<'e, E>(
+    executor: E,
+    id: i64,
+    value: Option<&str>,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query!(
+        "UPDATE collections SET description = ? WHERE id = ?",
+        value,
+        id,
+    )
+    .execute(executor)
+    .await
+    .map(|_| ())
+}
+
+pub async fn update_collection_poster<'e, E>(
+    executor: E,
+    id: i64,
+    value: Option<&str>,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query!("UPDATE collections SET poster = ? WHERE id = ?", value, id,)
+        .execute(executor)
+        .await
+        .map(|_| ())
+}
+
+/// Dispatch wrapper for the string-driven `patch_collection_field` server fn.
+/// Takes `&SqlitePool` (not a generic executor) because each branch produces
+/// a different concrete query type.
+pub async fn update_collection_by_field(
+    pool: &SqlitePool,
+    id: i64,
+    field: &str,
+    value: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    match field {
+        "title" => update_collection_title(pool, id, value).await,
+        "description" => update_collection_description(pool, id, value).await,
+        "poster" => update_collection_poster(pool, id, value).await,
+        _ => Err(sqlx::Error::Protocol(format!("unknown field: {field}"))),
+    }
 }
 
 pub async fn delete_collection<'e, E>(executor: E, id: i64) -> Result<(), sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query("DELETE FROM collections WHERE id=?")
-        .bind(id)
+    sqlx::query!("DELETE FROM collections WHERE id = ?", id)
         .execute(executor)
         .await
         .map(|_| ())
@@ -330,18 +353,46 @@ where
 // ─── Item queries ─────────────────────────────────────────────────────────
 
 pub async fn fetch_items(pool: &SqlitePool, collection_id: i64) -> Result<Vec<Item>, sqlx::Error> {
-    let rows: Vec<ItemRow> = sqlx::query_as(
-        "SELECT i.id, i.collection_id, i.number, i.season_number, \
-                i.title, i.poster, i.description, \
-                f.id AS file_id, f.size_bytes AS size, f.duration_secs AS dur \
-         FROM items i JOIN files f ON f.id = i.file_id \
-         WHERE i.collection_id = ? \
-         ORDER BY COALESCE(i.season_number, 0), i.number",
+    let rows = sqlx::query!(
+        r#"
+        SELECT i.id,
+               i.collection_id,
+               i.number,
+               i.season_number,
+               i.title,
+               i.poster,
+               i.description,
+               f.id            AS file_id,
+               f.size_bytes    AS size,
+               f.duration_secs AS dur
+        FROM items i
+        JOIN files f ON f.id = i.file_id
+        WHERE i.collection_id = ?
+        ORDER BY COALESCE(i.season_number, 0), i.number
+        "#,
+        collection_id,
     )
-    .bind(collection_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(ItemRow::into_model).collect())
+
+    Ok(rows
+        .into_iter()
+        .map(|r| Item {
+            id: r.id as u64,
+            collection_id: r.collection_id as u64,
+            number: r.number,
+            season_number: r.season_number,
+            title: r.title,
+            poster: r.poster,
+            description: r.description,
+            file: MediaFile {
+                id: r.file_id as u64,
+                path: format!("/media/{}", r.file_id),
+                size: r.size as u64,
+                duration: r.dur as u64,
+            },
+        })
+        .collect())
 }
 
 pub async fn next_item_number<'e, E>(
@@ -352,13 +403,16 @@ pub async fn next_item_number<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query_scalar(
-        "SELECT COALESCE(MAX(number)+1, 0) FROM items \
-         WHERE collection_id = ?1 AND \
-         ((?2 IS NULL AND season_number IS NULL) OR season_number = ?2)",
+    sqlx::query_scalar!(
+        r#"
+        SELECT COALESCE(MAX(number) + 1, 0)
+        FROM items
+        WHERE collection_id = ?1
+          AND ((?2 IS NULL AND season_number IS NULL) OR season_number = ?2)
+        "#,
+        collection_id,
+        season_number,
     )
-    .bind(collection_id)
-    .bind(season_number)
     .fetch_one(executor)
     .await
 }
@@ -374,15 +428,17 @@ pub async fn insert_item<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query(
-        "INSERT INTO items (collection_id, number, season_number, title, file_id) \
-         VALUES (?, ?, ?, ?, ?)",
+    sqlx::query!(
+        r#"
+        INSERT INTO items (collection_id, number, season_number, title, file_id)
+        VALUES (?, ?, ?, ?, ?)
+        "#,
+        collection_id,
+        number,
+        season_number,
+        title,
+        file_id,
     )
-    .bind(collection_id)
-    .bind(number)
-    .bind(season_number)
-    .bind(title)
-    .bind(file_id)
     .execute(executor)
     .await
     .map(|_| ())
@@ -396,9 +452,7 @@ pub async fn update_item_title<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query("UPDATE items SET title = ? WHERE id = ?")
-        .bind(title)
-        .bind(id)
+    sqlx::query!("UPDATE items SET title = ? WHERE id = ?", title, id)
         .execute(executor)
         .await
         .map(|_| ())
@@ -408,8 +462,7 @@ pub async fn delete_item<'e, E>(executor: E, id: i64) -> Result<(), sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query("DELETE FROM items WHERE id=?")
-        .bind(id)
+    sqlx::query!("DELETE FROM items WHERE id = ?", id)
         .execute(executor)
         .await
         .map(|_| ())
@@ -426,13 +479,16 @@ pub async fn insert_file<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query_scalar(
-        "INSERT INTO files (relative_path, size_bytes, duration_secs) \
-         VALUES (?, ?, ?) RETURNING id",
+    sqlx::query_scalar!(
+        r#"
+        INSERT INTO files (relative_path, size_bytes, duration_secs)
+        VALUES (?, ?, ?)
+        RETURNING id
+        "#,
+        relative_path,
+        size_bytes,
+        duration_secs,
     )
-    .bind(relative_path)
-    .bind(size_bytes)
-    .bind(duration_secs)
     .fetch_one(executor)
     .await
 }
@@ -441,8 +497,7 @@ pub async fn fetch_file_path(
     pool: &SqlitePool,
     file_id: i64,
 ) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT relative_path FROM files WHERE id = ?")
-        .bind(file_id)
+    sqlx::query_scalar!("SELECT relative_path FROM files WHERE id = ?", file_id,)
         .fetch_optional(pool)
         .await
 }
@@ -453,8 +508,7 @@ pub async fn fetch_section_kind(
     pool: &SqlitePool,
     slug: &str,
 ) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT media_kind FROM sections WHERE slug = ?")
-        .bind(slug)
+    sqlx::query_scalar!("SELECT media_kind FROM sections WHERE slug = ?", slug,)
         .fetch_optional(pool)
         .await
 }

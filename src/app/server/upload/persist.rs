@@ -4,16 +4,16 @@ use std::path::Path;
 
 use super::types::{StagedFile, UploadPayload};
 use crate::app::server::SqlErr;
-use crate::app::server::db::{self, CollectionField};
+use crate::app::server::db;
 use crate::app::server::poster::write_poster;
 
 pub async fn insert_files(
-    db_pool: &SqlitePool,
+    pool: &SqlitePool,
     staged: &[StagedFile],
 ) -> Result<Vec<(i64, String)>, ServerFnError> {
     let mut out = Vec::with_capacity(staged.len());
     for f in staged {
-        let id = db::insert_file(db_pool, &f.rel, f.size as i64, f.duration)
+        let id = db::insert_file(pool, &f.rel, f.size as i64, f.duration)
             .await
             .srv()?;
         out.push((id, f.title.clone()));
@@ -56,13 +56,8 @@ pub async fn attach_poster(
         return Ok(());
     };
     let url = write_poster(data_dir, &payload.section_slug, collection_id, ext, bytes).await?;
-    db::update_collection_field(
-        &mut **tx,
-        collection_id,
-        CollectionField::Poster,
-        Some(&url),
-    )
-    .await
-    .srv()?;
+    db::update_collection_poster(&mut **tx, collection_id, Some(&url))
+        .await
+        .srv()?;
     Ok(())
 }
