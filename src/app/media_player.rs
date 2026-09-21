@@ -1,6 +1,6 @@
 use crate::app::icons::{
-    DeleteIcon, EditIcon, FullscreenExitIcon, FullscreenIcon, MuteIcon, NextPageIcon, PauseIcon,
-    PlayIcon, PrevPageIcon, VolumeIcon,
+    DeleteIcon, DownloadIcon, EditIcon, FullscreenExitIcon, FullscreenIcon, MuteIcon, NextPageIcon,
+    PauseIcon, PlayIcon, PrevPageIcon, VolumeIcon,
 };
 use crate::app::inline_edit::use_edit_mode;
 use leptos::wasm_bindgen::JsCast;
@@ -47,6 +47,7 @@ pub fn MediaPlayer(
     #[prop(default = None)] artwork: Option<String>,
     #[prop(optional)] playlist_title: Option<String>,
     #[prop(default = true)] show_playlist: bool,
+    #[prop(default = true)] show_download: bool,
     #[prop(optional)] on_rename: Option<Callback<(u64, String)>>,
     #[prop(optional)] on_delete: Option<Callback<u64>>,
 ) -> impl IntoView {
@@ -328,6 +329,7 @@ pub fn MediaPlayer(
                     title=playlist_title.clone()
                     on_rename=on_rename
                     on_delete=on_delete
+                    show_download=show_download
                 />
             </aside>
         </Show>
@@ -567,6 +569,7 @@ fn PlaylistPanel(
     #[prop(default = None)] title: Option<String>,
     #[prop(default = None)] on_rename: Option<Callback<(u64, String)>>,
     #[prop(default = None)] on_delete: Option<Callback<u64>>,
+    #[prop(default = true)] show_download: bool,
 ) -> impl IntoView {
     let title = title.unwrap_or_else(|| "قائمة التشغيل".to_string());
 
@@ -590,6 +593,7 @@ fn PlaylistPanel(
                         current_idx=current_idx
                         on_rename=on_rename
                         on_delete=on_delete
+                        show_download=show_download
                     />
                 </For>
             </div>
@@ -602,10 +606,25 @@ fn PlaylistItem(
     item: MediaItem,
     index: usize,
     current_idx: RwSignal<usize>,
+    #[prop(default = true)] show_download: bool,
     #[prop(default = None)] on_rename: Option<Callback<(u64, String)>>,
     #[prop(default = None)] on_delete: Option<Callback<u64>>,
 ) -> impl IntoView {
     let id = item.id;
+    let download_src = item.src.clone();
+    let download_name = item.title.clone();
+
+    let download_button = show_download.then(|| view! {
+        <a
+            href=download_src
+            download=download_name
+            class="opacity-0 group-hover/row:opacity-100 transition text-gray-400 hover:text-white p-1 shrink-0"
+            aria-label="تحميل"
+            on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
+        >
+            <DownloadIcon/>
+        </a>
+    });
 
     // StoredValue is Copy and survives being captured by multiple closures.
     let title = StoredValue::new(item.title.clone());
@@ -726,6 +745,7 @@ fn PlaylistItem(
                     />
                 </Show>
             </div>
+            {download_button}
             {edit_buttons}
         </div>
     }

@@ -64,6 +64,10 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/s/:slug")     view={Lazy::<SectionListingPage>::new()}/>
                     <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
                     <Route path=path!("/settings")    view={Lazy::<SettingsPage>::new()}/>
+                    <Route
+                        path=path!("/s/:slug/:id/item/:item_id")
+                        view={Lazy::<CollectionDetailPage>::new()}
+                    />
                 </ParentRoute>
             </Routes>
         </Router>

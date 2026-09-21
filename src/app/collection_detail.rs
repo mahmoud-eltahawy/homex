@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use leptos::{either::Either, prelude::*};
 use leptos_router::{LazyRoute, lazy_route};
 use web_sys::wasm_bindgen::JsCast;
@@ -13,7 +15,7 @@ use crate::app::{
     media_player::{MediaItem, MediaPlayer},
     model::{Collection, Item, MediaKind, Section},
     resource_view::ResourceView,
-    route_params::{use_string_param, use_u64_param},
+    route_params::{use_optional_u64_param, use_string_param, use_u64_param},
     sections::fetch_section_by_slug,
     upload_job::{UploadJob, UploadProgress},
 };
@@ -22,6 +24,7 @@ pub struct CollectionDetailPage {
     section: Resource<Result<Section, ServerFnError>>,
     collection: Resource<Result<Collection, ServerFnError>>,
     items: Resource<Result<Vec<Item>, ServerFnError>>,
+    initial_item_id: Option<u64>,
 }
 
 #[lazy_route]
@@ -29,6 +32,8 @@ impl LazyRoute for CollectionDetailPage {
     fn data() -> Self {
         let slug = use_string_param("slug");
         let id = use_u64_param("id");
+        let item_id_fn = use_optional_u64_param("item_id");
+
         let slug_a = slug;
         let slug_b = slug;
 
@@ -39,16 +44,19 @@ impl LazyRoute for CollectionDetailPage {
                 |(s, i)| fetch_collection_detail(s, i),
             ),
             items: Resource::new(id, fetch_items),
+            initial_item_id: item_id_fn(),
         }
     }
 
     fn view(this: Self) -> AnyView {
         let collection = this.collection;
         let items = this.items;
+        let initial_item_id = this.initial_item_id;
         let adapter = move |section: Section| CollectionDetailBodyProps {
             section,
             collection,
             items,
+            initial_item_id,
         };
         view! {
             <ResourceView resource=this.section view_fn=CollectionDetailBody adapter=adapter/>
@@ -62,11 +70,13 @@ fn CollectionDetailBody(
     section: Section,
     collection: Resource<Result<Collection, ServerFnError>>,
     items: Resource<Result<Vec<Item>, ServerFnError>>,
+    initial_item_id: Option<u64>,
 ) -> impl IntoView {
     let adapter = move |c: Collection| CollectionContentProps {
         section: section.clone(),
         collection: c,
         items,
+        initial_item_id,
     };
     view! {
         <ResourceView resource=collection view_fn=CollectionContent adapter=adapter/>
@@ -78,6 +88,7 @@ fn CollectionContent(
     section: Section,
     collection: Collection,
     items: Resource<Result<Vec<Item>, ServerFnError>>,
+    initial_item_id: Option<u64>,
 ) -> impl IntoView {
     let collection_id = collection.id;
     let section_slug = section.slug.clone();
@@ -157,7 +168,6 @@ fn CollectionContent(
         (MediaKind::Audio, true) => "مجموعة صوتية",
     };
 
-    // ViewFn — re-runnable placeholder that picks the right SVG.
     let placeholder = ViewFn::from(move || {
         if is_audio {
             view! { <MusicPosterSvg/> }.into_any()
@@ -176,6 +186,7 @@ fn CollectionContent(
             artwork: poster_snapshot.clone(),
             playlist_title: title_snapshot.clone(),
             section_slug: section_slug.clone(),
+            initial_item_id,
             on_rename,
             on_delete,
         }
@@ -249,7 +260,6 @@ fn AppendItems(
     let upload_status = upload.status;
     let upload_error = upload.error();
 
-    // Callback is Copy — keeps the Show child closure as `Fn`.
     let slug_for_click = section_slug.clone();
     let on_files = Callback::new(move |ev: web_sys::Event| {
         let Some(input) = ev
@@ -321,7 +331,7 @@ fn AppendItems(
     }
 }
 
-// ─── Playlist (with rename + delete wired to edit mode) ──────────────────
+// ─── Playlist (season selector + per-item download) ──────────────────────
 
 #[component]
 fn Playlist(
@@ -330,6 +340,7 @@ fn Playlist(
     artwork: Option<String>,
     playlist_title: String,
     section_slug: String,
+    initial_item_id: Option<u64>,
     on_rename: Callback<(u64, String)>,
     on_delete: Callback<u64>,
 ) -> impl IntoView {
@@ -341,28 +352,102 @@ fn Playlist(
         });
     }
 
-    let media_items: Vec<MediaItem> = items
+    // Distinct season numbers, sorted.
+    let seasons: Vec<i64> = items
         .iter()
-        .map(|it| {
-            let mut mi = MediaItem::new(it.id, it.display_title(), it.file.path.clone());
-            if let Some(season) = it.season_number {
-                mi = mi.with_subtitle(format!("S{season:02}"));
-            }
-            mi
-        })
+        .filter_map(|i| i.season_number)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect();
+    let has_seasons = seasons.len() > 1;
 
-    // Reserved for future per-item permalinks.
+    // If the permalink points at an item, open its season first.
+    let initial_season = initial_item_id
+        .and_then(|target| items.iter().find(|it| it.id == target))
+        .and_then(|it| it.season_number)
+        .or_else(|| seasons.first().copied());
+
+    let selected_season = RwSignal::new(initial_season);
+
+    // Body re-runs whenever the selected season changes, remounting MediaPlayer
+    // so its internal `current_idx` gets the correct initial value.
+    let body = move || {
+        let current_season = selected_season.get();
+
+        let filtered: Vec<Item> = items
+            .iter()
+            .filter(|it| match (current_season, it.season_number) {
+                (Some(s), Some(n)) => s == n,
+                (Some(_), None) => false,
+                (None, _) => true,
+            })
+            .cloned()
+            .collect();
+
+        let initial_index = initial_item_id
+            .and_then(|target| filtered.iter().position(|it| it.id == target))
+            .unwrap_or(0);
+
+        let media_items: Vec<MediaItem> = filtered
+            .iter()
+            .map(|it| {
+                let mut mi = MediaItem::new(it.id, it.display_title(), it.file.path.clone());
+                if let Some(season) = it.season_number {
+                    mi = mi.with_subtitle(format!("S{season:02}"));
+                }
+                mi
+            })
+            .collect();
+
+        let selector = if has_seasons {
+            let seasons = seasons.clone();
+            Some(view! {
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="text-gray-300 text-sm">"الموسم:"</span>
+                    <select
+                        class="bg-white/10 backdrop-blur-md text-white rounded-xl py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                        prop:value=move || {
+                            selected_season.get().map(|v| v.to_string()).unwrap_or_default()
+                        }
+                        on:change=move |ev| {
+                            if let Some(sel) = ev
+                                .target()
+                                .and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok())
+                                && let Ok(v) = sel.value().parse::<i64>()
+                            {
+                                selected_season.set(Some(v));
+                            }
+                        }
+                    >
+                        <For each=move || seasons.clone() key=|s| *s let:season>
+                            <option value=season.to_string()>
+                                {format!("الموسم {}", season)}
+                            </option>
+                        </For>
+                    </select>
+                </div>
+            })
+        } else {
+            None
+        };
+
+        view! {
+            {selector}
+            <MediaPlayer
+                items=media_items.into()
+                initial_index=initial_index
+                audio=audio
+                artwork=artwork.clone()
+                playlist_title=playlist_title.clone()
+                on_rename=on_rename
+                on_delete=on_delete
+                show_download=true
+            />
+        }
+    };
+
+    // Reserved for future per-item permalink generation in the parent.
     let _ = section_slug;
 
-    Either::Right(view! {
-        <MediaPlayer
-            items=media_items.into()
-            audio=audio
-            artwork=artwork
-            playlist_title=playlist_title
-            on_rename=on_rename
-            on_delete=on_delete
-        />
-    })
+    Either::Right(view! { {body} })
 }
