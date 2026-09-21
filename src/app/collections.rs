@@ -2,7 +2,10 @@ use crate::app::model::{Collection, Item};
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
-use crate::app::server::SqlErr;
+use crate::app::server::{
+    SqlErr,
+    db::{self, CollectionField},
+};
 
 #[server]
 pub async fn fetch_collections(
@@ -12,48 +15,16 @@ pub async fn fetch_collections(
     search_query: Option<String>,
 ) -> Result<Vec<Collection>, ServerFnError> {
     use crate::app::server::AppState;
-
     let state: AppState = expect_context();
-
-    #[derive(sqlx::FromRow)]
-    struct Row {
-        id: i64,
-        section_id: i64,
-        section_slug: String,
-        title: String,
-        poster: Option<String>,
-        description: Option<String>,
-        items_count: i64,
-    }
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT c.id, c.section_id, s.slug AS section_slug, \
-                c.title, c.poster, c.description, \
-                (SELECT COUNT(*) FROM items i WHERE i.collection_id = c.id) AS items_count \
-         FROM collections c JOIN sections s ON s.id = c.section_id \
-         WHERE s.slug = ?1 \
-           AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%') \
-         ORDER BY c.position, c.title LIMIT ?3 OFFSET ?4",
+    db::fetch_collections(
+        &state.db,
+        &section_slug,
+        offset,
+        size,
+        search_query.as_deref(),
     )
-    .bind(&section_slug)
-    .bind(&search_query)
-    .bind(size as i64)
-    .bind(offset as i64)
-    .fetch_all(&state.db)
     .await
-    .srv()?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| Collection {
-            id: r.id as u64,
-            section_id: r.section_id as u64,
-            section_slug: r.section_slug,
-            title: r.title,
-            poster: r.poster,
-            description: r.description,
-            items_count: r.items_count as u32,
-        })
-        .collect())
+    .srv()
 }
 
 #[server]
@@ -62,17 +33,10 @@ pub async fn fetch_collections_count(
     search_query: Option<String>,
 ) -> Result<usize, ServerFnError> {
     use crate::app::server::AppState;
-
     let state: AppState = expect_context();
-    let n: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM collections c JOIN sections s ON s.id = c.section_id \
-         WHERE s.slug = ?1 AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')",
-    )
-    .bind(&section_slug)
-    .bind(&search_query)
-    .fetch_one(&state.db)
-    .await
-    .srv()?;
+    let n = db::fetch_collections_count(&state.db, &section_slug, search_query.as_deref())
+        .await
+        .srv()?;
     Ok(n as usize)
 }
 
@@ -83,115 +47,26 @@ pub async fn fetch_collection_detail(
 ) -> Result<Collection, ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-
-    #[derive(sqlx::FromRow)]
-    struct Row {
-        id: i64,
-        section_id: i64,
-        section_slug: String,
-        title: String,
-        poster: Option<String>,
-        description: Option<String>,
-        items_count: i64,
-    }
-    let r: Row = sqlx::query_as(
-        "SELECT c.id, c.section_id, s.slug AS section_slug, \
-                c.title, c.poster, c.description, \
-                (SELECT COUNT(*) FROM items i WHERE i.collection_id = c.id) AS items_count \
-         FROM collections c JOIN sections s ON s.id = c.section_id \
-         WHERE s.slug = ? AND c.id = ?",
-    )
-    .bind(&section_slug)
-    .bind(collection_id as i64)
-    .fetch_optional(&state.db)
-    .await
-    .srv()?
-    .ok_or_else(|| ServerFnError::new("collection not found"))?;
-
-    Ok(Collection {
-        id: r.id as u64,
-        section_id: r.section_id as u64,
-        section_slug: r.section_slug,
-        title: r.title,
-        poster: r.poster,
-        description: r.description,
-        items_count: r.items_count as u32,
-    })
+    db::fetch_collection_detail(&state.db, &section_slug, collection_id as i64)
+        .await
+        .srv()?
+        .ok_or_else(|| ServerFnError::new("collection not found"))
 }
 
 #[server]
 pub async fn fetch_items(collection_id: u64) -> Result<Vec<Item>, ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    use crate::app::model::MediaFile;
-
-    #[derive(sqlx::FromRow)]
-    struct Row {
-        id: i64,
-        collection_id: i64,
-        number: i64,
-        season_number: Option<i64>,
-        title: Option<String>,
-        poster: Option<String>,
-        description: Option<String>,
-        file_id: i64,
-        size: i64,
-        dur: i64,
-    }
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT i.id, i.collection_id, i.number, i.season_number, \
-                i.title, i.poster, i.description, \
-                f.id AS file_id, f.size_bytes AS size, f.duration_secs AS dur \
-         FROM items i JOIN files f ON f.id = i.file_id \
-         WHERE i.collection_id = ? \
-         ORDER BY COALESCE(i.season_number, 0), i.number",
-    )
-    .bind(collection_id as i64)
-    .fetch_all(&state.db)
-    .await
-    .srv()?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| Item {
-            id: r.id as u64,
-            collection_id: r.collection_id as u64,
-            number: r.number,
-            season_number: r.season_number,
-            title: r.title,
-            poster: r.poster,
-            description: r.description,
-            file: MediaFile {
-                id: r.file_id as u64,
-                path: format!("/media/{}", r.file_id),
-                size: r.size as u64,
-                duration: r.dur as u64,
-            },
-        })
-        .collect())
+    db::fetch_items(&state.db, collection_id as i64).await.srv()
 }
 
 #[server]
 pub async fn create_empty_collection(section_slug: String) -> Result<u64, ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    let section_id: i64 = sqlx::query_scalar("SELECT id FROM sections WHERE slug = ?")
-        .bind(&section_slug)
-        .fetch_one(&state.db)
+    let id = db::insert_empty_collection(&state.db, &section_slug)
         .await
         .srv()?;
-
-    let id: i64 = sqlx::query_scalar(
-        "INSERT INTO collections (section_id, title, position) \
-         VALUES (?, 'بدون عنوان', \
-                 (SELECT COALESCE(MAX(position)+1,0) FROM collections WHERE section_id=?)) \
-         RETURNING id",
-    )
-    .bind(section_id)
-    .bind(section_id)
-    .fetch_one(&state.db)
-    .await
-    .srv()?;
     Ok(id as u64)
 }
 
@@ -202,17 +77,9 @@ pub async fn patch_collection_field(
     value: Option<String>,
 ) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
-    use sqlx::AssertSqlSafe;
     let state: AppState = expect_context();
-    let col = match field.as_str() {
-        "title" | "description" | "poster" => field,
-        _ => return Err(ServerFnError::new("حقل غير مسموح")),
-    };
-    let sql = AssertSqlSafe(format!("UPDATE collections SET {col} = ? WHERE id = ?"));
-    sqlx::query(sql)
-        .bind(value)
-        .bind(id as i64)
-        .execute(&state.db)
+    let f = CollectionField::parse(&field).ok_or_else(|| ServerFnError::new("حقل غير مسموح"))?;
+    db::update_collection_field(&state.db, id as i64, f, value.as_deref())
         .await
         .srv()?;
     Ok(())
@@ -227,10 +94,7 @@ pub async fn patch_item_title(id: u64, title: String) -> Result<(), ServerFnErro
     } else {
         Some(title)
     };
-    sqlx::query("UPDATE items SET title = ? WHERE id = ?")
-        .bind(t)
-        .bind(id as i64)
-        .execute(&state.db)
+    db::update_item_title(&state.db, id as i64, t.as_deref())
         .await
         .srv()?;
     Ok(())
@@ -240,11 +104,7 @@ pub async fn patch_item_title(id: u64, title: String) -> Result<(), ServerFnErro
 pub async fn delete_collection(id: u64) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    sqlx::query("DELETE FROM collections WHERE id=?")
-        .bind(id as i64)
-        .execute(&state.db)
-        .await
-        .srv()?;
+    db::delete_collection(&state.db, id as i64).await.srv()?;
     Ok(())
 }
 
@@ -252,11 +112,7 @@ pub async fn delete_collection(id: u64) -> Result<(), ServerFnError> {
 pub async fn delete_item(id: u64) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    sqlx::query("DELETE FROM items WHERE id=?")
-        .bind(id as i64)
-        .execute(&state.db)
-        .await
-        .srv()?;
+    db::delete_item(&state.db, id as i64).await.srv()?;
     Ok(())
 }
 
@@ -265,9 +121,8 @@ pub async fn upload_collection_poster(
     data: server_fn::codec::MultipartData,
 ) -> Result<String, ServerFnError> {
     use crate::app::server::{AppState, poster::write_poster, upload::extension_of};
-    use sqlx::AssertSqlSafe;
-
     let state: AppState = expect_context();
+
     let mut mp = data.into_inner().unwrap();
     let mut section_slug = String::new();
     let mut id: i64 = 0;
@@ -300,11 +155,7 @@ pub async fn upload_collection_poster(
     )
     .await?;
 
-    let sql = AssertSqlSafe("UPDATE collections SET poster = ? WHERE id = ?".to_string());
-    sqlx::query(sql)
-        .bind(&url)
-        .bind(id)
-        .execute(&state.db)
+    db::update_collection_field(&state.db, id, CollectionField::Poster, Some(&url))
         .await
         .srv()?;
     Ok(url)

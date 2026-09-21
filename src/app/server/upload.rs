@@ -17,7 +17,7 @@ use leptos::prelude::ServerFnError;
 
 use crate::app::model::MediaKind;
 use crate::app::server::convert::{JobPhase, job_set_phase};
-use crate::app::server::{AppState, Jobs};
+use crate::app::server::{AppState, Jobs, SqlErr};
 
 const JOB_RETENTION: Duration = Duration::from_secs(60);
 
@@ -42,11 +42,7 @@ pub async fn process_upload(
     job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
     let file_rows = persist::insert_files(&state.db, &staged).await?;
 
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    let mut tx = state.db.begin().await.srv()?;
     persist::insert_items(&mut tx, collection_id, payload.season_number, &file_rows).await?;
     persist::attach_poster(
         &mut tx,
@@ -55,9 +51,7 @@ pub async fn process_upload(
         &state.config.storage.data_dir,
     )
     .await?;
-    tx.commit()
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    tx.commit().await.srv()?;
 
     job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
     if let Some(id) = job_id {

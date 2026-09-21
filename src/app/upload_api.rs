@@ -26,21 +26,19 @@ pub enum ConversionStatus {
 #[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {
     use crate::app::model::MediaKind;
-    use crate::app::server::AppState;
     use crate::app::server::convert::{Job, JobPhase};
     use crate::app::server::upload::{
         needs_conversion, new_job_id, parse_upload_multipart, process_upload,
         schedule_job_eviction, validate_extensions,
     };
+    use crate::app::server::{AppState, SqlErr, db};
 
     let state: AppState = expect_context();
     let payload = parse_upload_multipart(data).await?;
 
-    let kind_str: String = sqlx::query_scalar("SELECT media_kind FROM sections WHERE slug = ?")
-        .bind(&payload.section_slug)
-        .fetch_optional(&state.db)
+    let kind_str = db::fetch_section_kind(&state.db, &payload.section_slug)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .srv()?
         .ok_or_else(|| ServerFnError::new("section not found"))?;
     let kind = MediaKind::try_from(kind_str.as_str()).map_err(ServerFnError::new)?;
 

@@ -8,6 +8,8 @@ use axum::{
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
+use crate::app::server::db;
+
 use super::AppState;
 
 pub async fn stream_media(
@@ -15,18 +17,13 @@ pub async fn stream_media(
     Path(file_id): Path<i64>,
     req: Request<Body>,
 ) -> Response {
-    let rel: Option<String> =
-        match sqlx::query_scalar("SELECT relative_path FROM files WHERE id = ?")
-            .bind(file_id)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                leptos::logging::error!("[stream] db error: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
+    let rel: Option<String> = match db::fetch_file_path(&state.db, file_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            leptos::logging::error!("[stream] db error: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
     let Some(rel) = rel else {
         return StatusCode::NOT_FOUND.into_response();
