@@ -512,3 +512,17 @@ pub async fn fetch_section_kind(
         .fetch_optional(pool)
         .await
 }
+
+pub async fn update_section_title<'e, E>(
+    executor: E,
+    id: i64,
+    title: &str,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query!("UPDATE sections SET title = ? WHERE id = ?", title, id)
+        .execute(executor)
+        .await
+        .map(|_| ())
+}

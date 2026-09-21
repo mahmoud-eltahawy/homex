@@ -5,12 +5,13 @@ use leptos_router::{LazyRoute, lazy_route};
 use crate::app::{
     collections::{fetch_collections, fetch_collections_count},
     common::{CardsLoading, CollectionGrid, EmptyState},
-    icons::{AudioIcon, MovieIcon, ViewAllIcon},
-    model::{Collection, MediaKind, Section},
+    icons::{DeleteIcon, EditIcon, ViewAllIcon, icon_for},
+    inline_edit::{EditableText, provide_edit_mode, use_edit_mode},
+    model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
     search::SearchBar,
-    sections::fetch_sections,
+    sections::{create_section, delete_section, fetch_sections, patch_section_title},
 };
 
 const MEDIA_LIST_SIZE: usize = 6;
@@ -32,13 +33,20 @@ impl LazyRoute for HomePage {
     fn view(this: Self) -> AnyView {
         let search_query = this.search_query;
         let sections = this.sections;
-        let adapter = move |s: Vec<Section>| AllSectionsProps {
-            sections: s,
+        let edit_on = provide_edit_mode();
+
+        let adapter = move |value: Vec<Section>| AllSectionsProps {
+            sections: value,
             search_query,
+            sections_resource: sections,
         };
+
         view! {
             <div class="min-h-screen bg-[#0c0b1a] text-white">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-6 flex flex-col">
+                    <div class="flex justify-end mb-2">
+                        <EditToggle edit_on=edit_on/>
+                    </div>
                     <SearchBar search_query=search_query offset_reset=|| {} />
                     <ResourceView resource=sections view_fn=AllSections adapter=adapter/>
                 </div>
@@ -48,25 +56,81 @@ impl LazyRoute for HomePage {
     }
 }
 
+// ─── Edit-mode toggle ────────────────────────────────────────────────────
+
 #[component]
-fn AllSections(sections: Vec<Section>, search_query: RwSignal<Option<String>>) -> impl IntoView {
-    sections
-        .into_iter()
-        .map(|section| view! { <SectionTeaser section=section search_query=search_query/> })
-        .collect_view()
+fn EditToggle(edit_on: RwSignal<bool>) -> impl IntoView {
+    let toggle_class = move || {
+        format!(
+            "inline-flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-md \
+             transition text-sm border {}",
+            if edit_on.get() {
+                "bg-cyan-500/25 border-cyan-400/50 text-white"
+            } else {
+                "bg-white/10 border-white/10 text-gray-300 hover:bg-white/20 hover:text-white"
+            }
+        )
+    };
+
+    view! {
+        <button
+            type="button"
+            class=toggle_class
+            on:click=move |_| edit_on.update(|x| *x = !*x)
+            aria-pressed=move || edit_on.get().to_string()
+            aria-label="تبديل وضع التعديل"
+        >
+            <EditIcon/>
+            <span class="hidden sm:inline">
+                {move || if edit_on.get() { "إنهاء التعديل" } else { "تعديل" }}
+            </span>
+        </button>
+    }
 }
+
+// ─── Section list ────────────────────────────────────────────────────────
+
 #[component]
-fn SectionTeaser(section: Section, search_query: RwSignal<Option<String>>) -> impl IntoView {
+fn AllSections(
+    sections: Vec<Section>,
+    search_query: RwSignal<Option<String>>,
+    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+) -> impl IntoView {
+    let list = sections
+        .into_iter()
+        .map(|section| {
+            view! {
+                <SectionTeaser
+                    section=section
+                    search_query=search_query
+                    sections_resource=sections_resource
+                />
+            }
+        })
+        .collect_view();
+
+    let edit_on = use_edit_mode();
+
+    view! {
+        {list}
+        <Show when=move || edit_on.get()>
+            <NewSectionForm sections_resource=sections_resource/>
+        </Show>
+    }
+}
+
+#[component]
+fn SectionTeaser(
+    section: Section,
+    search_query: RwSignal<Option<String>>,
+    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+) -> impl IntoView {
     let folded = RwSignal::new(false);
     let offset = RwSignal::new(0usize);
 
-    let kind = section.media_kind;
     let slug_for_items = section.slug.clone();
     let slug_for_count = section.slug.clone();
-    let href = section.href();
-    let title = section.title.clone();
 
-    // Any new search resets every section's page back to 1.
     Effect::new(move |_| {
         let _ = search_query.get();
         offset.set(0);
@@ -94,15 +158,14 @@ fn SectionTeaser(section: Section, search_query: RwSignal<Option<String>>) -> im
         |(s, q)| fetch_collections_count(s, q),
     );
 
-    // Folded sections slide to the bottom of the flex column.
     let order = move || if folded.get() { "1" } else { "0" };
 
+    let section_for_header = section.clone();
     let header_adapter = move |c: usize| SectionHeaderProps {
-        kind,
-        title: title.clone(),
+        section: section_for_header.clone(),
         count: c,
-        href: href.clone(),
         folded,
+        sections_resource,
     };
 
     let pagination_adapter = move |c: usize| PaginationControlsProps {
@@ -141,33 +204,83 @@ fn SectionTeaser(section: Section, search_query: RwSignal<Option<String>>) -> im
     }
 }
 
+// ─── Section header (inline editable) ────────────────────────────────────
+
 #[component]
 fn SectionHeader(
-    kind: MediaKind,
-    title: String,
+    section: Section,
     count: usize,
-    href: String,
     folded: RwSignal<bool>,
+    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
 ) -> impl IntoView {
-    let icon = match kind {
-        MediaKind::Video => Either::Left(MovieIcon()),
-        MediaKind::Audio => Either::Right(AudioIcon()),
-    };
+    let edit_on = use_edit_mode();
+    let id = section.id;
+    let kind = section.media_kind;
+    let href_display = section.href();
+    let href_actions = section.href();
+    let title = RwSignal::new(section.title.clone());
+
+    let rename = Action::new_local(|(id, t): &(u64, String)| patch_section_title(*id, t.clone()));
+    let delete_action = Action::new_local(|id: &u64| delete_section(*id));
+
+    Effect::new(move |_| {
+        if matches!(rename.value().get(), Some(Ok(_)))
+            || matches!(delete_action.value().get(), Some(Ok(_)))
+        {
+            sections_resource.refetch();
+        }
+    });
+
+    let commit_title = Callback::new(move |v: String| {
+        title.set(v.clone());
+        rename.dispatch((id, v));
+    });
+
     view! {
-        <div class="flex items-center justify-between mb-6">
-            <a href=href.clone() class="flex items-center gap-3 group min-w-0">
-                <span class="flex items-center shrink-0">{icon}</span>
-                <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
-                    {title}
-                </span>
-                <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
-                    {count}
-                </span>
-            </a>
+        <div class="flex items-center justify-between mb-6 gap-3">
+            <Show
+                when=move || edit_on.get()
+                fallback=move || view! {
+                    <a
+                        href=href_display.clone()
+                        class="flex items-center gap-3 group min-w-0 flex-1"
+                    >
+                        <span class="flex items-center shrink-0">{icon_for(kind)}</span>
+                        <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
+                            {move || title.get()}
+                        </span>
+                        <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
+                            {count}
+                        </span>
+                    </a>
+                }
+            >
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                    <span class="flex items-center shrink-0">{icon_for(kind)}</span>
+                    <EditableText
+                        value=Signal::derive(move || title.get())
+                        on_commit=commit_title
+                        class="text-lg font-bold text-white truncate"
+                    />
+                    <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
+                        {count}
+                    </span>
+                </div>
+            </Show>
             <div class="flex items-center gap-1 shrink-0">
+                <Show when=move || edit_on.get()>
+                    <button
+                        type="button"
+                        on:click=move |_| {delete_action.dispatch(id);}
+                        class="p-1 rounded hover:bg-red-500/20 text-red-300 transition-colors"
+                        aria-label="حذف القسم"
+                    >
+                        <DeleteIcon/>
+                    </button>
+                </Show>
                 <FoldButton folded/>
                 <a
-                    href=href
+                    href=href_actions
                     class="p-1 rounded hover:bg-white/10 transition-colors"
                     aria-label="View all"
                 >
@@ -211,4 +324,90 @@ fn CollectionStrip(collections: Vec<Collection>) -> impl IntoView {
         return Either::Left(view! { <EmptyState label="0"/> });
     }
     Either::Right(view! { <CollectionGrid collections=collections/> })
+}
+
+// ─── New-section form (only visible in edit mode) ────────────────────────
+
+#[component]
+fn NewSectionForm(
+    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+) -> impl IntoView {
+    let title = RwSignal::new(String::new());
+    let kind = RwSignal::new("video".to_string());
+    let nested = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+
+    let create = Action::new_local(|(t, k, n): &(String, String, bool)| {
+        create_section(t.clone(), k.clone(), *n)
+    });
+
+    Effect::new(move |_| match create.value().get() {
+        Some(Ok(_)) => {
+            title.set(String::new());
+            error.set(None);
+            sections_resource.refetch();
+        }
+        Some(Err(e)) => error.set(Some(e.to_string())),
+        None => {}
+    });
+
+    let submit = move |ev: web_sys::SubmitEvent| {
+        ev.prevent_default();
+        let t = title.get_untracked().trim().to_string();
+        if t.is_empty() {
+            error.set(Some("الاسم مطلوب".into()));
+            return;
+        }
+        error.set(None);
+        create.dispatch((t, kind.get_untracked(), nested.get_untracked()));
+    };
+
+    view! {
+        <div class="mt-12 border-2 border-dashed border-cyan-400/30 rounded-2xl p-6 bg-cyan-500/[0.03]">
+            <h3 class="text-lg font-bold text-white mb-4">"إضافة قسم جديد"</h3>
+            <form on:submit=submit class="flex flex-wrap gap-3 items-end">
+                <label class="flex flex-col text-sm flex-1 min-w-48">
+                    <span class="mb-1 text-gray-300">"الاسم"</span>
+                    <input
+                        type="text"
+                        prop:value=move || title.get()
+                        on:input=move |e| title.set(event_target_value(&e))
+                        placeholder="أفلام، مسلسلات، ألبومات..."
+                        class="bg-white/10 rounded-lg px-3 py-1.5 text-white w-full"
+                    />
+                </label>
+                <label class="flex flex-col text-sm">
+                    <span class="mb-1 text-gray-300">"النوع"</span>
+                    <select
+                        prop:value=move || kind.get()
+                        on:change=move |e| kind.set(event_target_value(&e))
+                        class="bg-white/10 rounded-lg px-3 py-1.5 text-white"
+                    >
+                        <option value="video">"فيديو"</option>
+                        <option value="audio">"صوت"</option>
+                    </select>
+                </label>
+                <label class="flex items-center gap-2 text-sm pb-2 text-gray-300">
+                    <input
+                        type="checkbox"
+                        prop:checked=move || nested.get()
+                        on:change=move |e| nested.set(event_target_checked(&e))
+                    />
+                    <span>"مجموعات"</span>
+                </label>
+                <button
+                    type="submit"
+                    disabled=move || create.pending().get()
+                    class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 \
+                           hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
+                           disabled:opacity-50"
+                >
+                    {move || if create.pending().get() { "جاري الإضافة..." } else { "إضافة" }}
+                </button>
+            </form>
+            {move || error.get().map(|e| view! {
+                <div class="mt-3 text-red-300 text-sm">{e}</div>
+            })}
+        </div>
+    }
 }

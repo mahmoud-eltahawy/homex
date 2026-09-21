@@ -5,6 +5,20 @@ use leptos::prelude::*;
 use crate::app::server::{SqlErr, db};
 
 #[server]
+pub async fn patch_section_title(id: u64, title: String) -> Result<(), ServerFnError> {
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+    let t = title.trim();
+    if t.is_empty() {
+        return Err(ServerFnError::new("العنوان مطلوب"));
+    }
+    db::update_section_title(&state.db, id as i64, t)
+        .await
+        .srv()?;
+    Ok(())
+}
+
+#[server]
 pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();

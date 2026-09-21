@@ -1,5 +1,5 @@
 use crate::app::{
-    icons::{AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, SettingsIcon, XIcon},
+    icons::{AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, XIcon},
     model::{MediaKind, Section},
     sections::fetch_sections,
 };
@@ -114,7 +114,6 @@ fn FooterGrid() -> impl IntoView {
                 </Transition>
             </div>
             <div class="flex items-center gap-6">
-                <NavLink href="/settings".to_string() label="الإعدادات".to_string() icon={SettingsIcon()}/>
                 <span class="text-gray-500 text-xs font-mono">"v1.0.0"</span>
             </div>
         </div>
@@ -154,13 +153,6 @@ fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
                             }).collect_view()
                         })}
                     </Transition>
-                    <div class="border-t border-white/10 my-3"></div>
-                    <MobileMenuLink
-                        href="/settings".to_string()
-                        icon=SettingsIcon()
-                        label="الإعدادات".to_string()
-                        open=open
-                    />
                 </div>
             </div>
         </Show>

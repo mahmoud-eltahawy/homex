@@ -1,6 +1,6 @@
 use crate::app::{
     collection_detail::CollectionDetailPage, home::HomePage, layout::Layout,
-    section_listing::SectionListingPage, settings::SettingsPage,
+    section_listing::SectionListingPage,
 };
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
@@ -16,7 +16,6 @@ mod home;
 mod layout;
 mod section_listing;
 mod sections;
-mod settings;
 
 mod common;
 pub mod detail;
@@ -63,7 +62,6 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/")            view={Lazy::<HomePage>::new()}/>
                     <Route path=path!("/s/:slug")     view={Lazy::<SectionListingPage>::new()}/>
                     <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
-                    <Route path=path!("/settings")    view={Lazy::<SettingsPage>::new()}/>
                     <Route
                         path=path!("/s/:slug/:id/item/:item_id")
                         view={Lazy::<CollectionDetailPage>::new()}
