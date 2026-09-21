@@ -50,13 +50,11 @@ impl LazyRoute for HomePage {
 
 #[component]
 fn AllSections(sections: Vec<Section>, search_query: RwSignal<Option<String>>) -> impl IntoView {
-    view! {
-        <For each=move || sections.clone() key=|s| s.id let:section>
-            <SectionTeaser section=section search_query=search_query/>
-        </For>
-    }
+    sections
+        .into_iter()
+        .map(|section| view! { <SectionTeaser section=section search_query=search_query/> })
+        .collect_view()
 }
-
 #[component]
 fn SectionTeaser(section: Section, search_query: RwSignal<Option<String>>) -> impl IntoView {
     let folded = RwSignal::new(false);

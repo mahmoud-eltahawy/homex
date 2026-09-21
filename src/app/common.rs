@@ -58,11 +58,14 @@ pub fn CollectionCard(collection: Collection) -> impl IntoView {
 
 #[component]
 pub fn CollectionGrid(collections: Vec<Collection>) -> impl IntoView {
+    let cards = collections
+        .into_iter()
+        .map(|c| view! { <CollectionCard collection=c/> })
+        .collect_view();
+
     view! {
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-            <For each=move || collections.clone() key=|c| c.id let:c>
-                <CollectionCard collection=c/>
-            </For>
+            {cards}
         </div>
     }
 }

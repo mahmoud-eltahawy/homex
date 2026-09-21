@@ -55,8 +55,8 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 pub fn App() -> impl IntoView {
     provide_meta_context();
     view! {
-        <Stylesheet id="leptos" href="/pkg/mydisc.css"/>
-        <Title text="وسائطي - سينماك الشخصية"/>
+        <Stylesheet id="leptos" href="/pkg/homex.css"/>
+        <Title text="HomeX"/>
         <Router>
             <Routes fallback=|| "Page not found.".into_view()>
                 <ParentRoute path=path!("") view=Layout>
