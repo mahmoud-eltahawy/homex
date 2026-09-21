@@ -4,6 +4,7 @@ use crate::app::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionGridProps, CollectionPage,
         collections_paginated,
     },
+    inline_edit::use_edit_mode,
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
@@ -128,7 +129,9 @@ fn CreateNewButton(
     });
 
     let label_for_view = label.clone();
+    let edit_on = use_edit_mode();
     view! {
+        <Show when=move || edit_on.get()>
         <button
             type="button"
             on:click={
@@ -139,11 +142,15 @@ fn CreateNewButton(
             class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 disabled:opacity-50"
         >
             <span class="text-lg leading-none">"+"</span>
-            {move || if action.pending().get() {
+            {
+                let label_for_view= label_for_view.clone();
+
+                move || if action.pending().get() {
                 "جاري الإنشاء...".to_string()
             } else {
                 label_for_view.clone()
             }}
         </button>
+        </Show>
     }
 }
