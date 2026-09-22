@@ -1,10 +1,9 @@
 #![recursion_limit = "256"]
 
-use axum::middleware;
-
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
+    use axum::middleware;
     use axum::{Extension, Router, routing::get};
     use homex::app::server::auth;
     use homex::app::server::{AppState, Config};

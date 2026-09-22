@@ -59,6 +59,7 @@ pub fn App() -> impl IntoView {
         <Title text="HomeX"/>
         <Router>
             <Routes fallback=|| "Page not found.".into_view()>
+                <Route path=path!("/login") view={Lazy::<LoginPage>::new()}/>
                 <ParentRoute path=path!("") view=Layout>
                     <Route path=path!("/")            view={Lazy::<HomePage>::new()}/>
                     <Route path=path!("/s/:slug")     view={Lazy::<SectionListingPage>::new()}/>
@@ -67,7 +68,6 @@ pub fn App() -> impl IntoView {
                         path=path!("/s/:slug/:id/item/:item_id")
                         view={Lazy::<CollectionDetailPage>::new()}
                     />
-                    <Route path=path!("/login") view={Lazy::<LoginPage>::new()}/>
                 </ParentRoute>
             </Routes>
         </Router>
