@@ -10,6 +10,31 @@ use leptos_use::{UseTimeoutFnReturn, use_document, use_event_listener, use_timeo
 use serde::{Deserialize, Serialize};
 use web_sys::{HtmlInputElement, MouseEvent};
 
+// ─── Shared class strings ─────────────────────────────────────────────────
+
+const ICON_BUTTON: &str = "hover:scale-110 transition-transform duration-200 p-1 \
+                           rounded-full hover:bg-white/10";
+
+const NAV_BUTTON: &str = "hover:scale-110 transition-transform duration-200 p-1 \
+                          rounded-full hover:bg-white/10 disabled:opacity-30 \
+                          disabled:hover:bg-transparent disabled:hover:scale-100";
+
+const VOLUME_SLIDER: &str = "w-16 sm:w-20 h-1.5 bg-white/20 rounded-full \
+                             appearance-none cursor-pointer \
+                             [&::-webkit-slider-thumb]:appearance-none \
+                             [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 \
+                             [&::-webkit-slider-thumb]:rounded-full \
+                             [&::-webkit-slider-thumb]:bg-cyan-400";
+
+const SEEK_SLIDER: &str = "flex-1 h-1.5 bg-white/20 rounded-full appearance-none \
+                           cursor-pointer \
+                           [&::-webkit-slider-thumb]:appearance-none \
+                           [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 \
+                           [&::-webkit-slider-thumb]:rounded-full \
+                           [&::-webkit-slider-thumb]:bg-cyan-400 \
+                           [&::-webkit-slider-thumb]:shadow-lg \
+                           [&::-webkit-slider-thumb]:shadow-cyan-400/30";
+
 // ─── Public data type ─────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -37,6 +62,331 @@ impl MediaItem {
     }
 }
 
+// ─── Context marker types ─────────────────────────────────────────────────
+// Newtype wrappers so nested players or future widgets can't accidentally
+// shadow a same-shaped context. The pattern is the same for all five:
+//   `provide` stores the bundle; `expect` retrieves it from the nearest
+//   provider up the owner chain.
+
+#[derive(Clone, Copy)]
+struct PlayerSignalsCtx(PlayerSignals);
+
+#[derive(Clone, Copy)]
+struct PlayerDerivedCtx(PlayerDerived);
+
+#[derive(Clone, Copy)]
+struct PlayerHandlersCtx(PlayerHandlers);
+
+#[derive(Clone, Copy)]
+struct PlayerNavCtx(PlayerNav);
+
+#[derive(Clone, Copy)]
+struct PlaylistConfigCtx(PlaylistConfig);
+
+// ─── Signal bundle ────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct PlayerSignals {
+    playing: RwSignal<bool>,
+    current_time: RwSignal<f64>,
+    duration: RwSignal<f64>,
+    volume: RwSignal<f64>,
+    last_volume: RwSignal<f64>,
+    muted: RwSignal<bool>,
+    fullscreen: RwSignal<bool>,
+    controls_visible: RwSignal<bool>,
+    play_after_load: RwSignal<bool>,
+}
+
+impl PlayerSignals {
+    fn new() -> Self {
+        Self {
+            playing: RwSignal::new(false),
+            current_time: RwSignal::new(0.0),
+            duration: RwSignal::new(0.0),
+            volume: RwSignal::new(1.0),
+            last_volume: RwSignal::new(1.0),
+            muted: RwSignal::new(false),
+            fullscreen: RwSignal::new(false),
+            controls_visible: RwSignal::new(true),
+            play_after_load: RwSignal::new(false),
+        }
+    }
+
+    fn provide(s: Self) {
+        provide_context(PlayerSignalsCtx(s));
+    }
+
+    fn expect() -> Self {
+        expect_context::<PlayerSignalsCtx>().0
+    }
+}
+
+// ─── Derived signals ──────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct PlayerDerived {
+    current_src: Signal<String>,
+    current_title: Signal<String>,
+    current_artwork: Signal<Option<String>>,
+    has_prev: Signal<bool>,
+    has_next: Signal<bool>,
+    has_playlist: Signal<bool>,
+}
+
+impl PlayerDerived {
+    fn build(
+        items: Signal<Vec<MediaItem>>,
+        current_idx: RwSignal<usize>,
+        show_playlist: bool,
+        artwork_fallback: Option<String>,
+    ) -> Self {
+        let current_item = Memo::new(move |_| items.get().get(current_idx.get()).cloned());
+
+        let current_src =
+            Signal::derive(move || current_item.get().map(|i| i.src).unwrap_or_default());
+        let current_title =
+            Signal::derive(move || current_item.get().map(|i| i.title).unwrap_or_default());
+        let current_artwork = {
+            let fallback = artwork_fallback;
+            Signal::derive(move || {
+                current_item
+                    .get()
+                    .and_then(|i| i.artwork)
+                    .or_else(|| fallback.clone())
+            })
+        };
+
+        let has_prev = Signal::derive(move || current_idx.get() > 0);
+        let has_next = Signal::derive(move || current_idx.get() + 1 < items.get().len());
+        let has_playlist = Signal::derive(move || show_playlist && items.get().len() > 1);
+
+        Self {
+            current_src,
+            current_title,
+            current_artwork,
+            has_prev,
+            has_next,
+            has_playlist,
+        }
+    }
+
+    fn provide(d: Self) {
+        provide_context(PlayerDerivedCtx(d));
+    }
+
+    fn expect() -> Self {
+        expect_context::<PlayerDerivedCtx>().0
+    }
+}
+
+// ─── Handlers ─────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct PlayerHandlers {
+    toggle_play: Callback<MouseEvent>,
+    toggle_mute: Callback<MouseEvent>,
+    toggle_fullscreen: Callback<MouseEvent>,
+    handle_seek: Callback<web_sys::Event>,
+    handle_volume: Callback<web_sys::Event>,
+}
+
+impl PlayerHandlers {
+    fn provide(h: Self) {
+        provide_context(PlayerHandlersCtx(h));
+    }
+
+    fn expect() -> Self {
+        expect_context::<PlayerHandlersCtx>().0
+    }
+}
+
+// ─── Navigation callbacks ─────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct PlayerNav {
+    on_prev: Callback<MouseEvent>,
+    on_next: Callback<MouseEvent>,
+}
+
+impl PlayerNav {
+    fn provide(n: Self) {
+        provide_context(PlayerNavCtx(n));
+    }
+
+    fn expect() -> Self {
+        expect_context::<PlayerNavCtx>().0
+    }
+}
+
+// ─── Playlist config ──────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct PlaylistConfig {
+    on_rename: Option<Callback<(u64, String)>>,
+    on_delete: Option<Callback<u64>>,
+    show_download: bool,
+}
+
+impl PlaylistConfig {
+    fn provide(c: Self) {
+        provide_context(PlaylistConfigCtx(c));
+    }
+
+    fn expect() -> Self {
+        expect_context::<PlaylistConfigCtx>().0
+    }
+}
+
+// ─── Effects ──────────────────────────────────────────────────────────────
+
+fn install_clamp_effect(items: Signal<Vec<MediaItem>>, current_idx: RwSignal<usize>) {
+    Effect::new(move |_| {
+        let n = items.get().len();
+        if n == 0 {
+            current_idx.set(0);
+        } else if current_idx.get() >= n {
+            current_idx.set(n - 1);
+        }
+    });
+}
+
+fn install_src_reload_effect(
+    video_ref: NodeRef<html::Video>,
+    signals: PlayerSignals,
+    current_src: Signal<String>,
+) {
+    Effect::new(move || {
+        let src = current_src.get();
+        if let Some(video) = video_ref.get() {
+            video.set_src(&src);
+            video.load();
+            signals.playing.set(false);
+            signals.current_time.set(0.0);
+            signals.duration.set(0.0);
+            if signals.play_after_load.get_untracked() {
+                signals.play_after_load.set(false);
+                let _ = video.play();
+            }
+        }
+    });
+}
+
+// ─── Handler factories ────────────────────────────────────────────────────
+
+fn make_toggle_play(
+    video_ref: NodeRef<html::Video>,
+    playing: RwSignal<bool>,
+) -> impl Fn(MouseEvent) + Copy {
+    move |_| {
+        if let Some(video) = video_ref.get() {
+            if playing.get() {
+                video.pause().ok();
+            } else {
+                let _ = video.play();
+            }
+        }
+    }
+}
+
+fn make_handle_loaded_metadata(
+    video_ref: NodeRef<html::Video>,
+    duration: RwSignal<f64>,
+) -> impl Fn(web_sys::Event) + Copy {
+    move |_| {
+        if let Some(video) = video_ref.get() {
+            duration.set(video.duration());
+        }
+    }
+}
+
+fn make_handle_time_update(
+    video_ref: NodeRef<html::Video>,
+    current_time: RwSignal<f64>,
+) -> impl Fn(web_sys::Event) + Copy {
+    move |_| {
+        if let Some(video) = video_ref.get() {
+            current_time.set(video.current_time());
+        }
+    }
+}
+
+fn make_handle_seek(
+    video_ref: NodeRef<html::Video>,
+    current_time: RwSignal<f64>,
+) -> impl Fn(web_sys::Event) + Copy {
+    move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+            && let Ok(val) = input.value().parse::<f64>()
+            && let Some(video) = video_ref.get()
+        {
+            video.set_current_time(val);
+            current_time.set(val);
+        }
+    }
+}
+
+fn make_handle_volume(
+    video_ref: NodeRef<html::Video>,
+    volume: RwSignal<f64>,
+    muted: RwSignal<bool>,
+    last_volume: RwSignal<f64>,
+) -> impl Fn(web_sys::Event) + Copy {
+    move |ev: web_sys::Event| {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
+            && let Ok(val) = input.value().parse::<f64>()
+            && let Some(video) = video_ref.get()
+        {
+            video.set_volume(val);
+            video.set_muted(val == 0.0);
+            volume.set(val);
+            muted.set(val == 0.0);
+            if val > 0.0 {
+                last_volume.set(val);
+            }
+        }
+    }
+}
+
+fn make_toggle_mute(
+    video_ref: NodeRef<html::Video>,
+    volume: RwSignal<f64>,
+    last_volume: RwSignal<f64>,
+    muted: RwSignal<bool>,
+) -> impl Fn(MouseEvent) + Copy {
+    move |_| {
+        if let Some(video) = video_ref.get() {
+            if muted.get() {
+                video.set_muted(false);
+                let restore = last_volume.get().max(0.1);
+                video.set_volume(restore);
+                volume.set(restore);
+                muted.set(false);
+            } else {
+                last_volume.set(volume.get().max(0.1));
+                video.set_muted(true);
+                muted.set(true);
+            }
+        }
+    }
+}
+
+fn make_toggle_fullscreen(video_ref: NodeRef<html::Video>) -> impl Fn(MouseEvent) + Copy {
+    move |_| {
+        if let Some(video) = video_ref.get() {
+            if document().fullscreen_element().is_none() {
+                let _ = video.request_fullscreen();
+            } else {
+                document().exit_fullscreen();
+            }
+        }
+    }
+}
+
 // ─── Top-level component ──────────────────────────────────────────────────
 
 #[component]
@@ -52,70 +402,16 @@ pub fn MediaPlayer(
     #[prop(optional)] on_delete: Option<Callback<u64>>,
 ) -> impl IntoView {
     let current_idx = RwSignal::new(initial_index);
-
-    let has_playlist = Signal::derive(move || show_playlist && items.get().len() > 1);
-
-    Effect::new(move |_| {
-        let n = items.get().len();
-        if n == 0 {
-            current_idx.set(0);
-        } else if current_idx.get() >= n {
-            current_idx.set(n - 1);
-        }
-    });
-
-    let current_item = Memo::new(move |_| items.get().get(current_idx.get()).cloned());
-
-    let current_src = Signal::derive(move || current_item.get().map(|i| i.src).unwrap_or_default());
-    let current_title =
-        Signal::derive(move || current_item.get().map(|i| i.title).unwrap_or_default());
-    let current_artwork = {
-        let fallback = artwork.clone();
-        Signal::derive(move || {
-            current_item
-                .get()
-                .and_then(|i| i.artwork)
-                .or_else(|| fallback.clone())
-        })
-    };
-
-    let has_prev = Signal::derive(move || current_idx.get() > 0);
-
-    let has_next = Signal::derive(move || current_idx.get() + 1 < items.get().len());
-
-    let on_next: Callback<MouseEvent> = Callback::new(move |_| {
-        if current_idx.get_untracked() + 1 < items.get_untracked().len() {
-            current_idx.update(|i| *i += 1);
-        }
-    });
-
-    let on_prev: Callback<MouseEvent> = Callback::new(move |_| {
-        current_idx.update(|i| *i = i.saturating_sub(1));
-    });
-
-    // ── Element + state ──────────────────────────────────────────────
     let video_ref = NodeRef::<html::Video>::new();
-    let playing = RwSignal::new(false);
-    let current_time = RwSignal::new(0.0);
-    let duration = RwSignal::new(0.0);
-    let volume = RwSignal::new(1.0);
-    let last_volume = RwSignal::new(1.0);
-    let muted = RwSignal::new(false);
-    let fullscreen = RwSignal::new(false);
-    let controls_visible = RwSignal::new(true);
-    let play_after_load = RwSignal::new(false);
+    let signals = PlayerSignals::new();
+    let derived = PlayerDerived::build(items, current_idx, show_playlist, artwork.clone());
 
-    let u_document = use_document();
-    let _guard = use_event_listener(u_document.clone(), fullscreenchange, move |_| {
-        fullscreen.set(u_document.fullscreen().is_some_and(|x| x));
-    });
+    install_clamp_effect(items, current_idx);
+    install_src_reload_effect(video_ref, signals, derived.current_src);
 
-    let UseTimeoutFnReturn { start, stop, .. } = use_timeout_fn(
-        move |_i: i8| {
-            controls_visible.set(false);
-        },
-        3000.,
-    );
+    // ── Controls visibility timeout ───────────────────────────────────
+    let UseTimeoutFnReturn { start, stop, .. } =
+        use_timeout_fn(move |_i: i8| signals.controls_visible.set(false), 3000.);
     let start_hide_timer = {
         let stop = stop.clone();
         move || {
@@ -126,7 +422,7 @@ pub fn MediaPlayer(
     let show_controls = {
         let start_hide_timer = start_hide_timer.clone();
         move || {
-            controls_visible.set(true);
+            signals.controls_visible.set(true);
             start_hide_timer();
         }
     };
@@ -134,8 +430,8 @@ pub fn MediaPlayer(
         let show_controls = show_controls.clone();
         let stop = stop.clone();
         move || {
-            if controls_visible.get() {
-                controls_visible.set(false);
+            if signals.controls_visible.get() {
+                signals.controls_visible.set(false);
                 stop();
             } else {
                 show_controls();
@@ -143,104 +439,63 @@ pub fn MediaPlayer(
         }
     };
 
-    let handle_loaded_metadata = move |_| {
-        if let Some(video) = video_ref.get() {
-            duration.set(video.duration());
-        }
-    };
-    let handle_time_update = move |_| {
-        if let Some(video) = video_ref.get() {
-            current_time.set(video.current_time());
-        }
-    };
-    let toggle_play = move |_| {
-        if let Some(video) = video_ref.get() {
-            if playing.get() {
-                video.pause().ok();
-            } else {
-                let _ = video.play();
-            }
-        }
-    };
-    let handle_seek = move |ev: web_sys::Event| {
-        if let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-            && let Ok(val) = input.value().parse::<f64>()
-            && let Some(video) = video_ref.get()
-        {
-            video.set_current_time(val);
-            current_time.set(val);
-        }
-    };
-    let handle_volume = move |ev: web_sys::Event| {
-        if let Some(input) = ev
-            .target()
-            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
-            && let Ok(val) = input.value().parse::<f64>()
-            && let Some(video) = video_ref.get()
-        {
-            video.set_volume(val);
-            video.set_muted(val == 0.0);
-            volume.set(val);
-            muted.set(val == 0.0);
-            if val > 0.0 {
-                last_volume.set(val);
-            }
-        }
-    };
-    let toggle_mute = move |_| {
-        if let Some(video) = video_ref.get() {
-            if muted.get() {
-                video.set_muted(false);
-                let restore = last_volume.get().max(0.1);
-                video.set_volume(restore);
-                volume.set(restore);
-                muted.set(false);
-            } else {
-                last_volume.set(volume.get().max(0.1));
-                video.set_muted(true);
-                muted.set(true);
-            }
-        }
-    };
-    let toggle_fullscreen = move |_| {
-        if let Some(video) = video_ref.get() {
-            if document().fullscreen_element().is_none() {
-                let _ = video.request_fullscreen();
-            } else {
-                document().exit_fullscreen();
-            }
-        }
-    };
+    // ── Fullscreen listener ───────────────────────────────────────────
+    let u_document = use_document();
+    let _guard = use_event_listener(u_document.clone(), fullscreenchange, move |_| {
+        signals
+            .fullscreen
+            .set(u_document.fullscreen().is_some_and(|x| x));
+    });
 
-    // Auto-advance. We set a flag so the src-change effect knows to
-    // immediately start playback (matching YouTube behaviour).
+    // ── Navigation ────────────────────────────────────────────────────
+    let on_next: Callback<MouseEvent> = Callback::new(move |_| {
+        if current_idx.get_untracked() + 1 < items.get_untracked().len() {
+            current_idx.update(|i| *i += 1);
+        }
+    });
+    let on_prev: Callback<MouseEvent> = Callback::new(move |_| {
+        current_idx.update(|i| *i = i.saturating_sub(1));
+    });
+    let nav = PlayerNav { on_prev, on_next };
 
     let handle_ended = move |_| {
-        playing.set(false);
+        signals.playing.set(false);
         if current_idx.get_untracked() + 1 < items.get_untracked().len() {
-            play_after_load.set(true);
+            signals.play_after_load.set(true);
             current_idx.update(|i| *i += 1);
         }
     };
 
-    // Reload the media element whenever the current item changes.
-    Effect::new(move || {
-        let src = current_src.get();
-        if let Some(video) = video_ref.get() {
-            video.set_src(&src);
-            video.load();
-            playing.set(false);
-            current_time.set(0.0);
-            duration.set(0.0);
-            if play_after_load.get_untracked() {
-                play_after_load.set(false);
-                let _ = video.play();
-            }
-        }
-    });
+    // ── Build handler bundle ──────────────────────────────────────────
+    let handlers = PlayerHandlers {
+        toggle_play: Callback::new(make_toggle_play(video_ref, signals.playing)),
+        toggle_mute: Callback::new(make_toggle_mute(
+            video_ref,
+            signals.volume,
+            signals.last_volume,
+            signals.muted,
+        )),
+        toggle_fullscreen: Callback::new(make_toggle_fullscreen(video_ref)),
+        handle_seek: Callback::new(make_handle_seek(video_ref, signals.current_time)),
+        handle_volume: Callback::new(make_handle_volume(
+            video_ref,
+            signals.volume,
+            signals.muted,
+            signals.last_volume,
+        )),
+    };
 
+    // Direct handlers still needed on the `<video>` element itself.
+    let handle_loaded_metadata = make_handle_loaded_metadata(video_ref, signals.duration);
+    let handle_time_update = make_handle_time_update(video_ref, signals.current_time);
+
+    // ── Install contexts (must precede view!) ─────────────────────────
+    PlayerSignals::provide(signals);
+    PlayerDerived::provide(derived);
+    PlayerHandlers::provide(handlers);
+    PlayerNav::provide(nav);
+
+    // ── View ──────────────────────────────────────────────────────────
     let video_class = if audio {
         "w-full h-0 pointer-events-none"
     } else {
@@ -248,28 +503,12 @@ pub fn MediaPlayer(
     };
 
     let artwork_view = if audio {
-        let toggle_controls = toggle_controls.clone();
+        let tc = toggle_controls.clone();
         Some(view! {
-            <div
-                class="relative w-full aspect-video flex items-center justify-center bg-gradient-to-br from-[#1e1e2e] via-[#14141e] to-[#0a0a0f] cursor-pointer overflow-hidden"
-                on:click=move |_| toggle_controls()
-            >
-                {move || current_artwork.get().map(|url| view! {
-                    <div
-                        class="absolute inset-0 opacity-50"
-                        style=format!(
-                            "background-image: url('{url}'); background-size: cover; \
-                             background-position: center; filter: blur(50px) saturate(1.4); \
-                             transform: scale(1.3);"
-                        )
-                    ></div>
-                    <img
-                        src=url
-                        class="relative max-h-[70%] max-w-[70%] object-contain rounded-2xl shadow-2xl shadow-black/70 border border-white/10"
-                        alt=""
-                    />
-                })}
-            </div>
+            <AudioArtworkOverlay
+                artwork=derived.current_artwork
+                on_click=move |_| tc()
+            />
         })
     } else {
         None
@@ -283,45 +522,27 @@ pub fn MediaPlayer(
         >
             <video
                 node_ref=video_ref
-                title=move || current_title.get()
+                title=move || derived.current_title.get()
                 class=video_class
                 on:loadedmetadata=handle_loaded_metadata
                 on:timeupdate=handle_time_update
-                on:play=move |_| playing.set(true)
-                on:pause=move |_| playing.set(false)
+                on:play=move |_| signals.playing.set(true)
+                on:pause=move |_| signals.playing.set(false)
                 on:ended=handle_ended
                 on:click={let tc = toggle_controls.clone(); move |_| tc()}
                 playsinline
             />
             {artwork_view}
             <MediaControls
-                controls_visible=controls_visible
                 show_controls=show_controls.clone()
-                current_time=current_time
-                duration=duration
-                playing=playing
-                muted=muted
-                volume=volume
-                fullscreen=fullscreen
-                toggle_play=toggle_play
-                toggle_mute=toggle_mute
-                toggle_fullscreen=toggle_fullscreen
-                handle_seek=handle_seek
-                handle_volume=handle_volume
                 start_hide_timer=start_hide_timer
                 show_fullscreen=!audio
-                show_nav=has_playlist
-                current_title=current_title
-                on_prev=on_prev
-                on_next=on_next
-                has_prev=has_prev
-                has_next=has_next
             />
         </div>
     };
 
     let playlist_view = view! {
-        <Show when=move || has_playlist.get()>
+        <Show when=move || derived.has_playlist.get()>
             <aside class="w-full lg:w-80 xl:w-96 lg:flex-shrink-0">
                 <PlaylistPanel
                     items=items
@@ -343,37 +564,58 @@ pub fn MediaPlayer(
     }
 }
 
+// ─── Audio artwork overlay ────────────────────────────────────────────────
+
+#[component]
+fn AudioArtworkOverlay(
+    artwork: Signal<Option<String>>,
+    on_click: impl Fn(MouseEvent) + 'static,
+) -> impl IntoView {
+    view! {
+        <div
+            class="relative w-full aspect-video flex items-center justify-center \
+                   bg-gradient-to-br from-[#1e1e2e] via-[#14141e] to-[#0a0a0f] \
+                   cursor-pointer overflow-hidden"
+            on:click=on_click
+        >
+            {move || artwork.get().map(|url| view! {
+                <div
+                    class="absolute inset-0 opacity-50"
+                    style=format!(
+                        "background-image: url('{url}'); background-size: cover; \
+                         background-position: center; filter: blur(50px) saturate(1.4); \
+                         transform: scale(1.3);"
+                    )
+                ></div>
+                <img
+                    src=url
+                    class="relative max-h-[70%] max-w-[70%] object-contain \
+                           rounded-2xl shadow-2xl shadow-black/70 border border-white/10"
+                    alt=""
+                />
+            })}
+        </div>
+    }
+}
+
 // ─── Controls overlay ─────────────────────────────────────────────────────
+// Reads Signals / Derived / Handlers / Nav from context. Only receives what
+// is genuinely local: the two timeout closures, and the audio-mode flag.
 
 #[component]
 fn MediaControls(
-    controls_visible: RwSignal<bool>,
     show_controls: impl Fn() + Clone + 'static,
-    current_time: RwSignal<f64>,
-    duration: RwSignal<f64>,
-    playing: RwSignal<bool>,
-    muted: RwSignal<bool>,
-    volume: RwSignal<f64>,
-    fullscreen: RwSignal<bool>,
-    toggle_play: impl Fn(MouseEvent) + 'static,
-    toggle_mute: impl Fn(MouseEvent) + 'static,
-    toggle_fullscreen: impl Fn(MouseEvent) + 'static,
-    handle_seek: impl Fn(web_sys::Event) + 'static,
-    handle_volume: impl Fn(web_sys::Event) + 'static,
-    start_hide_timer: impl Fn() + 'static + Clone,
+    start_hide_timer: impl Fn() + Clone + 'static,
     #[prop(default = true)] show_fullscreen: bool,
-    show_nav: Signal<bool>,
-    #[prop(into)] current_title: Signal<String>,
-    on_prev: Callback<MouseEvent>,
-    on_next: Callback<MouseEvent>,
-    #[prop(into)] has_prev: Signal<bool>,
-    #[prop(into)] has_next: Signal<bool>,
 ) -> impl IntoView {
+    let signals = PlayerSignals::expect();
+    let derived = PlayerDerived::expect();
+
     let class = move || {
         format!(
             "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 \
              to-transparent p-3 sm:p-5 transition-opacity duration-300 {}",
-            if controls_visible.get() {
+            if signals.controls_visible.get() {
                 "opacity-100"
             } else {
                 "opacity-0"
@@ -384,6 +626,7 @@ fn MediaControls(
         let start = start_hide_timer.clone();
         move |_| start()
     };
+
     view! {
         <div
             class=class
@@ -393,169 +636,199 @@ fn MediaControls(
         >
             <div class="flex flex-col gap-2">
                 <div class="text-white text-sm font-medium truncate px-1 drop-shadow">
-                    {move || current_title.get()}
+                    {move || derived.current_title.get()}
                 </div>
-                <SeekBar current_time duration=duration handle_seek=handle_seek />
-                <ControlButtons
-                    playing=playing
-                    muted=muted
-                    volume=volume
-                    fullscreen=fullscreen
-                    toggle_play=toggle_play
-                    toggle_mute=toggle_mute
-                    toggle_fullscreen=toggle_fullscreen
-                    handle_volume=handle_volume
-                    show_fullscreen=show_fullscreen
-                    show_nav=show_nav
-                    on_prev=on_prev
-                    on_next=on_next
-                    has_prev=has_prev
-                    has_next=has_next
-                />
+                <SeekBar/>
+                <ControlButtons show_fullscreen=show_fullscreen/>
             </div>
         </div>
     }
 }
 
+// ─── Button row ───────────────────────────────────────────────────────────
+
 #[component]
-fn SeekBar(
-    current_time: RwSignal<f64>,
-    duration: RwSignal<f64>,
-    handle_seek: impl Fn(web_sys::Event) + 'static,
-) -> impl IntoView {
+fn ControlButtons(#[prop(default = true)] show_fullscreen: bool) -> impl IntoView {
+    let fullscreen_btn = show_fullscreen.then(|| {
+        view! {
+            <FullscreenButton/>
+        }
+    });
+
+    view! {
+        <div class="flex items-center gap-2 sm:gap-3 text-white">
+            <NavButton direction=NavDirection::Prev/>
+            <PlayPauseButton/>
+            <NavButton direction=NavDirection::Next/>
+            <div class="flex items-center gap-2">
+                <MuteButton/>
+                <VolumeSlider/>
+            </div>
+            <div class="flex-1"></div>
+            {fullscreen_btn}
+        </div>
+    }
+}
+
+// ─── Individual buttons ───────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+enum NavDirection {
+    Prev,
+    Next,
+}
+
+impl NavDirection {
+    fn aria_label(self) -> &'static str {
+        match self {
+            Self::Prev => "السابق",
+            Self::Next => "التالي",
+        }
+    }
+}
+
+#[component]
+fn NavButton(direction: NavDirection) -> impl IntoView {
+    let derived = PlayerDerived::expect();
+    let nav = PlayerNav::expect();
+
+    let show = Signal::derive(move || derived.has_playlist.get());
+    let disabled = Signal::derive(move || match direction {
+        NavDirection::Prev => !derived.has_prev.get(),
+        NavDirection::Next => !derived.has_next.get(),
+    });
+    let on_click = match direction {
+        NavDirection::Prev => nav.on_prev,
+        NavDirection::Next => nav.on_next,
+    };
+    let label = direction.aria_label();
+
+    view! {
+        <Show when=move || show.get()>
+            <button
+                on:click=move |ev| on_click.run(ev)
+                disabled=move || disabled.get()
+                class=NAV_BUTTON
+                aria-label=label
+            >
+                {move || match direction {
+                    NavDirection::Prev => Either::Left(view! { <PrevPageIcon/> }),
+                    NavDirection::Next => Either::Right(view! { <NextPageIcon/> }),
+                }}
+            </button>
+        </Show>
+    }
+}
+
+#[component]
+fn PlayPauseButton() -> impl IntoView {
+    let signals = PlayerSignals::expect();
+    let handlers = PlayerHandlers::expect();
+
+    view! {
+        <button
+            on:click=move |ev| handlers.toggle_play.run(ev)
+            class=ICON_BUTTON
+            aria-label="تشغيل / إيقاف"
+        >
+            {move || if signals.playing.get() {
+                Either::Left(PauseIcon())
+            } else {
+                Either::Right(PlayIcon())
+            }}
+        </button>
+    }
+}
+
+#[component]
+fn MuteButton() -> impl IntoView {
+    let signals = PlayerSignals::expect();
+    let handlers = PlayerHandlers::expect();
+
+    view! {
+        <button
+            on:click=move |ev| handlers.toggle_mute.run(ev)
+            class=ICON_BUTTON
+            aria-label="كتم / إلغاء"
+        >
+            {move || if signals.muted.get() || signals.volume.get() == 0.0 {
+                Either::Left(MuteIcon())
+            } else {
+                Either::Right(VolumeIcon())
+            }}
+        </button>
+    }
+}
+
+#[component]
+fn FullscreenButton() -> impl IntoView {
+    let signals = PlayerSignals::expect();
+    let handlers = PlayerHandlers::expect();
+
+    view! {
+        <button
+            on:click=move |ev| handlers.toggle_fullscreen.run(ev)
+            class=ICON_BUTTON
+            aria-label="ملء الشاشة"
+        >
+            {move || if signals.fullscreen.get() {
+                Either::Left(FullscreenExitIcon())
+            } else {
+                Either::Right(FullscreenIcon())
+            }}
+        </button>
+    }
+}
+
+#[component]
+fn VolumeSlider() -> impl IntoView {
+    let signals = PlayerSignals::expect();
+    let handlers = PlayerHandlers::expect();
+
+    let vol_value = move || {
+        if signals.muted.get() {
+            0.0
+        } else {
+            signals.volume.get()
+        }
+    };
+
+    view! {
+        <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            prop:value=vol_value
+            on:input=move |ev| handlers.handle_volume.run(ev)
+            class=VOLUME_SLIDER
+        />
+    }
+}
+
+// ─── Seek bar ─────────────────────────────────────────────────────────────
+
+#[component]
+fn SeekBar() -> impl IntoView {
+    let signals = PlayerSignals::expect();
+    let handlers = PlayerHandlers::expect();
+
     view! {
         <div class="flex items-center gap-2">
             <span class="text-white text-xs font-mono">
-                {move || format_time(current_time.get())}
+                {move || format_time(signals.current_time.get())}
             </span>
             <input
                 type="range"
                 min="0"
-                prop:max=duration
-                prop:value=current_time
-                on:input=handle_seek
-                class="flex-1 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400 [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-cyan-400/30"
+                prop:max=signals.duration
+                prop:value=signals.current_time
+                on:input=move |ev| handlers.handle_seek.run(ev)
+                class=SEEK_SLIDER
             />
             <span class="text-white text-xs font-mono">
-                {move || format_time(duration.get())}
+                {move || format_time(signals.duration.get())}
             </span>
-        </div>
-    }
-}
-
-#[component]
-fn ControlButtons(
-    playing: RwSignal<bool>,
-    muted: RwSignal<bool>,
-    volume: RwSignal<f64>,
-    fullscreen: RwSignal<bool>,
-    toggle_play: impl Fn(MouseEvent) + 'static,
-    toggle_mute: impl Fn(MouseEvent) + 'static,
-    toggle_fullscreen: impl Fn(MouseEvent) + 'static,
-    handle_volume: impl Fn(web_sys::Event) + 'static,
-    #[prop(default = true)] show_fullscreen: bool,
-    show_nav: Signal<bool>,
-    on_prev: Callback<MouseEvent>,
-    on_next: Callback<MouseEvent>,
-    has_prev: Signal<bool>,
-    has_next: Signal<bool>,
-) -> impl IntoView {
-    let play_icon = move || {
-        if playing.get() {
-            Either::Left(PauseIcon())
-        } else {
-            Either::Right(PlayIcon())
-        }
-    };
-    let mute_icon = move || {
-        if muted.get() || volume.get() == 0.0 {
-            Either::Left(MuteIcon())
-        } else {
-            Either::Right(VolumeIcon())
-        }
-    };
-    let vol_value = move || if muted.get() { 0.0 } else { volume.get() };
-    let full_screen = move || {
-        if fullscreen.get() {
-            Either::Left(FullscreenExitIcon())
-        } else {
-            Either::Right(FullscreenIcon())
-        }
-    };
-    let fullscreen_btn = show_fullscreen.then(move || {
-        view! {
-            <button
-                on:click=toggle_fullscreen
-                class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
-                aria-label="ملء الشاشة"
-            >
-                {full_screen}
-            </button>
-        }
-    });
-
-    let nav_class = "hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:scale-100";
-
-    let prev_btn = move || {
-        show_nav.get().then(move || {
-            view! {
-                <button
-                    on:click=move |ev| on_prev.run(ev)
-                    disabled=move || !has_prev.get()
-                    class=nav_class
-                    aria-label="السابق"
-                >
-                    <PrevPageIcon/>
-                </button>
-            }
-        })
-    };
-    let next_btn = move || {
-        show_nav.get().then(move || {
-            view! {
-                <button
-                    on:click=move |ev| on_next.run(ev)
-                    disabled=move || !has_next.get()
-                    class=nav_class
-                    aria-label="التالي"
-                >
-                    <NextPageIcon/>
-                </button>
-            }
-        })
-    };
-
-    view! {
-        <div class="flex items-center gap-2 sm:gap-3 text-white">
-            {prev_btn}
-            <button
-                on:click=toggle_play
-                class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
-                aria-label="تشغيل / إيقاف"
-            >
-                {play_icon}
-            </button>
-            {next_btn}
-            <div class="flex items-center gap-2">
-                <button
-                    on:click=toggle_mute
-                    class="hover:scale-110 transition-transform duration-200 p-1 rounded-full hover:bg-white/10"
-                    aria-label="كتم / إلغاء"
-                >
-                    {mute_icon}
-                </button>
-                <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    prop:value={vol_value}
-                    on:input=handle_volume
-                    class="w-16 sm:w-20 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"
-                />
-            </div>
-            <div class="flex-1"></div>
-            {fullscreen_btn}
         </div>
     }
 }
@@ -571,11 +844,21 @@ fn PlaylistPanel(
     #[prop(default = None)] on_delete: Option<Callback<u64>>,
     #[prop(default = true)] show_download: bool,
 ) -> impl IntoView {
+    // Config only needs to reach PlaylistItem; scope it here so the panel
+    // owns it and the item can read it without an argument.
+    PlaylistConfig::provide(PlaylistConfig {
+        on_rename,
+        on_delete,
+        show_download,
+    });
+
     let title = title.unwrap_or_else(|| "قائمة التشغيل".to_string());
 
     view! {
-        <div class="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden flex flex-col max-h-[60vh] lg:max-h-[500px]">
-            <div class="px-4 py-3 border-b border-white/10 flex items-center justify-between shrink-0">
+        <div class="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 \
+                    overflow-hidden flex flex-col max-h-[60vh] lg:max-h-[500px]">
+            <div class="px-4 py-3 border-b border-white/10 flex items-center \
+                        justify-between shrink-0">
                 <h3 class="text-sm font-bold text-white truncate">{title}</h3>
                 <span class="text-xs text-gray-400 font-mono bg-white/10 px-2 py-0.5 rounded-full">
                     {move || items.get().len()}
@@ -587,14 +870,7 @@ fn PlaylistPanel(
                     key=|(_, item)| item.id
                     let:((index,item))
                 >
-                    <PlaylistItem
-                        item=item
-                        index=index
-                        current_idx=current_idx
-                        on_rename=on_rename
-                        on_delete=on_delete
-                        show_download=show_download
-                    />
+                    <PlaylistItem item=item index=index current_idx=current_idx/>
                 </For>
             </div>
         </div>
@@ -602,31 +878,13 @@ fn PlaylistPanel(
 }
 
 #[component]
-fn PlaylistItem(
-    item: MediaItem,
-    index: usize,
-    current_idx: RwSignal<usize>,
-    #[prop(default = true)] show_download: bool,
-    #[prop(default = None)] on_rename: Option<Callback<(u64, String)>>,
-    #[prop(default = None)] on_delete: Option<Callback<u64>>,
-) -> impl IntoView {
+fn PlaylistItem(item: MediaItem, index: usize, current_idx: RwSignal<usize>) -> impl IntoView {
+    let config = PlaylistConfig::expect();
+
     let id = item.id;
     let download_src = item.src.clone();
     let download_name = item.title.clone();
 
-    let download_button = show_download.then(|| view! {
-        <a
-            href=download_src
-            download=download_name
-            class="opacity-0 group-hover/row:opacity-100 transition text-gray-400 hover:text-white p-1 shrink-0"
-            aria-label="تحميل"
-            on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
-        >
-            <DownloadIcon/>
-        </a>
-    });
-
-    // StoredValue is Copy and survives being captured by multiple closures.
     let title = StoredValue::new(item.title.clone());
     let subtitle = StoredValue::new(item.subtitle.clone());
 
@@ -648,12 +906,11 @@ fn PlaylistItem(
         editing.set(true);
     };
 
-    // Callback is Copy — both on:keydown and on:blur can hold a copy.
     let do_commit: Callback<()> = Callback::new(move |_| {
         editing.set(false);
         let new_title = draft.get_untracked();
         if new_title != title.get_value()
-            && let Some(cb) = on_rename
+            && let Some(cb) = config.on_rename
         {
             cb.run((id, new_title));
         }
@@ -661,7 +918,7 @@ fn PlaylistItem(
 
     let on_delete_click = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
-        if let Some(cb) = on_delete {
+        if let Some(cb) = config.on_delete {
             cb.run(id);
         }
     };
@@ -677,7 +934,8 @@ fn PlaylistItem(
 
     let row_class = move || {
         format!(
-            "w-full flex items-center gap-2 p-2 rounded-lg cursor-pointer transition text-right group/row {}",
+            "w-full flex items-center gap-2 p-2 rounded-lg cursor-pointer \
+             transition text-right group/row {}",
             if is_current() {
                 "bg-cyan-500/15 border border-cyan-500/30"
             } else {
@@ -687,31 +945,9 @@ fn PlaylistItem(
     };
 
     let edit_on = use_edit_mode();
-
-    let edit_buttons = move || {
-        edit_on.get().then_some((
-            on_rename.map(|_| view! {
-                <button
-                    type="button"
-                    on:click=begin_edit
-                    class="opacity-0 group-hover/row:opacity-100 transition text-gray-400 hover:text-white p-1 shrink-0"
-                    aria-label="إعادة تسمية"
-                >
-                    <EditIcon/>
-                </button>
-            }),
-            on_delete.map(|_| view! {
-                <button
-                    type="button"
-                    on:click=on_delete_click
-                    class="opacity-0 group-hover/row:opacity-100 transition text-red-400 hover:text-red-300 p-1 shrink-0"
-                    aria-label="حذف"
-                >
-                    <DeleteIcon/>
-                </button>
-            })
-    ))
-    };
+    let can_rename = config.on_rename.is_some();
+    let can_delete = config.on_delete.is_some();
+    let show_download = config.show_download;
 
     view! {
         <div class=row_class on:click=on_select>
@@ -732,7 +968,8 @@ fn PlaylistItem(
                     <input
                         node_ref=input_ref
                         type="text"
-                        class="w-full bg-white/10 text-white text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                        class="w-full bg-white/10 text-white text-sm rounded px-2 py-1 \
+                               focus:outline-none focus:ring-1 focus:ring-cyan-400"
                         prop:value=move || draft.get()
                         on:input=move |ev| draft.set(event_target_value(&ev))
                         on:keydown=move |ev: web_sys::KeyboardEvent| match ev.key().as_str() {
@@ -745,9 +982,57 @@ fn PlaylistItem(
                     />
                 </Show>
             </div>
-            {download_button}
-            {edit_buttons}
+
+            <Show when=move || show_download>
+                <PlaylistDownloadLink
+                    href=download_src.clone()
+                    download_name=download_name.clone()
+                />
+            </Show>
+
+            <Show when=move || edit_on.get() && can_rename>
+                <button
+                    type="button"
+                    on:click=begin_edit
+                    class="opacity-0 group-hover/row:opacity-100 transition \
+                           text-gray-400 hover:text-white p-1 shrink-0"
+                    aria-label="إعادة تسمية"
+                >
+                    <EditIcon/>
+                </button>
+            </Show>
+
+            <Show when=move || edit_on.get() && can_delete>
+                <button
+                    type="button"
+                    on:click=on_delete_click
+                    class="opacity-0 group-hover/row:opacity-100 transition \
+                           text-red-400 hover:text-red-300 p-1 shrink-0"
+                    aria-label="حذف"
+                >
+                    <DeleteIcon/>
+                </button>
+            </Show>
         </div>
+    }
+}
+
+#[component]
+fn PlaylistDownloadLink(
+    #[prop(into)] href: String,
+    #[prop(into)] download_name: String,
+) -> impl IntoView {
+    view! {
+        <a
+            href=href
+            download=download_name
+            class="opacity-0 group-hover/row:opacity-100 transition \
+                   text-gray-400 hover:text-white p-1 shrink-0"
+            aria-label="تحميل"
+            on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
+        >
+            <DownloadIcon/>
+        </a>
     }
 }
 
@@ -756,13 +1041,15 @@ fn PlaylistIndicator(index: usize, #[prop(into)] is_current: Signal<bool>) -> im
     view! {
         {move || if is_current.get() {
             Either::Left(view! {
-                <span class="flex items-center justify-center w-8 h-8 rounded-full bg-cyan-500/20 text-cyan-400 shrink-0">
+                <span class="flex items-center justify-center w-8 h-8 rounded-full \
+                             bg-cyan-500/20 text-cyan-400 shrink-0">
                     <PlayIcon/>
                 </span>
             })
         } else {
             Either::Right(view! {
-                <span class="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 text-gray-300 text-xs font-bold shrink-0">
+                <span class="flex items-center justify-center w-8 h-8 rounded-full \
+                             bg-white/5 text-gray-300 text-xs font-bold shrink-0">
                     {index + 1}
                 </span>
             })
