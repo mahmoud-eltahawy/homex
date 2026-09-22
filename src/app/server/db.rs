@@ -171,8 +171,8 @@ pub async fn fetch_collections(
         JOIN sections s ON s.id = c.section_id
         WHERE s.slug = ?1
           AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')
-        ORDER BY c.position, c.title
-        LIMIT ?3 OFFSET ?4
+        ORDER BY c.position, c.title, c.id
+        LIMIT ?3 OFFSET ?4          
         "#,
         section_slug,
         search,
@@ -358,7 +358,7 @@ pub async fn fetch_items(pool: &SqlitePool, collection_id: i64) -> Result<Vec<It
         FROM items i
         JOIN files f ON f.id = i.file_id
         WHERE i.collection_id = ?
-        ORDER BY COALESCE(i.season_number, 0), i.number
+        ORDER BY COALESCE(i.season_number, 0), i.number, i.id
         "#,
         collection_id,
     )

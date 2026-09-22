@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT c.id,\n               c.section_id,\n               s.slug AS section_slug,\n               c.title,\n               c.poster,\n               c.description,\n               COALESCE(\n                   (SELECT COUNT(*) FROM items i WHERE i.collection_id = c.id),\n                   0\n               ) AS \"items_count!\"\n        FROM collections c\n        JOIN sections s ON s.id = c.section_id\n        WHERE s.slug = ?1\n          AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')\n        ORDER BY c.position, c.title\n        LIMIT ?3 OFFSET ?4\n        ",
+  "query": "\n        SELECT c.id,\n               c.section_id,\n               s.slug AS section_slug,\n               c.title,\n               c.poster,\n               c.description,\n               COALESCE(\n                   (SELECT COUNT(*) FROM items i WHERE i.collection_id = c.id),\n                   0\n               ) AS \"items_count!\"\n        FROM collections c\n        JOIN sections s ON s.id = c.section_id\n        WHERE s.slug = ?1\n          AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')\n        ORDER BY c.position, c.title, c.id\n        LIMIT ?3 OFFSET ?4          \n        ",
   "describe": {
     "columns": [
       {
@@ -89,5 +89,5 @@
       false
     ]
   },
-  "hash": "40d56cb765197004beba474eef8af348278ca1d179c0fccc13e5e28e9fed78a0"
+  "hash": "8f5ec3997735b703411b143c94028e7e97a5b1efef7144f06c1ed16280441f19"
 }

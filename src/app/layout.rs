@@ -8,10 +8,24 @@ use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
+// ─── Shared sections resource ─────────────────────────────────────────────
+// Provided once by `Layout`, consumed by Navbar / Footer / MobileMenu so
+// they all read the same `Resource` and a single refetch updates all three.
+
+#[derive(Clone, Copy)]
+pub struct SectionsResource(pub Resource<Result<Vec<Section>, ServerFnError>>);
+
+pub fn use_sections() -> Resource<Result<Vec<Section>, ServerFnError>> {
+    expect_context::<SectionsResource>().0
+}
+
 #[component(transparent)]
 pub fn Layout() -> impl IntoView {
     let edit_on = RwSignal::new(false);
     provide_context(EditMode(edit_on));
+
+    let sections = Resource::new(|| (), |_| fetch_sections());
+    provide_context(SectionsResource(sections));
 
     view! {
         <div class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased" dir="rtl">
@@ -61,7 +75,7 @@ fn Brand() -> impl IntoView {
 
 #[component]
 fn DesktopNavLinks() -> impl IntoView {
-    let sections = Resource::new(|| (), |_| fetch_sections());
+    let sections = use_sections();
     view! {
         <div class="hidden md:flex items-center gap-2">
             <Transition fallback=|| ()>
@@ -105,7 +119,7 @@ fn Footer() -> impl IntoView {
 
 #[component]
 fn FooterGrid() -> impl IntoView {
-    let sections = Resource::new(|| (), |_| fetch_sections());
+    let sections = use_sections();
     view! {
         <div class="flex flex-col sm:flex-row items-center justify-between gap-8 md:gap-12">
             <Brand/>
@@ -143,7 +157,7 @@ fn MobileMenuButton(open: RwSignal<bool>) -> impl IntoView {
 
 #[component]
 fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
-    let sections = Resource::new(|| (), |_| fetch_sections());
+    let sections = use_sections();
     view! {
         <Show when=move || open.get()>
             <div class="md:hidden fixed inset-0 top-16 z-40 bg-black/85 backdrop-blur-xl"

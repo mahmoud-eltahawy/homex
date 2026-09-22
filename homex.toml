@@ -3,6 +3,6 @@ addr = "127.0.0.1:3000"
 
 [storage]
 # mergerfs mount point — the single logical pool
-media_root = "Downloads" #"/mnt/pool"
+media_root = "/srv/homex/media"
 # SSD-backed directory for the SQLite DB and uploaded posters
-data_dir = "Downloads" #"/opt/mydisc/data"
+data_dir = "/var/lib/homex"

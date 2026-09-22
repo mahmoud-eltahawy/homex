@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT i.id,\n               i.collection_id,\n               i.number,\n               i.season_number,\n               i.title,\n               i.poster,\n               i.description,\n               f.id            AS file_id,\n               f.size_bytes    AS size,\n               f.duration_secs AS dur\n        FROM items i\n        JOIN files f ON f.id = i.file_id\n        WHERE i.collection_id = ?\n        ORDER BY COALESCE(i.season_number, 0), i.number\n        ",
+  "query": "\n        SELECT i.id,\n               i.collection_id,\n               i.number,\n               i.season_number,\n               i.title,\n               i.poster,\n               i.description,\n               f.id            AS file_id,\n               f.size_bytes    AS size,\n               f.duration_secs AS dur\n        FROM items i\n        JOIN files f ON f.id = i.file_id\n        WHERE i.collection_id = ?\n        ORDER BY COALESCE(i.season_number, 0), i.number, i.id\n        ",
   "describe": {
     "columns": [
       {
@@ -130,5 +130,5 @@
       false
     ]
   },
-  "hash": "b154077f25bc3876ed7f5e139e760f56be458254adb3124e3960c32b91122955"
+  "hash": "cb4dcab3c1f10fec8765cada1847964235c1f3894f213054860dc5412b728037"
 }

@@ -9,3 +9,12 @@ run with a live dev DB:
 
 CI builds with `SQLX_OFFLINE=true`, so forgetting this step will fail the
 build, not ship a broken release.
+
+
+## Config
+
+`homex.toml` ships production-shaped defaults (`/srv/homex/media`,
+`/var/lib/homex`). Local development uses `homex.dev.toml`, which `run`
+selects via `HOMEX_CONFIG`. To use a different file:
+
+    HOMEX_CONFIG=/path/to/your.toml cargo leptos watch --split --hot-reload

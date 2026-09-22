@@ -7,7 +7,7 @@ async fn main() {
     use homex::app::server::auth;
     use homex::app::server::{AppState, Config};
     use homex::app::{server::routes::stream_media, *};
-    use leptos::logging::log;
+    use leptos::logging::{error, log};
     use leptos::prelude::*;
     use leptos_axum::{LeptosRoutes, generate_route_list};
     use tokio_util::sync::CancellationToken;
@@ -15,17 +15,42 @@ async fn main() {
 
     auth::init_from_env();
 
-    let config = Config::load().expect("failed to load homex.toml");
+    let config = match Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            error!("[fatal] config: {e}");
+            std::process::exit(1);
+        }
+    };
     let server_addr = config.server.addr;
 
-    let db = server::db::init(&config)
-        .await
-        .expect("failed to init database");
+    let db = match server::db::init(&config).await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("[fatal] db init: {e}");
+            std::process::exit(1);
+        }
+    };
 
+    // Both storage roots must exist before anything tries to write into them.
+    for dir in [&config.storage.media_root, &config.storage.data_dir] {
+        if let Err(e) = tokio::fs::create_dir_all(dir).await {
+            error!("[fatal] mkdir {}: {e}", dir.display());
+            std::process::exit(1);
+        }
+    }
     let posters_dir = config.storage.data_dir.join("posters");
-    tokio::fs::create_dir_all(&posters_dir)
-        .await
-        .expect("failed to create posters dir");
+    if let Err(e) = tokio::fs::create_dir_all(&posters_dir).await {
+        error!("[fatal] mkdir {}: {e}", posters_dir.display());
+        std::process::exit(1);
+    }
+
+    log!(
+        "[boot] media_root={} data_dir={} db={}",
+        config.storage.media_root.display(),
+        config.storage.data_dir.display(),
+        config.db_path().display(),
+    );
 
     let cancel = CancellationToken::new();
 
