@@ -274,10 +274,10 @@ async fn stream_ffmpeg_progress(stdout: ChildStdout, ctx: ConvertContext<'_>) {
     let mut lines = BufReader::new(stdout).lines();
     let mut tracker = ProgressTracker::new();
     while let Ok(Some(line)) = lines.next_line().await {
-        if let Some(pct) = parse_progress_line(&line, ctx.total_secs) {
-            if tracker.observe(pct).is_some() {
-                publish_progress(&ctx, pct).await;
-            }
+        if let Some(pct) = parse_progress_line(&line, ctx.total_secs)
+            && tracker.observe(pct).is_some()
+        {
+            publish_progress(&ctx, pct).await;
         }
     }
 }
