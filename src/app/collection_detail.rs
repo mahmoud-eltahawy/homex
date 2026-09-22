@@ -6,7 +6,7 @@ use web_sys::wasm_bindgen::JsCast;
 
 use crate::app::{
     collections::{
-        delete_item, fetch_collection_detail, fetch_items, patch_collection_field,
+        delete_item, fetch_collection_detail, fetch_items, move_item, patch_collection_field,
         patch_item_title, upload_collection_poster,
     },
     common::refetch_on_success,
@@ -36,6 +36,7 @@ struct CollectionActions {
     poster_upload: PosterUploadAction,
     rename_item: RenameItemAction,
     delete_item: DeleteItemAction,
+    move_item: Action<(u64, bool), Result<(), ServerFnError>>, // NEW
 }
 
 impl CollectionActions {
@@ -54,16 +55,18 @@ impl CollectionActions {
         refetch_on_success(rename_item, items);
         refetch_on_success(delete_item, items);
 
+        let move_item = Action::new_local(|(id, up): &(u64, bool)| move_item(*id, *up));
+        refetch_on_success(move_item, items);
+
         Self {
             patch,
             poster_upload,
             rename_item,
             delete_item,
+            move_item,
         }
     }
 
-    /// Wraps `rename_item`/`delete_item` as single-arg callbacks the
-    /// playlist can hand to its per-row actions.
     fn rename_callback(self) -> Callback<(u64, String)> {
         Callback::new(move |(id, t): (u64, String)| {
             let _ = self.rename_item.dispatch((id, t));
@@ -73,6 +76,12 @@ impl CollectionActions {
     fn delete_callback(self) -> Callback<u64> {
         Callback::new(move |id: u64| {
             let _ = self.delete_item.dispatch(id);
+        })
+    }
+
+    fn move_callback(self) -> Callback<(u64, bool)> {
+        Callback::new(move |(id, up): (u64, bool)| {
+            let _ = self.move_item.dispatch((id, up));
         })
     }
 }
@@ -166,6 +175,7 @@ fn make_playlist_adapter(
     initial_item_id: Option<u64>,
     on_rename: Callback<(u64, String)>,
     on_delete: Callback<u64>,
+    on_move: Callback<(u64, bool)>,
 ) -> impl Fn(Vec<Item>) -> PlaylistProps {
     move |list: Vec<Item>| PlaylistProps {
         items: list,
@@ -178,6 +188,7 @@ fn make_playlist_adapter(
         initial_item_id,
         on_rename,
         on_delete,
+        on_move,
     }
 }
 
@@ -289,6 +300,7 @@ fn CollectionContent(
     let placeholder = make_poster_placeholder(is_audio);
     let icon = icon_for(section.media_kind());
     let badge_label = section.badge_label();
+    let on_move = actions.move_callback();
 
     let playlist_adapter = make_playlist_adapter(
         section_slug.clone(),
@@ -300,6 +312,7 @@ fn CollectionContent(
         initial_item_id,
         on_rename,
         on_delete,
+        on_move,
     );
 
     view! {
@@ -524,6 +537,7 @@ fn Playlist(
     initial_item_id: Option<u64>,
     on_rename: Callback<(u64, String)>,
     on_delete: Callback<u64>,
+    on_move: Callback<(u64, bool)>,
 ) -> impl IntoView {
     let all_seasons: Vec<i64> = items
         .iter()
@@ -590,6 +604,7 @@ fn Playlist(
                 playlist_title=playlist_title.clone()
                 on_rename=on_rename
                 on_delete=on_delete
+                on_move=on_move
                 show_download=true
             />
         })

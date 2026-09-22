@@ -422,3 +422,41 @@ pub async fn delete_item_cascade(db: &mut Db, id: i64) -> toasty::Result<ItemDel
     tx.commit().await?;
     Ok(ItemDeletion { media_paths })
 }
+
+// ─── Reordering ───────────────────────────────────────────────────────────
+
+pub async fn swap_item_order(db: &mut Db, id: i64, is_up: bool) -> toasty::Result<()> {
+    let mut tx = db.transaction().await?;
+
+    let item = Item::get_by_id(&mut tx, &(id as u64)).await?;
+
+    let mut q = Item::filter(Item::fields().collection_id().eq(item.collection_id));
+    q = match item.season_number {
+        Some(s) => q.filter(Item::fields().season_number().eq(s)),
+        None => q.filter(Item::fields().season_number().is_none()),
+    };
+    q = if is_up {
+        q.filter(Item::fields().number().lt(item.number))
+            .order_by(Item::fields().number().desc())
+    } else {
+        q.filter(Item::fields().number().gt(item.number))
+            .order_by(Item::fields().number().asc())
+    };
+
+    let neighbour = q.limit(1).exec(&mut tx).await?;
+    let Some(neighbour) = neighbour.into_iter().next() else {
+        return Ok(());
+    };
+
+    let a_number = item.number;
+    let b_number = neighbour.number;
+
+    let mut a = Item::get_by_id(&mut tx, &item.id).await?;
+    a.update().number(b_number).exec(&mut tx).await?;
+
+    let mut b = Item::get_by_id(&mut tx, &neighbour.id).await?;
+    b.update().number(a_number).exec(&mut tx).await?;
+
+    tx.commit().await?;
+    Ok(())
+}

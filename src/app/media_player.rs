@@ -177,6 +177,7 @@ struct PlayerNav {
 struct PlaylistConfig {
     on_rename: Option<Callback<(u64, String)>>,
     on_delete: Option<Callback<u64>>,
+    on_move: Option<Callback<(u64, bool)>>, // (id, is_up)
     show_download: bool,
 }
 
@@ -342,6 +343,7 @@ pub fn MediaPlayer(
     #[prop(default = true)] show_download: bool,
     #[prop(optional)] on_rename: Option<Callback<(u64, String)>>,
     #[prop(optional)] on_delete: Option<Callback<u64>>,
+    #[prop(optional)] on_move: Option<Callback<(u64, bool)>>,
 ) -> impl IntoView {
     let current_idx = RwSignal::new(initial_index);
     let video_ref = NodeRef::<html::Video>::new();
@@ -491,6 +493,7 @@ pub fn MediaPlayer(
                     current_idx=current_idx
                     title=playlist_title.clone()
                     on_rename=on_rename
+                    on_move=on_move
                     on_delete=on_delete
                     show_download=show_download
                 />
@@ -785,6 +788,7 @@ fn PlaylistPanel(
     #[prop(default = None)] on_rename: Option<Callback<(u64, String)>>,
     #[prop(default = None)] on_delete: Option<Callback<u64>>,
     #[prop(default = true)] show_download: bool,
+    #[prop(default = None)] on_move: Option<Callback<(u64, bool)>>,
 ) -> impl IntoView {
     // Config only needs to reach PlaylistItem; scope it here so the panel
     // owns it and the item can read it without an argument.
@@ -792,6 +796,7 @@ fn PlaylistPanel(
         on_rename,
         on_delete,
         show_download,
+        on_move,
     });
 
     let title = title.unwrap_or_else(|| "قائمة التشغيل".to_string());
@@ -808,11 +813,15 @@ fn PlaylistPanel(
             </div>
             <div class="overflow-y-auto p-2 flex-1 min-h-0">
                 <For
-                    each=move || items.get().into_iter().enumerate()
-                    key=|(_, item)| item.id
-                    let:((index,item))
+                    each=move || {
+                        let v = items.get();
+                        let n = v.len();
+                        v.into_iter().enumerate().map(move |(i,item)| (i,n,item))
+                    }
+                    key=|(_,_,item)| item.id
+                    let:((index,total,item))
                 >
-                    <PlaylistItem item=item index=index current_idx=current_idx/>
+                    <PlaylistItem total item index current_idx/>
                 </For>
             </div>
         </div>
@@ -820,7 +829,12 @@ fn PlaylistPanel(
 }
 
 #[component]
-fn PlaylistItem(item: MediaItem, index: usize, current_idx: RwSignal<usize>) -> impl IntoView {
+fn PlaylistItem(
+    item: MediaItem,
+    index: usize,
+    total: usize,
+    current_idx: RwSignal<usize>,
+) -> impl IntoView {
     let config = PlaylistConfig::expect();
 
     let id = item.id;
@@ -831,6 +845,8 @@ fn PlaylistItem(item: MediaItem, index: usize, current_idx: RwSignal<usize>) -> 
     let subtitle = StoredValue::new(item.subtitle.clone());
 
     let is_current = move || current_idx.get() == index;
+    let is_first = index == 0;
+    let is_last = index + 1 == total;
 
     let editing = RwSignal::new(false);
     let draft = RwSignal::new(item.title.clone());
@@ -865,6 +881,13 @@ fn PlaylistItem(item: MediaItem, index: usize, current_idx: RwSignal<usize>) -> 
         }
     };
 
+    let on_move_click = move |ev: web_sys::MouseEvent, up: bool| {
+        ev.stop_propagation();
+        if let Some(cb) = config.on_move {
+            cb.run((id, up));
+        }
+    };
+
     Effect::new(move |_| {
         if editing.get()
             && let Some(input) = input_ref.get()
@@ -889,11 +912,39 @@ fn PlaylistItem(item: MediaItem, index: usize, current_idx: RwSignal<usize>) -> 
     let edit_on = use_edit_mode();
     let can_rename = config.on_rename.is_some();
     let can_delete = config.on_delete.is_some();
+    let can_move = config.on_move.is_some();
     let show_download = config.show_download;
 
     view! {
         <div class=row_class on:click=on_select>
-            <PlaylistIndicator index=index is_current=Signal::derive(is_current)/>
+            <Show when=move || !(edit_on.get() && can_move)>
+                <PlaylistIndicator index=index is_current=Signal::derive(is_current)/>
+            </Show>
+
+            <Show when=move || edit_on.get() && can_move>
+                <div class="flex flex-col shrink-0">
+                    <button
+                        type="button"
+                        disabled=is_first
+                        on:click=move |ev| on_move_click(ev, true)
+                        class="text-gray-500 hover:text-white disabled:opacity-20 \
+                               disabled:hover:text-gray-500 leading-none px-1"
+                        aria-label="نقل لأعلى"
+                    >
+                        "▲"
+                    </button>
+                    <button
+                        type="button"
+                        disabled=is_last
+                        on:click=move |ev| on_move_click(ev, false)
+                        class="text-gray-500 hover:text-white disabled:opacity-20 \
+                               disabled:hover:text-gray-500 leading-none px-1"
+                        aria-label="نقل لأسفل"
+                    >
+                        "▼"
+                    </button>
+                </div>
+            </Show>
 
             <div class="flex-1 min-w-0">
                 <Show

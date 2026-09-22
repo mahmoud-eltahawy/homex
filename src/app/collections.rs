@@ -186,3 +186,13 @@ pub async fn upload_collection_poster(
         .srv()?;
     Ok(url)
 }
+
+#[server]
+pub async fn move_item(id: u64, is_up: bool) -> Result<(), ServerFnError> {
+    use crate::app::server::AppState;
+    let mut state: AppState = expect_context();
+    db::swap_item_order(&mut state.db, id as i64, is_up)
+        .await
+        .srv()?;
+    Ok(())
+}

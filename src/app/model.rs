@@ -35,10 +35,6 @@ impl TryFrom<&str> for MediaKind {
 }
 
 // ─── Models ───────────────────────────────────────────────────────────────
-//
-// Every `#[derive(toasty::Model)]` and every Toasty-only field attribute
-// is gated behind `feature = "ssr"`. On the hydrate build the structs are
-// plain data types with no Toasty dependency in scope.
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
