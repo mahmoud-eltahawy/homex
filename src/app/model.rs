@@ -1,13 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MediaFile {
-    pub id: u64,
-    pub path: String,
-    pub size: u64,
-    pub duration: u64,
-}
-// impl MediaFile unchanged
+// ─── MediaKind ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MediaKind {
@@ -41,33 +34,98 @@ impl TryFrom<&str> for MediaKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Section {
+// ─── Models ───────────────────────────────────────────────────────────────
+//
+// Every `#[derive(toasty::Model)]` and every Toasty-only field attribute
+// is gated behind `feature = "ssr"`. On the hydrate build the structs are
+// plain data types with no Toasty dependency in scope.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(toasty::Model))]
+#[cfg_attr(feature = "ssr", table = "files")]
+pub struct File {
+    #[cfg_attr(feature = "ssr", key)]
+    #[cfg_attr(feature = "ssr", auto)]
     pub id: u64,
-    pub slug: String,
-    pub title: String,
-    pub media_kind: MediaKind,
-    pub nested: bool,
-    pub position: i64,
-    /// how many cards (collections) it holds — populated by the listing fn
-    pub collections_count: u32,
+    #[cfg_attr(feature = "ssr", unique)]
+    pub relative_path: String,
+    pub size_bytes: i64,
+    pub duration_secs: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(toasty::Model))]
+#[cfg_attr(feature = "ssr", table = "sections")]
+pub struct Section {
+    #[cfg_attr(feature = "ssr", key)]
+    #[cfg_attr(feature = "ssr", auto)]
+    pub id: u64,
+    #[cfg_attr(feature = "ssr", unique)]
+    pub slug: String,
+    pub title: String,
+    pub media_kind: String,
+    pub nested: bool,
+    pub position: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(toasty::Model))]
+#[cfg_attr(feature = "ssr", table = "collections")]
+pub struct Collection {
+    #[cfg_attr(feature = "ssr", key)]
+    #[cfg_attr(feature = "ssr", auto)]
+    pub id: u64,
+    #[cfg_attr(feature = "ssr", index)]
+    pub section_id: u64,
+    #[cfg_attr(feature = "ssr", index)]
+    pub section_slug: String,
+    pub title: String,
+    pub poster: Option<String>,
+    pub description: Option<String>,
+    pub position: i64,
+    /// Denormalized counter — kept in sync by the insert/delete paths.
+    /// The original SQLx schema computed this with a correlated subquery;
+    /// Toasty has no equivalent expression, so we materialise it.
+    pub items_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(toasty::Model))]
+#[cfg_attr(feature = "ssr", table = "items")]
+pub struct Item {
+    #[cfg_attr(feature = "ssr", key)]
+    #[cfg_attr(feature = "ssr", auto)]
+    pub id: u64,
+    #[cfg_attr(feature = "ssr", index)]
+    pub collection_id: u64,
+    pub number: i64,
+    pub season_number: Option<i64>,
+    pub title: Option<String>,
+    pub poster: Option<String>,
+    pub description: Option<String>,
+    #[cfg_attr(feature = "ssr", index)]
+    pub file_id: u64,
+}
+
+// ─── Domain methods ───────────────────────────────────────────────────────
+
 impl Section {
+    pub fn media_kind(&self) -> MediaKind {
+        MediaKind::try_from(self.media_kind.as_str()).unwrap_or(MediaKind::Video)
+    }
     pub fn href(&self) -> String {
         format!("/s/{}", self.slug)
     }
     pub fn new_label(&self) -> &'static str {
-        match (self.media_kind, self.nested) {
+        match (self.media_kind(), self.nested) {
             (MediaKind::Video, false) => "إضافة فيديو جديد",
             (MediaKind::Video, true) => "إضافة مسلسل جديد",
             (MediaKind::Audio, false) => "إضافة مقطع صوتي جديد",
             (MediaKind::Audio, true) => "إضافة مجموعة صوتية جديدة",
         }
     }
-
     pub fn badge_label(&self) -> &'static str {
-        match (self.media_kind, self.nested) {
+        match (self.media_kind(), self.nested) {
             (MediaKind::Video, false) => "فيديو",
             (MediaKind::Video, true) => "مسلسل",
             (MediaKind::Audio, false) => "مقطع صوتي",
@@ -76,33 +134,10 @@ impl Section {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Collection {
-    pub id: u64,
-    pub section_id: u64,
-    pub section_slug: String,
-    pub title: String,
-    pub poster: Option<String>,
-    pub description: Option<String>,
-    pub items_count: u32,
-}
-
 impl Collection {
     pub fn href(&self) -> String {
         format!("/s/{}/{}", self.section_slug, self.id)
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Item {
-    pub id: u64,
-    pub collection_id: u64,
-    pub number: i64,
-    pub season_number: Option<i64>,
-    pub title: Option<String>,
-    pub poster: Option<String>,
-    pub description: Option<String>,
-    pub file: MediaFile,
 }
 
 impl Item {
@@ -110,6 +145,11 @@ impl Item {
         self.title
             .clone()
             .unwrap_or_else(|| format!("المقطع {}", self.number + 1))
+    }
+    /// Was `Item.file.path` in the SQLx model, where `file` was a nested
+    /// `MediaFile` struct. Now it is derived from `file_id`.
+    pub fn file_path(&self) -> String {
+        format!("/media/{}", self.file_id)
     }
     pub fn href(&self, section_slug: &str) -> String {
         format!(

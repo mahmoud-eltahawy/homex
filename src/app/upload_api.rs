@@ -31,12 +31,12 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         needs_conversion, new_job_id, parse_upload_multipart, process_upload,
         schedule_job_eviction, validate_extensions,
     };
-    use crate::app::server::{AppState, SqlErr, db};
+    use crate::app::server::{AppState, ToastyErr, db};
 
-    let state: AppState = expect_context();
+    let mut state: AppState = expect_context();
     let payload = parse_upload_multipart(data).await?;
 
-    let kind_str = db::fetch_section_kind(&state.db, &payload.section_slug)
+    let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
         .await
         .srv()?
         .ok_or_else(|| ServerFnError::new("section not found"))?;

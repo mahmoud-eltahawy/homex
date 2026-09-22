@@ -10,7 +10,6 @@ use std::time::Duration;
 
 pub use multipart::parse_upload_multipart;
 pub use naming::{extension_of, new_job_id, new_storage_token, sanitize_filename, slugify};
-use sqlx::SqlitePool;
 use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};
@@ -19,7 +18,7 @@ use leptos::prelude::ServerFnError;
 
 use crate::app::model::MediaKind;
 use crate::app::server::convert::{JobPhase, job_set_phase};
-use crate::app::server::{AppState, Config, Jobs, SqlErr};
+use crate::app::server::{AppState, Jobs};
 
 const JOB_RETENTION: Duration = Duration::from_secs(60);
 
@@ -30,13 +29,9 @@ pub fn schedule_job_eviction(jobs: Jobs, job_id: String) {
     });
 }
 
-// ─── Cleanup ──────────────────────────────────────────────────────────────
-
 async fn wipe_temp_dir(dir: &Path) {
     let _ = tokio::fs::remove_dir_all(dir).await;
 }
-
-// ─── Phases ───────────────────────────────────────────────────────────────
 
 async fn stage_phase(
     payload: &UploadPayload,
@@ -48,31 +43,6 @@ async fn stage_phase(
     files::stage_files(payload, state, kind, job_id).await
 }
 
-async fn commit_items_and_poster(
-    db: &SqlitePool,
-    config: &Config,
-    payload: &UploadPayload,
-    file_rows: &[(i64, String)],
-) -> Result<(), ServerFnError> {
-    let mut tx = db.begin().await.srv()?;
-    persist::insert_items(
-        &mut tx,
-        payload.collection_id,
-        payload.season_number,
-        file_rows,
-    )
-    .await?;
-    persist::attach_poster(
-        &mut tx,
-        payload,
-        payload.collection_id,
-        &config.storage.data_dir,
-    )
-    .await?;
-    tx.commit().await.srv()?;
-    Ok(())
-}
-
 async fn persist_phase(
     state: &AppState,
     payload: &UploadPayload,
@@ -80,8 +50,10 @@ async fn persist_phase(
     job_id: Option<&str>,
 ) -> Result<(), ServerFnError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
-    let file_rows = persist::insert_files(&state.db, staged).await?;
-    commit_items_and_poster(&state.db, &state.config, payload, &file_rows).await
+    let mut db = state.db.clone();
+    let file_rows = persist::insert_files(&mut db, staged).await?;
+    persist::insert_items_and_poster(&mut db, payload, &file_rows, &state.config.storage.data_dir)
+        .await
 }
 
 async fn finish_job(state: &AppState, job_id: Option<&str>) {
@@ -102,8 +74,6 @@ async fn execute_upload(
     finish_job(state, job_id).await;
     Ok(format!("تم رفع {} ملف بنجاح", staged.len()))
 }
-
-// ─── Public entry point ───────────────────────────────────────────────────
 
 pub async fn process_upload(
     payload: UploadPayload,

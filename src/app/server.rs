@@ -1,5 +1,5 @@
 use leptos::prelude::ServerFnError;
-use sqlx::SqlitePool;
+use toasty::Db;
 use tokio_util::sync::CancellationToken;
 
 pub mod auth;
@@ -15,17 +15,19 @@ pub use convert::Jobs;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: SqlitePool,
+    pub db: Db,
     pub config: Config,
     pub jobs: Jobs,
     pub cancel: CancellationToken,
 }
 
-pub trait SqlErr<T> {
+/// Toasty errors become a generic message at the API boundary. The real
+/// error is logged; the caller sees nothing useful about the DB.
+pub trait ToastyErr<T> {
     fn srv(self) -> Result<T, ServerFnError>;
 }
 
-impl<T> SqlErr<T> for Result<T, sqlx::Error> {
+impl<T> ToastyErr<T> for toasty::Result<T> {
     fn srv(self) -> Result<T, ServerFnError> {
         self.map_err(|e| {
             leptos::logging::error!("[db] {e}");
@@ -34,6 +36,7 @@ impl<T> SqlErr<T> for Result<T, sqlx::Error> {
     }
 }
 
+// remove_media_files / remove_poster unchanged
 pub async fn remove_media_files(state: &AppState, rel_paths: &[String]) {
     for rel in rel_paths {
         if rel.starts_with("http://") || rel.starts_with("https://") {

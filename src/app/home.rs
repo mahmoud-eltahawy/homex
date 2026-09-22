@@ -223,7 +223,7 @@ fn SectionHeader(
     let edit_on = use_edit_mode();
 
     let id = section.id;
-    let kind = section.media_kind;
+    let kind = section.media_kind();
     let href_display = section.href();
     let href_actions = section.href();
 

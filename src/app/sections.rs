@@ -2,17 +2,17 @@ use crate::app::model::Section;
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
-use crate::app::server::{SqlErr, db};
+use crate::app::server::{ToastyErr, db};
 
 #[server]
 pub async fn patch_section_title(id: u64, title: String) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
-    let state: AppState = expect_context();
+    let mut state: AppState = expect_context();
     let t = title.trim();
     if t.is_empty() {
         return Err(ServerFnError::new("العنوان مطلوب"));
     }
-    db::update_section_title(&state.db, id as i64, t)
+    db::update_section_title(&mut state.db, id as i64, t)
         .await
         .srv()?;
     Ok(())
@@ -21,15 +21,15 @@ pub async fn patch_section_title(id: u64, title: String) -> Result<(), ServerFnE
 #[server]
 pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
     use crate::app::server::AppState;
-    let state: AppState = expect_context();
-    db::fetch_sections(&state.db).await.srv()
+    let mut state: AppState = expect_context();
+    db::fetch_sections(&mut state.db).await.srv()
 }
 
 #[server]
 pub async fn fetch_section_by_slug(slug: String) -> Result<Section, ServerFnError> {
     use crate::app::server::AppState;
-    let state: AppState = expect_context();
-    db::fetch_section_by_slug(&state.db, &slug)
+    let mut state: AppState = expect_context();
+    db::fetch_section_by_slug(&mut state.db, &slug)
         .await
         .srv()?
         .ok_or_else(|| ServerFnError::new("section not found"))
@@ -66,7 +66,7 @@ pub async fn create_section(
         format!("{hash:08x}")
     }
 
-    let state: AppState = expect_context();
+    let mut state: AppState = expect_context();
 
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -78,14 +78,25 @@ pub async fn create_section(
 
     for attempt in 0..4 {
         let slug = format!("{prefix}-{}", short_hash());
-        let res: Result<i64, sqlx::Error> =
-            db::insert_section(&state.db, &slug, &title, media_kind.as_str(), nested).await;
 
-        match res {
-            Ok(id) => return Ok(id as u64),
-            Err(sqlx::Error::Database(e)) if e.is_unique_violation() && attempt < 3 => continue,
+        if db::fetch_section_by_slug(&mut state.db, &slug)
+            .await
+            .srv()?
+            .is_some()
+        {
+            if attempt < 3 {
+                continue;
+            }
+            return Err(ServerFnError::new("تعذّر توليد معرّف فريد للقسم"));
+        }
+
+        match db::insert_section(&mut state.db, &slug, &title, media_kind.as_str(), nested).await {
+            Ok(id) => return Ok(id),
             Err(e) => {
                 leptos::logging::error!("[sections] insert failed: {e}");
+                if attempt < 3 {
+                    continue;
+                }
                 return Err(ServerFnError::new("تعذّر إنشاء القسم"));
             }
         }
@@ -102,9 +113,9 @@ pub async fn update_section(
 ) -> Result<(), ServerFnError> {
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
-    let state: AppState = expect_context();
+    let mut state: AppState = expect_context();
     MediaKind::try_from(media_kind.as_str()).map_err(ServerFnError::new)?;
-    db::update_section(&state.db, id as i64, &title, &media_kind, nested)
+    db::update_section(&mut state.db, id as i64, &title, &media_kind, nested)
         .await
         .srv()?;
     Ok(())
@@ -113,7 +124,7 @@ pub async fn update_section(
 #[server]
 pub async fn delete_section(id: u64) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
-    let state: AppState = expect_context();
-    db::delete_section(&state.db, id as i64).await.srv()?;
+    let mut state: AppState = expect_context();
+    db::delete_section(&mut state.db, id as i64).await.srv()?;
     Ok(())
 }

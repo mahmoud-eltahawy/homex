@@ -1,63 +1,110 @@
 use leptos::prelude::ServerFnError;
-use sqlx::SqlitePool;
 use std::path::Path;
+use toasty::{Db, Transaction};
 
 use super::types::{StagedFile, UploadPayload};
-use crate::app::server::SqlErr;
+use crate::app::model::{Collection, Item};
 use crate::app::server::db;
 use crate::app::server::poster::write_poster;
 
+fn toasty_err(e: toasty::Error) -> ServerFnError {
+    leptos::logging::error!("[upload] {e}");
+    ServerFnError::new("حدث خطأ داخلي")
+}
+
+// ─── Files ────────────────────────────────────────────────────────────────
+
 pub async fn insert_files(
-    pool: &SqlitePool,
+    db: &mut Db,
     staged: &[StagedFile],
-) -> Result<Vec<(i64, String)>, ServerFnError> {
+) -> Result<Vec<(u64, String)>, ServerFnError> {
     let mut out = Vec::with_capacity(staged.len());
     for f in staged {
-        let id = db::insert_file(pool, &f.rel, f.size as i64, f.duration)
+        let id = db::insert_file(db, &f.rel, f.size as i64, f.duration)
             .await
-            .srv()?;
+            .map_err(toasty_err)?;
         out.push((id, f.title.clone()));
     }
     Ok(out)
 }
 
-pub async fn insert_items(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    collection_id: i64,
-    season_number: Option<i64>,
-    file_rows: &[(i64, String)],
-) -> Result<(), ServerFnError> {
-    let start = db::next_item_number(&mut **tx, collection_id, season_number)
-        .await
-        .srv()?;
+// ─── Items + poster, one transaction ──────────────────────────────────────
 
-    for (i, (fid, title)) in file_rows.iter().enumerate() {
-        db::insert_item(
-            &mut **tx,
-            collection_id,
-            start + i as i64,
-            season_number,
-            Some(title.as_str()),
-            *fid,
-        )
-        .await
-        .srv()?;
-    }
-    Ok(())
+async fn next_item_number_tx(
+    tx: &mut Transaction<'_>,
+    collection_id: u64,
+    season_number: Option<i64>,
+) -> toasty::Result<i64> {
+    let mut q = Item::filter(Item::fields().collection_id().eq(collection_id));
+    q = match season_number {
+        Some(s) => q.filter(Item::fields().season_number().eq(s)),
+        None => q.filter(Item::fields().season_number().is_none()),
+    };
+    let last = q
+        .order_by(Item::fields().number().desc())
+        .limit(1)
+        .exec(tx)
+        .await?;
+    Ok(last.first().map(|i| i.number + 1).unwrap_or(0))
 }
 
-pub async fn attach_poster(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+pub async fn insert_items_and_poster(
+    db: &mut Db,
     payload: &UploadPayload,
-    collection_id: i64,
+    file_rows: &[(u64, String)],
     data_dir: &Path,
 ) -> Result<(), ServerFnError> {
-    let Some((ext, bytes)) = payload.poster.as_ref() else {
-        return Ok(());
-    };
-    let url = write_poster(data_dir, &payload.section_slug, collection_id, ext, bytes).await?;
-    db::update_collection_poster(&mut **tx, collection_id, Some(&url))
+    let mut tx = db.transaction().await.map_err(toasty_err)?;
+
+    let collection_id = payload.collection_id as u64;
+    let start = next_item_number_tx(&mut tx, collection_id, payload.season_number)
         .await
-        .srv()?;
+        .map_err(toasty_err)?;
+
+    for (i, (fid, title)) in file_rows.iter().enumerate() {
+        toasty::create!(Item {
+            collection_id,
+            number: start + i as i64,
+            season_number: payload.season_number,
+            title: Some(title.clone()),
+            poster: None,
+            description: None,
+            file_id: *fid,
+        })
+        .exec(&mut tx)
+        .await
+        .map_err(toasty_err)?;
+    }
+
+    // Bump the denormalized counter by the number of items just inserted.
+    let mut collection = Collection::get_by_id(&mut tx, &collection_id)
+        .await
+        .map_err(toasty_err)?;
+    let new_count = collection.items_count + file_rows.len() as i64;
+    collection
+        .update()
+        .items_count(new_count)
+        .exec(&mut tx)
+        .await
+        .map_err(toasty_err)?;
+
+    if let Some((ext, bytes)) = payload.poster.as_ref() {
+        let url = write_poster(
+            data_dir,
+            &payload.section_slug,
+            collection_id as i64,
+            ext,
+            bytes,
+        )
+        .await?;
+        collection
+            .update()
+            .poster(Some(url))
+            .exec(&mut tx)
+            .await
+            .map_err(toasty_err)?;
+    }
+
+    tx.commit().await.map_err(toasty_err)?;
     Ok(())
 }

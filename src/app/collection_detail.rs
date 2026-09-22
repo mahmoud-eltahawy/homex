@@ -255,7 +255,7 @@ fn CollectionContent(
 ) -> impl IntoView {
     let collection_id = collection.id;
     let section_slug = section.slug.clone();
-    let is_audio = matches!(section.media_kind, MediaKind::Audio);
+    let is_audio = matches!(section.media_kind(), MediaKind::Audio);
     let is_series = section.nested && !is_audio;
 
     let selected_season = RwSignal::new(None::<i64>);
@@ -287,7 +287,7 @@ fn CollectionContent(
     // Snapshots for the initial render + playlist adapter
     let poster_for_shell = edit.poster.get_untracked();
     let placeholder = make_poster_placeholder(is_audio);
-    let icon = icon_for(section.media_kind);
+    let icon = icon_for(section.media_kind());
     let badge_label = section.badge_label();
 
     let playlist_adapter = make_playlist_adapter(
@@ -573,7 +573,7 @@ fn Playlist(
         let media_items: Vec<MediaItem> = filtered
             .iter()
             .map(|it| {
-                let mut mi = MediaItem::new(it.id, it.display_title(), it.file.path.clone());
+                let mut mi = MediaItem::new(it.id, it.display_title(), it.file_path());
                 if let Some(season) = it.season_number {
                     mi = mi.with_subtitle(format!("S{season:02}"));
                 }

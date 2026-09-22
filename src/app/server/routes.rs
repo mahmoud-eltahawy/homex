@@ -17,7 +17,9 @@ pub async fn stream_media(
     Path(file_id): Path<i64>,
     req: Request<Body>,
 ) -> Response {
-    let rel: Option<String> = match db::fetch_file_path(&state.db, file_id).await {
+    let mut db = state.db.clone();
+
+    let rel: Option<String> = match db::fetch_file_path(&mut db, file_id).await {
         Ok(r) => r,
         Err(e) => {
             leptos::logging::error!("[stream] db error: {e}");
@@ -29,7 +31,6 @@ pub async fn stream_media(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    // Absolute URLs (demo seed data) → redirect to origin.
     if rel.starts_with("http://") || rel.starts_with("https://") {
         return Redirect::temporary(&rel).into_response();
     }

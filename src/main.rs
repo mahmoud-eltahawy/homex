@@ -39,7 +39,7 @@ fn load_config_or_exit() -> homex::app::server::Config {
 }
 
 #[cfg(feature = "ssr")]
-async fn init_db_or_exit(config: &homex::app::server::Config) -> sqlx::SqlitePool {
+async fn init_db_or_exit(config: &homex::app::server::Config) -> toasty::Db {
     use leptos::logging::error;
     match homex::app::server::db::init(config).await {
         Ok(p) => p,
@@ -79,7 +79,7 @@ fn log_boot_info(config: &homex::app::server::Config) {
 
 #[cfg(feature = "ssr")]
 fn build_app_state(
-    db: sqlx::SqlitePool,
+    db: toasty::Db,
     config: homex::app::server::Config,
     cancel: tokio_util::sync::CancellationToken,
 ) -> homex::app::server::AppState {
