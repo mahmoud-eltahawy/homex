@@ -3,10 +3,13 @@ use leptos::prelude::*;
 use leptos_router::{LazyRoute, lazy_route};
 
 use crate::app::{
-    common::{CardsLoading, CollectionGrid, EmptyState, collections_paginated, refetch_on_success},
+    common::{
+        CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
+        collections_paginated, refetch_on_success,
+    },
     icons::{DeleteIcon, ViewAllIcon, icon_for},
     inline_edit::{EditableText, use_edit_mode},
-    model::{Collection, Section},
+    model::{Collection, MediaKind, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
     search::SearchBar,
@@ -14,6 +17,8 @@ use crate::app::{
 };
 
 const MEDIA_LIST_SIZE: usize = 6;
+
+// ─── Page ─────────────────────────────────────────────────────────────────
 
 pub struct HomePage {
     search_query: RwSignal<Option<String>>,
@@ -51,7 +56,7 @@ impl LazyRoute for HomePage {
     }
 }
 
-// ─── Section list ────────────────────────────────────────────────────────
+// ─── Section list ─────────────────────────────────────────────────────────
 
 #[component]
 fn AllSections(
@@ -82,67 +87,86 @@ fn AllSections(
     }
 }
 
-#[component]
-fn SectionTeaser(
-    section: Section,
+// ─── Section teaser ───────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct SectionTeaserState {
+    folded: RwSignal<bool>,
+    offset: RwSignal<usize>,
+    items: CollectionPage,
+    count: CollectionCount,
+}
+
+/// All state for one section teaser: fold toggle, pagination offset,
+/// items list, and item count. Resets `offset` when the search query changes.
+fn use_section_teaser_state(
+    slug: String,
     search_query: RwSignal<Option<String>>,
-    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
-) -> impl IntoView {
+) -> SectionTeaserState {
     let folded = RwSignal::new(false);
     let offset = RwSignal::new(0usize);
-
-    let slug = section.slug.clone();
-    let slug_for_fetch = slug.clone();
 
     Effect::new(move |_| {
         let _ = search_query.get();
         offset.set(0);
     });
 
+    let slug_for_fetch = slug;
     let (items, count) = collections_paginated(
-        {
-            let slug_for_fetch = slug_for_fetch.clone();
-            move || slug_for_fetch.clone()
-        },
+        move || slug_for_fetch.clone(),
         offset,
         search_query,
         move || folded.get(),
         MEDIA_LIST_SIZE,
     );
 
-    let order = move || if folded.get() { "1" } else { "0" };
+    SectionTeaserState {
+        folded,
+        offset,
+        items,
+        count,
+    }
+}
+
+#[component]
+fn SectionTeaser(
+    section: Section,
+    search_query: RwSignal<Option<String>>,
+    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+) -> impl IntoView {
+    let state = use_section_teaser_state(section.slug.clone(), search_query);
+
+    let order = move || if state.folded.get() { "1" } else { "0" };
 
     let section_for_header = section.clone();
     let header_adapter = move |c: usize| SectionHeaderProps {
         section: section_for_header.clone(),
         count: c,
-        folded,
+        folded: state.folded,
         sections_resource,
     };
-
     let pagination_adapter = move |c: usize| PaginationControlsProps {
-        offset,
+        offset: state.offset,
         count: c,
         window_size: 5,
         page_size: MEDIA_LIST_SIZE,
     };
-
     let content_adapter = move |list: Vec<Collection>| CollectionStripProps { collections: list };
 
     view! {
         <div style:order=order>
             <hr class="border-t border-white/5 my-10 md:my-12" />
             <section class="bg-white/5 rounded-2xl p-4 md:p-6">
-                <ResourceView resource=count view_fn=SectionHeader adapter=header_adapter/>
-                <Show when=move || !folded.get()>
+                <ResourceView resource=state.count view_fn=SectionHeader adapter=header_adapter/>
+                <Show when=move || !state.folded.get()>
                     <ResourceView
-                        resource=items
+                        resource=state.items
                         view_fn=CollectionStrip
                         adapter=content_adapter
                         fallback=CardsLoading
                     />
                     <ResourceView
-                        resource=count
+                        resource=state.count
                         view_fn=PaginationControls
                         adapter=pagination_adapter
                     />
@@ -152,20 +176,22 @@ fn SectionTeaser(
     }
 }
 
-// ─── Section header (inline editable) ────────────────────────────────────
+// ─── Section header ───────────────────────────────────────────────────────
 
-#[component]
-fn SectionHeader(
-    section: Section,
-    count: usize,
-    folded: RwSignal<bool>,
+#[derive(Clone, Copy)]
+struct SectionHeaderState {
+    title: RwSignal<String>,
+    commit_title: Callback<String>,
+    delete_action: Action<u64, Result<(), ServerFnError>>,
+}
+
+/// Local title signal + the two server actions. Wires both actions to
+/// refetch the sections list on success.
+fn use_section_header_state(
+    section: &Section,
     sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
-) -> impl IntoView {
-    let edit_on = use_edit_mode();
+) -> SectionHeaderState {
     let id = section.id;
-    let kind = section.media_kind;
-    let href_display = section.href();
-    let href_actions = section.href();
     let title = RwSignal::new(section.title.clone());
 
     let rename = Action::new_local(|(id, t): &(u64, String)| patch_section_title(*id, t.clone()));
@@ -176,7 +202,33 @@ fn SectionHeader(
 
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
-        rename.dispatch((id, v));
+        let _ = rename.dispatch((id, v));
+    });
+
+    SectionHeaderState {
+        title,
+        commit_title,
+        delete_action,
+    }
+}
+
+#[component]
+fn SectionHeader(
+    section: Section,
+    count: usize,
+    folded: RwSignal<bool>,
+    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+) -> impl IntoView {
+    let state = use_section_header_state(&section, sections_resource);
+    let edit_on = use_edit_mode();
+
+    let id = section.id;
+    let kind = section.media_kind;
+    let href_display = section.href();
+    let href_actions = section.href();
+
+    let on_delete = Callback::new(move |_| {
+        let _ = state.delete_action.dispatch(id);
     });
 
     view! {
@@ -184,52 +236,103 @@ fn SectionHeader(
             <Show
                 when=move || edit_on.get()
                 fallback=move || view! {
-                    <a
+                    <SectionHeaderViewMode
                         href=href_display.clone()
-                        class="flex items-center gap-3 group min-w-0 flex-1"
-                    >
-                        <span class="flex items-center shrink-0">{icon_for(kind)}</span>
-                        <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
-                            {move || title.get()}
-                        </span>
-                        <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
-                            {count}
-                        </span>
-                    </a>
+                        title=state.title
+                        count=count
+                        kind=kind
+                    />
                 }
             >
-                <div class="flex items-center gap-3 min-w-0 flex-1">
-                    <span class="flex items-center shrink-0">{icon_for(kind)}</span>
-                    <EditableText
-                        value=Signal::derive(move || title.get())
-                        on_commit=commit_title
-                        class="text-lg font-bold text-white truncate"
-                    />
-                    <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
-                        {count}
-                    </span>
-                </div>
+                <SectionHeaderEditMode
+                    title=state.title
+                    count=count
+                    kind=kind
+                    on_commit=state.commit_title
+                />
             </Show>
-            <div class="flex items-center gap-1 shrink-0">
-                <Show when=move || edit_on.get()>
-                    <button
-                        type="button"
-                        on:click=move |_| {delete_action.dispatch(id);}
-                        class="p-1 rounded hover:bg-red-500/20 text-red-300 transition-colors"
-                        aria-label="حذف القسم"
-                    >
-                        <DeleteIcon/>
-                    </button>
-                </Show>
-                <FoldButton folded/>
-                <a
-                    href=href_actions
-                    class="p-1 rounded hover:bg-white/10 transition-colors"
-                    aria-label="View all"
+            <SectionHeaderActions
+                view_all_href=href_actions
+                edit_on=edit_on
+                on_delete=on_delete
+                folded=folded
+            />
+        </div>
+    }
+}
+
+#[component]
+fn SectionHeaderViewMode(
+    #[prop(into)] href: String,
+    title: RwSignal<String>,
+    count: usize,
+    kind: MediaKind,
+) -> impl IntoView {
+    view! {
+        <a
+            href=href
+            class="flex items-center gap-3 group min-w-0 flex-1"
+        >
+            <span class="flex items-center shrink-0">{icon_for(kind)}</span>
+            <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
+                {move || title.get()}
+            </span>
+            <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
+                {count}
+            </span>
+        </a>
+    }
+}
+
+#[component]
+fn SectionHeaderEditMode(
+    title: RwSignal<String>,
+    count: usize,
+    kind: MediaKind,
+    on_commit: Callback<String>,
+) -> impl IntoView {
+    view! {
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+            <span class="flex items-center shrink-0">{icon_for(kind)}</span>
+            <EditableText
+                value=Signal::derive(move || title.get())
+                on_commit=on_commit
+                class="text-lg font-bold text-white truncate"
+            />
+            <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
+                {count}
+            </span>
+        </div>
+    }
+}
+
+#[component]
+fn SectionHeaderActions(
+    #[prop(into)] view_all_href: String,
+    edit_on: RwSignal<bool>,
+    on_delete: Callback<()>,
+    folded: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="flex items-center gap-1 shrink-0">
+            <Show when=move || edit_on.get()>
+                <button
+                    type="button"
+                    on:click=move |_| on_delete.run(())
+                    class="p-1 rounded hover:bg-red-500/20 text-red-300 transition-colors"
+                    aria-label="حذف القسم"
                 >
-                    <ViewAllIcon />
-                </a>
-            </div>
+                    <DeleteIcon/>
+                </button>
+            </Show>
+            <FoldButton folded/>
+            <a
+                href=view_all_href
+                class="p-1 rounded hover:bg-white/10 transition-colors"
+                aria-label="View all"
+            >
+                <ViewAllIcon />
+            </a>
         </div>
     }
 }
@@ -269,12 +372,22 @@ fn CollectionStrip(collections: Vec<Collection>) -> impl IntoView {
     Either::Right(view! { <CollectionGrid collections=collections/> })
 }
 
-// ─── New-section form (only visible in edit mode) ────────────────────────
+// ─── New-section form ─────────────────────────────────────────────────────
 
-#[component]
-fn NewSectionForm(
+#[derive(Clone, Copy)]
+struct NewSectionFormState {
+    title: RwSignal<String>,
+    kind: RwSignal<String>,
+    nested: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+    create: Action<(String, String, bool), Result<u64, ServerFnError>>,
+}
+
+/// The form's signals, the create action, and the effect that resets
+/// the form on success or surfaces the server error on failure.
+fn use_new_section_form(
     sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
-) -> impl IntoView {
+) -> NewSectionFormState {
     let title = RwSignal::new(String::new());
     let kind = RwSignal::new("video".to_string());
     let nested = RwSignal::new(false);
@@ -295,15 +408,32 @@ fn NewSectionForm(
         None => {}
     });
 
+    NewSectionFormState {
+        title,
+        kind,
+        nested,
+        error,
+        create,
+    }
+}
+
+#[component]
+fn NewSectionForm(
+    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+) -> impl IntoView {
+    let state = use_new_section_form(sections_resource);
+
     let submit = move |ev: web_sys::SubmitEvent| {
         ev.prevent_default();
-        let t = title.get_untracked().trim().to_string();
+        let t = state.title.get_untracked().trim().to_string();
         if t.is_empty() {
-            error.set(Some("الاسم مطلوب".into()));
+            state.error.set(Some("الاسم مطلوب".into()));
             return;
         }
-        error.set(None);
-        create.dispatch((t, kind.get_untracked(), nested.get_untracked()));
+        state.error.set(None);
+        state
+            .create
+            .dispatch((t, state.kind.get_untracked(), state.nested.get_untracked()));
     };
 
     view! {
@@ -314,8 +444,8 @@ fn NewSectionForm(
                     <span class="mb-1 text-gray-300">"الاسم"</span>
                     <input
                         type="text"
-                        prop:value=move || title.get()
-                        on:input=move |e| title.set(event_target_value(&e))
+                        prop:value=move || state.title.get()
+                        on:input=move |e| state.title.set(event_target_value(&e))
                         placeholder="أفلام، مسلسلات، ألبومات..."
                         class="bg-white/10 rounded-lg px-3 py-1.5 text-white w-full"
                     />
@@ -323,8 +453,8 @@ fn NewSectionForm(
                 <label class="flex flex-col text-sm">
                     <span class="mb-1 text-gray-300">"النوع"</span>
                     <select
-                        prop:value=move || kind.get()
-                        on:change=move |e| kind.set(event_target_value(&e))
+                        prop:value=move || state.kind.get()
+                        on:change=move |e| state.kind.set(event_target_value(&e))
                         class="bg-white/10 rounded-lg px-3 py-1.5 text-white"
                     >
                         <option value="video">"فيديو"</option>
@@ -334,22 +464,26 @@ fn NewSectionForm(
                 <label class="flex items-center gap-2 text-sm pb-2 text-gray-300">
                     <input
                         type="checkbox"
-                        prop:checked=move || nested.get()
-                        on:change=move |e| nested.set(event_target_checked(&e))
+                        prop:checked=move || state.nested.get()
+                        on:change=move |e| state.nested.set(event_target_checked(&e))
                     />
                     <span>"مجموعات"</span>
                 </label>
                 <button
                     type="submit"
-                    disabled=move || create.pending().get()
+                    disabled=move || state.create.pending().get()
                     class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 \
                            hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
                            disabled:opacity-50"
                 >
-                    {move || if create.pending().get() { "جاري الإضافة..." } else { "إضافة" }}
+                    {move || if state.create.pending().get() {
+                        "جاري الإضافة..."
+                    } else {
+                        "إضافة"
+                    }}
                 </button>
             </form>
-            {move || error.get().map(|e| view! {
+            {move || state.error.get().map(|e| view! {
                 <div class="mt-3 text-red-300 text-sm">{e}</div>
             })}
         </div>
