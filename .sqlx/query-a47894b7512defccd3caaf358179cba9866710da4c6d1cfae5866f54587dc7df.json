@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT poster FROM collections WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "poster",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "collections",
+            "name": "poster"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a47894b7512defccd3caaf358179cba9866710da4c6d1cfae5866f54587dc7df"
+}

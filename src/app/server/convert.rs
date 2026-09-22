@@ -6,6 +6,7 @@ use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
 // ─── Job state ────────────────────────────────────────────────────────────
 
@@ -61,12 +62,10 @@ impl TargetFormat {
 
 // ─── Container classification ─────────────────────────────────────────────
 
-/// Browser can play this video container in `<video>` directly.
 pub fn is_video_container_supported(ext: &str) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "mp4" | "m4v" | "webm")
 }
 
-/// Browser can play this audio container in `<audio>` directly.
 pub fn is_audio_container_supported(ext: &str) -> bool {
     matches!(
         ext.to_ascii_lowercase().as_str(),
@@ -74,7 +73,6 @@ pub fn is_audio_container_supported(ext: &str) -> bool {
     )
 }
 
-/// Video containers we know how to turn into MP4.
 pub fn is_convertible_video(ext: &str) -> bool {
     matches!(
         ext.to_ascii_lowercase().as_str(),
@@ -82,7 +80,6 @@ pub fn is_convertible_video(ext: &str) -> bool {
     )
 }
 
-/// Audio containers we know how to turn into MP3.
 pub fn is_convertible_audio(ext: &str) -> bool {
     matches!(
         ext.to_ascii_lowercase().as_str(),
@@ -128,6 +125,7 @@ pub async fn convert_file(
     display_name: &str,
     jobs: &Jobs,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<(), String> {
     match target {
         TargetFormat::Mp4 => {
@@ -140,6 +138,7 @@ pub async fn convert_file(
                 display_name,
                 jobs,
                 job_id,
+                cancel,
             )
             .await
         }
@@ -153,6 +152,7 @@ pub async fn convert_file(
                 display_name,
                 jobs,
                 job_id,
+                cancel,
             )
             .await
         }
@@ -171,6 +171,7 @@ async fn ensure_mp4(
     display_name: &str,
     jobs: &Jobs,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<(), String> {
     // Attempt 1: remux video, transcode audio to AAC, drop subtitles.
     let mut cmd = Command::new("ffmpeg");
@@ -190,6 +191,7 @@ async fn ensure_mp4(
         display_name,
         jobs,
         job_id,
+        cancel,
     )
     .await?;
     if ok && file_ok(output).await {
@@ -219,6 +221,7 @@ async fn ensure_mp4(
         display_name,
         jobs,
         job_id,
+        cancel,
     )
     .await?;
     if ok && file_ok(output).await {
@@ -240,6 +243,7 @@ async fn ensure_mp3(
     display_name: &str,
     jobs: &Jobs,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<(), String> {
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-hide_banner")
@@ -258,6 +262,7 @@ async fn ensure_mp3(
         display_name,
         jobs,
         job_id,
+        cancel,
     )
     .await?;
     if ok && file_ok(output).await {
@@ -269,6 +274,7 @@ async fn ensure_mp3(
 
 // ─── Shared runner ────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 async fn run_and_watch(
     mut cmd: Command,
     total_secs: f64,
@@ -277,6 +283,7 @@ async fn run_and_watch(
     display_name: &str,
     jobs: &Jobs,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<bool, String> {
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -291,28 +298,39 @@ async fn run_and_watch(
     let mut lines = BufReader::new(stdout).lines();
     let mut last_bucket: u32 = u32::MAX;
 
-    while let Ok(Some(line)) = lines.next_line().await {
-        if let Some(val) = line.strip_prefix("out_time=")
-            && total_secs > 0.0
-            && let Some(secs) = parse_hms(val)
-        {
-            let pct = (secs / total_secs).clamp(0.0, 1.0) as f32;
-            let bucket = (pct * 100.0) as u32;
-            if bucket != last_bucket {
-                last_bucket = bucket;
-                job_set_phase(
-                    jobs,
-                    job_id,
-                    JobPhase::Converting {
-                        conversion_index,
-                        conversion_count,
-                        current_file: display_name.to_string(),
-                        progress: pct,
-                    },
-                )
-                .await;
+    // Scoped so we can cancel the reader if `cancel` fires.
+    let reader = async {
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let Some(val) = line.strip_prefix("out_time=")
+                && total_secs > 0.0
+                && let Some(secs) = parse_hms(val)
+            {
+                let pct = (secs / total_secs).clamp(0.0, 1.0) as f32;
+                let bucket = (pct * 100.0) as u32;
+                if bucket != last_bucket {
+                    last_bucket = bucket;
+                    job_set_phase(
+                        jobs,
+                        job_id,
+                        JobPhase::Converting {
+                            conversion_index,
+                            conversion_count,
+                            current_file: display_name.to_string(),
+                            progress: pct,
+                        },
+                    )
+                    .await;
+                }
             }
         }
+    };
+
+    tokio::select! {
+        _ = cancel.cancelled() => {
+            let _ = child.kill().await;
+            return Err("تم إلغاء التحويل".into());
+        }
+        _ = reader => {}
     }
 
     Ok(child.wait().await.map(|s| s.success()).unwrap_or(false))

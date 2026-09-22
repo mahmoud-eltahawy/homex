@@ -77,9 +77,18 @@ pub async fn stage_files(
 
             let raw_rel = format!("{subdir}/{slug}/{safe_stem}-{token}.{ext}");
             let raw_abs = state.config.storage.media_root.join(&raw_rel);
-            tokio::fs::write(&raw_abs, &file.bytes)
-                .await
-                .map_err(|e| ServerFnError::new(format!("write {}: {e}", raw_abs.display())))?;
+
+            match tokio::fs::rename(&file.temp_path, &raw_abs).await {
+                Ok(()) => {}
+                Err(_) => {
+                    tokio::fs::copy(&file.temp_path, &raw_abs)
+                        .await
+                        .map_err(|e| {
+                            ServerFnError::new(format!("copy {}: {e}", raw_abs.display()))
+                        })?;
+                    let _ = tokio::fs::remove_file(&file.temp_path).await;
+                }
+            }
             written.push(raw_abs.clone());
 
             let Some(target) = targets[i] else {
@@ -87,7 +96,7 @@ pub async fn stage_files(
                 staged.push(StagedFile {
                     rel: raw_rel,
                     duration: dur,
-                    size: file.bytes.len() as u64,
+                    size: file.size,
                     title: file.title.clone(),
                 });
                 continue;
@@ -109,6 +118,7 @@ pub async fn stage_files(
                 &file.filename,
                 &state.jobs,
                 job_id,
+                &state.cancel,
             )
             .await
             .map_err(ServerFnError::new)?;

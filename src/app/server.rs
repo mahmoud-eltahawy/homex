@@ -1,5 +1,6 @@
 use leptos::prelude::ServerFnError;
 use sqlx::SqlitePool;
+use tokio_util::sync::CancellationToken;
 
 pub mod auth;
 pub mod config;
@@ -17,6 +18,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub config: Config,
     pub jobs: Jobs,
+    pub cancel: CancellationToken,
 }
 
 pub trait SqlErr<T> {

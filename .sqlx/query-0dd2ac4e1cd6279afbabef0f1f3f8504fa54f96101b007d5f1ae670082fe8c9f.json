@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sections SET title = ?, media_kind = ?, nested = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "0dd2ac4e1cd6279afbabef0f1f3f8504fa54f96101b007d5f1ae670082fe8c9f"
+}

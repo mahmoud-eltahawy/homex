@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT relative_path FROM files WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "relative_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "files",
+            "name": "relative_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "39829f91fa807901d9b6d2bca1d220e49f634746b5fa93ea1b0b75a7bc65c47b"
+}

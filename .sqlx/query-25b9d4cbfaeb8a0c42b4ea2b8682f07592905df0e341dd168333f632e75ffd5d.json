@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            DELETE FROM files\n            WHERE id = ?\n              AND NOT EXISTS (SELECT 1 FROM items WHERE file_id = ?)\n            RETURNING relative_path\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "relative_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "files",
+            "name": "relative_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "25b9d4cbfaeb8a0c42b4ea2b8682f07592905df0e341dd168333f632e75ffd5d"
+}

@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT COUNT(*)\n        FROM collections c\n        JOIN sections s ON s.id = c.section_id\n        WHERE s.slug = ?1\n          AND (?2 IS NULL OR c.title LIKE '%' || ?2 || '%')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4a4a37bddeac33dcd94945b96fbc919de54137d19236eec6d5ea356090f61ab0"
+}

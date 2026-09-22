@@ -4,5 +4,6 @@
 export HOMEX_TOKEN="0000"
 export DATABASE_URL="sqlite://$(pwd)/Downloads/homex.db"
 cargo leptos watch --split --hot-reload
-# cargo sqlx prepare
+#cargo sqlx prepare --workspace -- --all-features
+
 # git add .sqlx && git commit -m "add sqlx offline cache"

@@ -1,0 +1,93 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT s.id, s.slug, s.title, s.media_kind, s.nested, s.position,\n               COALESCE(\n                   (SELECT COUNT(*) FROM collections c WHERE c.section_id = s.id),\n                   0\n               ) AS \"collections_count!\"\n        FROM sections s\n        WHERE s.slug = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "slug",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "media_kind",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "media_kind"
+          }
+        }
+      },
+      {
+        "name": "nested",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "nested"
+          }
+        }
+      },
+      {
+        "name": "position",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "collections_count!",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "96028eceaee887d35e3ef3828380d774921297a974770c3838b89852f1d737c1"
+}

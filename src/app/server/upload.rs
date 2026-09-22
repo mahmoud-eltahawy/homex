@@ -35,27 +35,35 @@ pub async fn process_upload(
     job_id: Option<&str>,
 ) -> Result<String, ServerFnError> {
     let collection_id = payload.collection_id;
+    let temp_dir = payload.temp_dir.clone();
 
-    job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
-    let staged = files::stage_files(&payload, state, kind, job_id).await?;
+    let result = async {
+        job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
+        let staged = files::stage_files(&payload, state, kind, job_id).await?;
 
-    job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
-    let file_rows = persist::insert_files(&state.db, &staged).await?;
+        job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
+        let file_rows = persist::insert_files(&state.db, &staged).await?;
 
-    let mut tx = state.db.begin().await.srv()?;
-    persist::insert_items(&mut tx, collection_id, payload.season_number, &file_rows).await?;
-    persist::attach_poster(
-        &mut tx,
-        &payload,
-        collection_id,
-        &state.config.storage.data_dir,
-    )
-    .await?;
-    tx.commit().await.srv()?;
+        let mut tx = state.db.begin().await.srv()?;
+        persist::insert_items(&mut tx, collection_id, payload.season_number, &file_rows).await?;
+        persist::attach_poster(
+            &mut tx,
+            &payload,
+            collection_id,
+            &state.config.storage.data_dir,
+        )
+        .await?;
+        tx.commit().await.srv()?;
 
-    job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
-    if let Some(id) = job_id {
-        schedule_job_eviction(state.jobs.clone(), id.to_string());
+        job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
+        if let Some(id) = job_id {
+            schedule_job_eviction(state.jobs.clone(), id.to_string());
+        }
+        Ok::<_, ServerFnError>(format!("تم رفع {} ملف بنجاح", file_rows.len()))
     }
-    Ok(format!("تم رفع {} ملف بنجاح", file_rows.len()))
+    .await;
+
+    // Always wipe scratch space — success, failure, or panic-unwind.
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    result
 }
