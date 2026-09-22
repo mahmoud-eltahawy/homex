@@ -128,3 +128,16 @@ pub fn collections_paginated(
 
     (items, count)
 }
+
+#[derive(Clone, Copy)]
+struct Bundle<T>(T);
+
+pub trait ContextBundle: Clone + Send + Sync + 'static {
+    fn provide(self) {
+        provide_context(Bundle(self));
+    }
+
+    fn expect() -> Self {
+        expect_context::<Bundle<Self>>().0
+    }
+}

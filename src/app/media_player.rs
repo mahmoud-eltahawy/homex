@@ -1,3 +1,4 @@
+use crate::app::common::ContextBundle;
 use crate::app::icons::{
     DeleteIcon, DownloadIcon, EditIcon, FullscreenExitIcon, FullscreenIcon, MuteIcon, NextPageIcon,
     PauseIcon, PlayIcon, PrevPageIcon, VolumeIcon,
@@ -63,25 +64,12 @@ impl MediaItem {
 }
 
 // ─── Context marker types ─────────────────────────────────────────────────
-// Newtype wrappers so nested players or future widgets can't accidentally
-// shadow a same-shaped context. The pattern is the same for all five:
-//   `provide` stores the bundle; `expect` retrieves it from the nearest
-//   provider up the owner chain.
 
-#[derive(Clone, Copy)]
-struct PlayerSignalsCtx(PlayerSignals);
-
-#[derive(Clone, Copy)]
-struct PlayerDerivedCtx(PlayerDerived);
-
-#[derive(Clone, Copy)]
-struct PlayerHandlersCtx(PlayerHandlers);
-
-#[derive(Clone, Copy)]
-struct PlayerNavCtx(PlayerNav);
-
-#[derive(Clone, Copy)]
-struct PlaylistConfigCtx(PlaylistConfig);
+impl ContextBundle for PlayerSignals {}
+impl ContextBundle for PlayerDerived {}
+impl ContextBundle for PlayerHandlers {}
+impl ContextBundle for PlayerNav {}
+impl ContextBundle for PlaylistConfig {}
 
 // ─── Signal bundle ────────────────────────────────────────────────────────
 
@@ -111,14 +99,6 @@ impl PlayerSignals {
             controls_visible: RwSignal::new(true),
             play_after_load: RwSignal::new(false),
         }
-    }
-
-    fn provide(s: Self) {
-        provide_context(PlayerSignalsCtx(s));
-    }
-
-    fn expect() -> Self {
-        expect_context::<PlayerSignalsCtx>().0
     }
 }
 
@@ -170,14 +150,6 @@ impl PlayerDerived {
             has_playlist,
         }
     }
-
-    fn provide(d: Self) {
-        provide_context(PlayerDerivedCtx(d));
-    }
-
-    fn expect() -> Self {
-        expect_context::<PlayerDerivedCtx>().0
-    }
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────
@@ -191,32 +163,12 @@ struct PlayerHandlers {
     handle_volume: Callback<web_sys::Event>,
 }
 
-impl PlayerHandlers {
-    fn provide(h: Self) {
-        provide_context(PlayerHandlersCtx(h));
-    }
-
-    fn expect() -> Self {
-        expect_context::<PlayerHandlersCtx>().0
-    }
-}
-
 // ─── Navigation callbacks ─────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 struct PlayerNav {
     on_prev: Callback<MouseEvent>,
     on_next: Callback<MouseEvent>,
-}
-
-impl PlayerNav {
-    fn provide(n: Self) {
-        provide_context(PlayerNavCtx(n));
-    }
-
-    fn expect() -> Self {
-        expect_context::<PlayerNavCtx>().0
-    }
 }
 
 // ─── Playlist config ──────────────────────────────────────────────────────
@@ -226,16 +178,6 @@ struct PlaylistConfig {
     on_rename: Option<Callback<(u64, String)>>,
     on_delete: Option<Callback<u64>>,
     show_download: bool,
-}
-
-impl PlaylistConfig {
-    fn provide(c: Self) {
-        provide_context(PlaylistConfigCtx(c));
-    }
-
-    fn expect() -> Self {
-        expect_context::<PlaylistConfigCtx>().0
-    }
 }
 
 // ─── Effects ──────────────────────────────────────────────────────────────
@@ -692,7 +634,7 @@ fn NavButton(direction: NavDirection) -> impl IntoView {
     let derived = PlayerDerived::expect();
     let nav = PlayerNav::expect();
 
-    let show = Signal::derive(move || derived.has_playlist.get());
+    let show = derived.has_playlist;
     let disabled = Signal::derive(move || match direction {
         NavDirection::Prev => !derived.has_prev.get(),
         NavDirection::Next => !derived.has_next.get(),

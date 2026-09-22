@@ -1,3 +1,4 @@
+use crate::app::common::ContextBundle;
 use crate::app::{
     icons::{AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, XIcon},
     inline_edit::{EditMode, EditModeToggle},
@@ -9,15 +10,9 @@ use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
 // ─── Shared sections resource ─────────────────────────────────────────────
-// Provided once by `Layout`, consumed by Navbar / Footer / MobileMenu so
-// they all read the same `Resource` and a single refetch updates all three.
 
-#[derive(Clone, Copy)]
-pub struct SectionsResource(pub Resource<Result<Vec<Section>, ServerFnError>>);
-
-pub fn use_sections() -> Resource<Result<Vec<Section>, ServerFnError>> {
-    expect_context::<SectionsResource>().0
-}
+type Sections = Resource<Result<Vec<Section>, ServerFnError>>;
+impl ContextBundle for Sections {}
 
 #[component(transparent)]
 pub fn Layout() -> impl IntoView {
@@ -25,7 +20,7 @@ pub fn Layout() -> impl IntoView {
     provide_context(EditMode(edit_on));
 
     let sections = Resource::new(|| (), |_| fetch_sections());
-    provide_context(SectionsResource(sections));
+    Sections::provide(sections);
 
     view! {
         <div class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased" dir="rtl">
@@ -74,23 +69,6 @@ fn Brand() -> impl IntoView {
 }
 
 #[component]
-fn DesktopNavLinks() -> impl IntoView {
-    let sections = use_sections();
-    view! {
-        <div class="hidden md:flex items-center gap-2">
-            <Transition fallback=|| ()>
-                {move || sections.get().map(|r| {
-                    r.unwrap_or_default().into_iter().map(|s: Section| {
-                        let icon = section_icon(s.media_kind);
-                        view! { <NavLink href=s.href() label=s.title icon=icon/> }
-                    }).collect_view()
-                })}
-            </Transition>
-        </div>
-    }
-}
-
-#[component]
 pub fn NavLink(
     #[prop(into)] href: String,
     icon: impl IntoView + 'static,
@@ -118,29 +96,6 @@ fn Footer() -> impl IntoView {
 }
 
 #[component]
-fn FooterGrid() -> impl IntoView {
-    let sections = use_sections();
-    view! {
-        <div class="flex flex-col sm:flex-row items-center justify-between gap-8 md:gap-12">
-            <Brand/>
-            <div class="flex items-center gap-6">
-                <Transition fallback=|| ()>
-                    {move || sections.get().map(|r| {
-                        r.unwrap_or_default().into_iter().map(|s: Section| {
-                            let icon = section_icon(s.media_kind);
-                            view! { <NavLink href=s.href() label=s.title icon=icon/> }
-                        }).collect_view()
-                    })}
-                </Transition>
-            </div>
-            <div class="flex items-center gap-6">
-                <span class="text-gray-500 text-xs font-mono">"v1.0.0"</span>
-            </div>
-        </div>
-    }
-}
-
-#[component]
 fn MobileMenuButton(open: RwSignal<bool>) -> impl IntoView {
     view! {
         <button
@@ -152,30 +107,6 @@ fn MobileMenuButton(open: RwSignal<bool>) -> impl IntoView {
         >
             {move || if open.get() { Either::Left(XIcon()) } else { Either::Right(MenuIcon()) }}
         </button>
-    }
-}
-
-#[component]
-fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
-    let sections = use_sections();
-    view! {
-        <Show when=move || open.get()>
-            <div class="md:hidden fixed inset-0 top-16 z-40 bg-black/85 backdrop-blur-xl"
-                on:click=move |_| open.set(false)>
-                <div class="flex flex-col p-4 gap-1" on:click=|ev| ev.stop_propagation()>
-                    <Transition fallback=|| ()>
-                        {move || sections.get().map(|r| {
-                            r.unwrap_or_default().into_iter().map(|s: Section| {
-                                let icon = section_icon(s.media_kind);
-                                view! {
-                                    <MobileMenuLink href=s.href() icon=icon label=s.title open=open/>
-                                }
-                            }).collect_view()
-                        })}
-                    </Transition>
-                </div>
-            </div>
-        </Show>
     }
 }
 
@@ -192,5 +123,69 @@ fn MobileMenuLink(
             {icon}
             <span class="font-medium text-base">{label}</span>
         </a>
+    }
+}
+
+fn render_section_links<F, V>(render: F) -> impl IntoView
+where
+    F: Fn(Section) -> V + Copy + Send + Sync + 'static,
+    V: IntoView + 'static,
+{
+    let sections = Sections::expect();
+    view! {
+        <Transition fallback=|| ()>
+            {move || sections.get().map(|r| {
+                r.unwrap_or_default().into_iter().map(render).collect_view()
+            })}
+        </Transition>
+    }
+}
+
+#[component]
+fn DesktopNavLinks() -> impl IntoView {
+    view! {
+        <div class="hidden md:flex items-center gap-2">
+            {render_section_links(|s: Section| {
+                let icon = section_icon(s.media_kind);
+                view! { <NavLink href=s.href() label=s.title icon=icon/> }
+            })}
+        </div>
+    }
+}
+
+#[component]
+fn FooterGrid() -> impl IntoView {
+    view! {
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-8 md:gap-12">
+            <Brand/>
+            <div class="flex items-center gap-6">
+                {render_section_links(|s: Section| {
+                    let icon = section_icon(s.media_kind);
+                    view! { <NavLink href=s.href() label=s.title icon=icon/> }
+                })}
+            </div>
+            <div class="flex items-center gap-6">
+                <span class="text-gray-500 text-xs font-mono">"v1.0.0"</span>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
+    let render = move |s: Section| {
+        let icon = section_icon(s.media_kind);
+        view! { <MobileMenuLink href=s.href() icon=icon label=s.title open=open/> }
+    };
+
+    view! {
+        <Show when=move || open.get()>
+            <div class="md:hidden fixed inset-0 top-16 z-40 bg-black/85 backdrop-blur-xl"
+                on:click=move |_| open.set(false)>
+                <div class="flex flex-col p-4 gap-1" on:click=|ev| ev.stop_propagation()>
+                    {render_section_links(render)}
+                </div>
+            </div>
+        </Show>
     }
 }
