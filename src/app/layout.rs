@@ -1,8 +1,9 @@
 use crate::app::common::ContextBundle;
+use crate::app::icons::icon_for;
 use crate::app::{
-    icons::{AudioIcon, MediaCubeLogo, MenuIcon, MovieIcon, XIcon},
+    icons::{MediaCubeLogo, MenuIcon, XIcon},
     inline_edit::{EditMode, EditModeToggle},
-    model::{MediaKind, Section},
+    model::Section,
     sections::fetch_sections,
 };
 use leptos::either::Either;
@@ -30,13 +31,6 @@ pub fn Layout() -> impl IntoView {
             </main>
             <Footer/>
         </div>
-    }
-}
-
-fn section_icon(kind: MediaKind) -> Either<impl IntoView, impl IntoView> {
-    match kind {
-        MediaKind::Video => Either::Left(MovieIcon()),
-        MediaKind::Audio => Either::Right(AudioIcon()),
     }
 }
 
@@ -146,7 +140,7 @@ fn DesktopNavLinks() -> impl IntoView {
     view! {
         <div class="hidden md:flex items-center gap-2">
             {render_section_links(|s: Section| {
-                let icon = section_icon(s.media_kind());
+                let icon = icon_for(s.media_kind(), s.nested);
                 view! { <NavLink href=s.href() label=s.title icon=icon/> }
             })}
         </div>
@@ -160,7 +154,7 @@ fn FooterGrid() -> impl IntoView {
             <Brand/>
             <div class="flex items-center gap-6">
                 {render_section_links(|s: Section| {
-                    let icon = section_icon(s.media_kind());
+                    let icon = icon_for(s.media_kind(), s.nested);
                     view! { <NavLink href=s.href() label=s.title icon=icon/> }
                 })}
             </div>
@@ -174,7 +168,7 @@ fn FooterGrid() -> impl IntoView {
 #[component]
 fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
     let render = move |s: Section| {
-        let icon = section_icon(s.media_kind());
+        let icon = icon_for(s.media_kind(), s.nested);
         view! { <MobileMenuLink href=s.href() icon=icon label=s.title open=open/> }
     };
 

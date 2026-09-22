@@ -27,7 +27,7 @@ fn Icon(
     }
 }
 
-// ─── Icon Components ───────────────────────────────────────────────────────
+// ─── Search & navigation ─────────────────────────────────────────────────
 
 #[component]
 pub fn SearchIcon() -> impl IntoView {
@@ -41,46 +41,74 @@ pub fn SearchIcon() -> impl IntoView {
 }
 
 #[component]
+pub fn XIcon() -> impl IntoView {
+    view! {
+        <Icon class="h-5 w-5" label="Cancel">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+        </Icon>
+    }
+}
+
+#[component]
+pub fn MenuIcon() -> impl IntoView {
+    view! {
+        <Icon class="h-6 w-6" label="القائمة">
+            <line x1="4" y1="6" x2="20" y2="6" />
+            <line x1="4" y1="12" x2="20" y2="12" />
+            <line x1="4" y1="18" x2="20" y2="18" />
+        </Icon>
+    }
+}
+
+#[component]
+pub fn PrevPageIcon() -> impl IntoView {
+    view! {
+        <Icon class="w-5 h-5" label="Previous">
+            <polyline points="9 6 15 12 9 18" />
+        </Icon>
+    }
+}
+
+#[component]
+pub fn NextPageIcon() -> impl IntoView {
+    view! {
+        <Icon class="w-5 h-5" label="Next">
+            <polyline points="15 6 9 12 15 18" />
+        </Icon>
+    }
+}
+
+// ─── Actions ─────────────────────────────────────────────────────────────
+
+#[component]
 pub fn DownloadIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Download" >
+        <Icon class="h-5 w-5" label="Download">
             <path d="M12 3v12" />
             <polyline points="7 10 12 15 17 10" />
             <path d="M5 21h14" />
-            <path d="M7 18h10" /> // subtle tray lines
+            <path d="M7 18h10" />
         </Icon>
     }
 }
 
 #[component]
-pub fn PlayIcon() -> impl IntoView {
+pub fn UploadIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6" label="Play" >
-            <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" stroke="none" />
-            <polygon points="7 6 17 12 7 18" fill="none" stroke="rgba(255,255,255,0.3)" />
+        <Icon class="h-5 w-5 text-gray-400 hover:text-white transition-colors" label="Upload">
+            <path d="M4 14.9A7 7 0 0 1 7 4.1a7 7 0 0 1 12.7 2.1A5 5 0 0 1 19 16h-5" />
+            <polyline points="12 12 12 20 9 17 12 12 15 17" />
         </Icon>
     }
 }
 
 #[component]
-pub fn PauseIcon() -> impl IntoView {
+pub fn EditIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6" label="Pause" >
-            <rect x="6" y="4" width="4" height="16" rx="1" />
-            <rect x="14" y="4" width="4" height="16" rx="1" />
-            <line x1="6" y1="12" x2="10" y2="12" stroke="currentColor" opacity="0.5" />
-            <line x1="14" y1="12" x2="18" y2="12" stroke="currentColor" opacity="0.5" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn ClockIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-4 w-4" label="Clock" >
-            <circle cx="12" cy="12" r="9" />
-            <polyline points="12 7 12 12 15 15" />
-            <circle cx="12" cy="12" r="1" fill="currentColor" />
+        <Icon class="h-5 w-5" label="تعديل">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
         </Icon>
     }
 }
@@ -88,7 +116,7 @@ pub fn ClockIcon() -> impl IntoView {
 #[component]
 pub fn DeleteIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Delete" >
+        <Icon class="h-5 w-5" label="Delete">
             <path d="M3 6h18" />
             <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
             <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -99,62 +127,34 @@ pub fn DeleteIcon() -> impl IntoView {
 }
 
 #[component]
-pub fn VolumeIcon() -> impl IntoView {
+pub fn ViewAllIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="Volume" >
-            <path d="M11 5L6 9H2v6h4l5 4V5z" />
-            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        <Icon class="w-5 h-5 text-gray-400 group-hover:text-white transition-colors" label="Show All" filled=true>
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+            <circle cx="6.5" cy="6.5" r="0.5" fill="#0c0b1a" />
+            <circle cx="17.5" cy="6.5" r="0.5" fill="#0c0b1a" />
+            <circle cx="6.5" cy="17.5" r="0.5" fill="#0c0b1a" />
+            <circle cx="17.5" cy="17.5" r="0.5" fill="#0c0b1a" />
         </Icon>
     }
 }
 
-#[component]
-pub fn MuteIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5" label="Mute" >
-            <path d="M11 5L6 9H2v6h4l5 4V5z" />
-            <line x1="23" y1="9" x2="17" y2="15" />
-            <line x1="17" y1="9" x2="23" y2="15" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn FullscreenIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5" label="Full Screen" >
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-            <path d="M12 8v8M8 12h8" opacity="0.5" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn FullscreenExitIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5" label="Full Screen Exit" >
-            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
-            <path d="M12 8v8M8 12h8" opacity="0.5" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn XIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5" label="Cancel" >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-        </Icon>
-    }
-}
+// ─── Section kind icons ──────────────────────────────────────────────────
+//
+// Four distinct icons for the four (media_kind, nested) combinations:
+//
+//   (Video, false) → MovieIcon        amber   — flat list of movies
+//   (Video, true)  → SeriesIcon       purple  — seasons / episodes
+//   (Audio, false) → AudioIcon        cyan    — flat list of tracks
+//   (Audio, true)  → AudioGroupIcon   pink    — albums / playlists
 
 #[component]
 pub fn MovieIcon() -> impl IntoView {
-    // Clapperboard – universally recognized symbol for film
     view! {
-        <Icon class="w-6 h-6 text-amber-400" label="Movie"  filled=true>
+        <Icon class="w-6 h-6 text-amber-400" label="Movie" filled=true>
             <path d="M4 5h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
             <path d="M3 10h18" stroke="#0c0b1a" stroke-width="2" />
             <path d="M6 5v5M10 5v5M14 5v5M18 5v5" stroke="#0c0b1a" stroke-width="2" />
@@ -165,9 +165,8 @@ pub fn MovieIcon() -> impl IntoView {
 
 #[component]
 pub fn SeriesIcon() -> impl IntoView {
-    // Retro TV – universally recognized for television series
     view! {
-        <Icon class="w-6 h-6 text-purple-400" label="Series"  filled=true>
+        <Icon class="w-6 h-6 text-purple-400" label="Series" filled=true>
             <rect x="3" y="4" width="18" height="13" rx="2" />
             <path d="M8 20h8l-1-3H9z" fill="currentColor" />
             <path d="M10 8h4v3h-4z" fill="#0c0b1a" />
@@ -178,12 +177,70 @@ pub fn SeriesIcon() -> impl IntoView {
 
 #[component]
 pub fn AudioIcon() -> impl IntoView {
-    // Headphones – global audio symbol
     view! {
-        <Icon class="w-6 h-6 text-cyan-400" label="Audio"  filled=true>
+        <Icon class="w-6 h-6 text-cyan-400" label="Audio" filled=true>
             <path d="M4 13v-1a8 8 0 1 1 16 0v1" />
             <path d="M4 13a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h2v-5H4zM20 13a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2v-5h2z" />
             <rect x="6" y="14" width="12" height="4" rx="1" fill="#0c0b1a" />
+        </Icon>
+    }
+}
+
+#[component]
+pub fn AudioGroupIcon() -> impl IntoView {
+    view! {
+        <Icon class="w-6 h-6 text-pink-400" label="Audio Group" filled=true>
+            // Back cover — dimmer, offset up-right to read as a stack
+            <rect x="5" y="4" width="14" height="14" rx="2" opacity="0.45" />
+            // Front cover — solid
+            <rect x="3" y="6" width="14" height="14" rx="2" />
+            // Vinyl disc punched into the front cover
+            <circle cx="10" cy="13" r="4" fill="#0c0b1a" />
+            <circle cx="10" cy="13" r="1.5" fill="currentColor" />
+        </Icon>
+    }
+}
+
+/// Pick the icon for a section based on its media kind and nesting.
+/// The four combinations map to four visually distinct icons.
+pub fn icon_for(kind: MediaKind, nested: bool) -> AnyView {
+    match (kind, nested) {
+        (MediaKind::Video, false) => view! { <MovieIcon/> }.into_any(),
+        (MediaKind::Video, true) => view! { <SeriesIcon/> }.into_any(),
+        (MediaKind::Audio, false) => view! { <AudioIcon/> }.into_any(),
+        (MediaKind::Audio, true) => view! { <AudioGroupIcon/> }.into_any(),
+    }
+}
+
+// ─── Status ──────────────────────────────────────────────────────────────
+
+#[component]
+pub fn LoadingIcon() -> impl IntoView {
+    view! {
+        <Icon class="h-8 w-8 animate-spin text-cyan-400" label="Loading">
+            <circle cx="12" cy="12" r="10" stroke-dasharray="70 200" stroke-dashoffset="0" />
+            <circle cx="12" cy="12" r="2" fill="currentColor" />
+        </Icon>
+    }
+}
+
+#[component]
+pub fn RetryIcon() -> impl IntoView {
+    view! {
+        <Icon class="h-6 w-6 text-gray-400 hover:text-white transition-colors" label="Retry">
+            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1.03 6.36 2.36L21 8" />
+            <polyline points="21 3 21 8 16 8" />
+        </Icon>
+    }
+}
+
+#[component]
+pub fn ErrorIcon() -> impl IntoView {
+    view! {
+        <Icon class="h-6 w-6 text-red-400" label="Something Went Wrong">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <circle cx="12" cy="16" r="0.5" fill="currentColor" />
         </Icon>
     }
 }
@@ -200,69 +257,17 @@ pub fn EmptyStateIcon() -> impl IntoView {
 }
 
 #[component]
-pub fn ViewAllIcon() -> impl IntoView {
+pub fn ClockIcon() -> impl IntoView {
     view! {
-        <Icon class="w-5 h-5 text-gray-400 group-hover:text-white transition-colors" label="Show All"  filled=true>
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-            <circle cx="6.5" cy="6.5" r="0.5" fill="#0c0b1a" />
-            <circle cx="17.5" cy="6.5" r="0.5" fill="#0c0b1a" />
-            <circle cx="6.5" cy="17.5" r="0.5" fill="#0c0b1a" />
-            <circle cx="17.5" cy="17.5" r="0.5" fill="#0c0b1a" />
+        <Icon class="h-4 w-4" label="Clock">
+            <circle cx="12" cy="12" r="9" />
+            <polyline points="12 7 12 12 15 15" />
+            <circle cx="12" cy="12" r="1" fill="currentColor" />
         </Icon>
     }
 }
 
-#[component]
-pub fn PrevPageIcon() -> impl IntoView {
-    view! {
-        <Icon class="w-5 h-5" label="Previous" >
-            <polyline points="9 6 15 12 9 18" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn NextPageIcon() -> impl IntoView {
-    view! {
-        <Icon class="w-5 h-5" label="Next" >
-            <polyline points="15 6 9 12 15 18" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn LoadingIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-8 w-8 animate-spin text-cyan-400" label="Loading" >
-            <circle cx="12" cy="12" r="10" stroke-dasharray="70 200" stroke-dashoffset="0" />
-            <circle cx="12" cy="12" r="2" fill="currentColor" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn RetryIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-6 w-6 text-gray-400 hover:text-white transition-colors" label="Retry" >
-            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1.03 6.36 2.36L21 8" />
-            <polyline points="21 3 21 8 16 8" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn ErrorIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-6 w-6 text-red-400" label="Something Went Wrong" >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <circle cx="12" cy="16" r="0.5" fill="currentColor" />
-        </Icon>
-    }
-}
+// ─── Branding ────────────────────────────────────────────────────────────
 
 #[component]
 pub fn MediaCubeLogo() -> impl IntoView {
@@ -281,28 +286,7 @@ pub fn MediaCubeLogo() -> impl IntoView {
     }
 }
 
-#[component]
-pub fn SettingsIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5 text-gray-400 hover:text-white transition-colors" label="Settings" >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 1v3M12 20v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M1 12h3M20 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" />
-            <circle cx="12" cy="12" r="0.5" fill="currentColor" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn UploadIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5 text-gray-400 hover:text-white transition-colors" label="Upload" >
-            <path d="M4 14.9A7 7 0 0 1 7 4.1a7 7 0 0 1 12.7 2.1A5 5 0 0 1 19 16h-5" />
-            <polyline points="12 12 12 20 9 17 12 12 15 17" />
-        </Icon>
-    }
-}
-
-// ─── Poster SVGs (Artistic Overhaul) ─────────────────────────────────────
+// ─── Poster placeholders ─────────────────────────────────────────────────
 
 #[component]
 pub fn MoviePosterSvg() -> impl IntoView {
@@ -468,33 +452,5 @@ pub fn MusicPosterSvg() -> impl IntoView {
             <text x="300" y="550" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="900" letter-spacing="6" fill="#ffffff" text-anchor="middle">MUSIC</text>
             <text x="300" y="580" font-family="Arial, Helvetica, sans-serif" font-size="14" letter-spacing="3" fill="#fbcfe8" text-anchor="middle">NO ARTWORK AVAILABLE</text>
         </svg>
-    }
-}
-
-#[component]
-pub fn MenuIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-6 w-6" label="القائمة" >
-            <line x1="4" y1="6" x2="20" y2="6" />
-            <line x1="4" y1="12" x2="20" y2="12" />
-            <line x1="4" y1="18" x2="20" y2="18" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn EditIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-5 w-5" label="تعديل" >
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-        </Icon>
-    }
-}
-
-pub fn icon_for(kind: MediaKind) -> AnyView {
-    match kind {
-        MediaKind::Video => view! { <MovieIcon/> }.into_any(),
-        MediaKind::Audio => view! { <AudioIcon/> }.into_any(),
     }
 }

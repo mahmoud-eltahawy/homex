@@ -230,6 +230,7 @@ fn SectionHeader(
     let on_delete = Callback::new(move |_| {
         let _ = state.delete_action.dispatch(id);
     });
+    let nested = section.nested;
 
     view! {
         <div class="flex items-center justify-between mb-6 gap-3">
@@ -239,16 +240,18 @@ fn SectionHeader(
                     <SectionHeaderViewMode
                         href=href_display.clone()
                         title=state.title
-                        count=count
-                        kind=kind
+                        count
+                        kind
+                        nested
                     />
                 }
             >
                 <SectionHeaderEditMode
                     title=state.title
-                    count=count
-                    kind=kind
                     on_commit=state.commit_title
+                    count
+                    kind
+                    nested
                 />
             </Show>
             <SectionHeaderActions
@@ -267,13 +270,14 @@ fn SectionHeaderViewMode(
     title: RwSignal<String>,
     count: usize,
     kind: MediaKind,
+    nested: bool,
 ) -> impl IntoView {
     view! {
         <a
             href=href
             class="flex items-center gap-3 group min-w-0 flex-1"
         >
-            <span class="flex items-center shrink-0">{icon_for(kind)}</span>
+            <span class="flex items-center shrink-0">{icon_for(kind,nested)}</span>
             <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
                 {move || title.get()}
             </span>
@@ -290,10 +294,11 @@ fn SectionHeaderEditMode(
     count: usize,
     kind: MediaKind,
     on_commit: Callback<String>,
+    nested: bool,
 ) -> impl IntoView {
     view! {
         <div class="flex items-center gap-3 min-w-0 flex-1">
-            <span class="flex items-center shrink-0">{icon_for(kind)}</span>
+            <span class="flex items-center shrink-0">{icon_for(kind,nested)}</span>
             <EditableText
                 value=Signal::derive(move || title.get())
                 on_commit=on_commit

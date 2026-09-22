@@ -299,7 +299,7 @@ fn CollectionContent(
     // Snapshots for the initial render + playlist adapter
     let poster_for_shell = edit.poster.get_untracked();
     let placeholder = make_poster_placeholder(is_audio);
-    let icon = icon_for(section.media_kind());
+    let icon = icon_for(section.media_kind(), section.nested);
     let badge_label = section.badge_label();
     let on_move = actions.move_callback();
 
