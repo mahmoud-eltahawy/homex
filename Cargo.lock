@@ -1090,6 +1090,7 @@ dependencies = [
  "leptos",
  "leptos-use",
  "leptos_axum",
+ "leptos_media_player",
  "leptos_meta",
  "leptos_router",
  "multer",
@@ -1605,6 +1606,18 @@ dependencies = [
  "server_fn_macro",
  "syn 2.0.119",
  "uuid",
+]
+
+[[package]]
+name = "leptos_media_player"
+version = "0.1.0"
+source = "git+https://github.com/mahmoud-eltahawy/leptos_media_player.git#07dc05588f72cddc0d7004aeea827fc7f0bbf2b0"
+dependencies = [
+ "leptos",
+ "leptos-use",
+ "serde",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

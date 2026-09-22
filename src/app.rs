@@ -20,9 +20,8 @@ mod sections;
 
 mod common;
 pub mod detail;
-pub mod icons;
+mod icons;
 mod inline_edit;
-mod media_player;
 mod model;
 mod pagination;
 mod resource_view;

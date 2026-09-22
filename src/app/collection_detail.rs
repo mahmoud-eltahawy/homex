@@ -4,6 +4,8 @@ use leptos::{either::Either, prelude::*};
 use leptos_router::{LazyRoute, lazy_route};
 use web_sys::wasm_bindgen::JsCast;
 
+use leptos_media_player::{MediaItem, WatchPage};
+
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_items, move_item, patch_collection_field,
@@ -13,7 +15,6 @@ use crate::app::{
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
-    media_player::{MediaItem, MediaPlayer},
     model::{Collection, Item, MediaKind, Section},
     resource_view::ResourceView,
     route_params::{use_optional_u64_param, use_string_param, use_u64_param},
@@ -596,15 +597,16 @@ fn Playlist(
             .collect();
 
         Either::Right(view! {
-            <MediaPlayer
+            <WatchPage
+                edit_mode=use_edit_mode()
                 items=media_items.into()
-                initial_index=initial_index
+                current_idx=RwSignal::new(initial_index)
                 audio=audio
                 artwork=artwork.clone()
-                playlist_title=playlist_title.clone()
-                on_rename=on_rename
-                on_delete=on_delete
-                on_move=on_move
+                playlist_title=Some(playlist_title.clone())
+                on_rename=Some(on_rename)
+                on_delete=Some(on_delete)
+                on_move=Some(on_move)
                 show_download=true
             />
         })
