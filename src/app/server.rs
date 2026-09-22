@@ -27,7 +27,10 @@ pub trait SqlErr<T> {
 
 impl<T> SqlErr<T> for Result<T, sqlx::Error> {
     fn srv(self) -> Result<T, ServerFnError> {
-        self.map_err(|e| ServerFnError::new(e.to_string()))
+        self.map_err(|e| {
+            leptos::logging::error!("[db] {e}");
+            ServerFnError::new("حدث خطأ داخلي")
+        })
     }
 }
 

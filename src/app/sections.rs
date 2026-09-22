@@ -84,7 +84,10 @@ pub async fn create_section(
         match res {
             Ok(id) => return Ok(id as u64),
             Err(sqlx::Error::Database(e)) if e.is_unique_violation() && attempt < 3 => continue,
-            Err(e) => return Err(ServerFnError::new(e.to_string())),
+            Err(e) => {
+                leptos::logging::error!("[sections] insert failed: {e}");
+                return Err(ServerFnError::new("تعذّر إنشاء القسم"));
+            }
         }
     }
     Err(ServerFnError::new("تعذّر توليد معرّف فريد للقسم"))
