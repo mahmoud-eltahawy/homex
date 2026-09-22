@@ -10,6 +10,9 @@ use leptos_router::components::Outlet;
 
 #[component(transparent)]
 pub fn Layout() -> impl IntoView {
+    let edit_on = RwSignal::new(false);
+    provide_context(EditMode(edit_on));
+
     view! {
         <div class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased" dir="rtl">
             <Navbar/>
@@ -31,8 +34,6 @@ fn section_icon(kind: MediaKind) -> Either<impl IntoView, impl IntoView> {
 #[component]
 fn Navbar() -> impl IntoView {
     let mobile_open = RwSignal::new(false);
-    let edit_on = RwSignal::new(false);
-    provide_context(EditMode(edit_on));
 
     view! {
         <nav class="fixed top-0 start-0 end-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/[0.06] shadow-2xl shadow-black/50">

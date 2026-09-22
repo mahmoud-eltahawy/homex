@@ -1,6 +1,7 @@
 #!/usr/bin/sh
 
 # cargo binstall sqlx-cli
+export HOMEX_TOKEN="0000"
 export DATABASE_URL="sqlite://$(pwd)/Downloads/homex.db"
 cargo leptos watch --split --hot-reload
 # cargo sqlx prepare

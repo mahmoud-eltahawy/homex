@@ -1,9 +1,12 @@
 #![recursion_limit = "256"]
 
+use axum::middleware;
+
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
     use axum::{Extension, Router, routing::get};
+    use homex::app::server::auth;
     use homex::app::server::{AppState, Config};
     use homex::app::{server::routes::stream_media, *};
     use leptos::logging::log;
@@ -11,6 +14,7 @@ async fn main() {
     use leptos_axum::{LeptosRoutes, generate_route_list};
     use tower_http::services::ServeDir;
 
+    auth::init_from_env();
     let config = Config::load().expect("failed to load homex.toml");
     let server_addr = config.server.addr;
 
@@ -52,6 +56,7 @@ async fn main() {
         .route("/media/{id}", get(stream_media))
         .fallback(leptos_axum::file_and_error_handler(shell))
         .layer(Extension(state))
+        .layer(middleware::from_fn(auth::middleware))
         .with_state(leptos_options);
 
     log!("listening on http://{}", &server_addr);

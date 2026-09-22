@@ -1,5 +1,5 @@
 use crate::app::{
-    collection_detail::CollectionDetailPage, home::HomePage, layout::Layout,
+    collection_detail::CollectionDetailPage, home::HomePage, layout::Layout, login::LoginPage,
     section_listing::SectionListingPage,
 };
 use leptos::prelude::*;
@@ -14,6 +14,7 @@ mod collection_detail;
 mod collections;
 mod home;
 mod layout;
+mod login;
 mod section_listing;
 mod sections;
 
@@ -66,6 +67,7 @@ pub fn App() -> impl IntoView {
                         path=path!("/s/:slug/:id/item/:item_id")
                         view={Lazy::<CollectionDetailPage>::new()}
                     />
+                    <Route path=path!("/login") view={Lazy::<LoginPage>::new()}/>
                 </ParentRoute>
             </Routes>
         </Router>

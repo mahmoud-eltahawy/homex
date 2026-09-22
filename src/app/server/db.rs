@@ -340,16 +340,6 @@ pub async fn update_collection_by_field(
     }
 }
 
-pub async fn delete_collection<'e, E>(executor: E, id: i64) -> Result<(), sqlx::Error>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    sqlx::query!("DELETE FROM collections WHERE id = ?", id)
-        .execute(executor)
-        .await
-        .map(|_| ())
-}
-
 // ─── Item queries ─────────────────────────────────────────────────────────
 
 pub async fn fetch_items(pool: &SqlitePool, collection_id: i64) -> Result<Vec<Item>, sqlx::Error> {
@@ -458,16 +448,6 @@ where
         .map(|_| ())
 }
 
-pub async fn delete_item<'e, E>(executor: E, id: i64) -> Result<(), sqlx::Error>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    sqlx::query!("DELETE FROM items WHERE id = ?", id)
-        .execute(executor)
-        .await
-        .map(|_| ())
-}
-
 // ─── File queries ─────────────────────────────────────────────────────────
 
 pub async fn insert_file<'e, E>(
@@ -525,4 +505,88 @@ where
         .execute(executor)
         .await
         .map(|_| ())
+}
+
+pub struct CollectionDeletion {
+    pub media_paths: Vec<String>,
+    pub poster_url: Option<String>,
+}
+
+pub struct ItemDeletion {
+    pub media_paths: Vec<String>,
+}
+
+pub async fn delete_collection_cascade(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<CollectionDeletion, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Grab the poster URL before the row disappears.
+    let poster_url: Option<String> =
+        sqlx::query_scalar!("SELECT poster FROM collections WHERE id = ?", id,)
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten();
+
+    // Snapshot the candidate file ids before the FK cascade removes items.
+    let file_ids: Vec<i64> =
+        sqlx::query_scalar!("SELECT file_id FROM items WHERE collection_id = ?", id,)
+            .fetch_all(&mut *tx)
+            .await?;
+
+    sqlx::query!("DELETE FROM collections WHERE id = ?", id)
+        .execute(&mut *tx)
+        .await?;
+
+    let media_paths = delete_orphaned_files(&mut tx, &file_ids).await?;
+
+    tx.commit().await?;
+    Ok(CollectionDeletion {
+        media_paths,
+        poster_url,
+    })
+}
+
+pub async fn delete_item_cascade(pool: &SqlitePool, id: i64) -> Result<ItemDeletion, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let file_id: Option<i64> = sqlx::query_scalar!("SELECT file_id FROM items WHERE id = ?", id,)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+    sqlx::query!("DELETE FROM items WHERE id = ?", id)
+        .execute(&mut *tx)
+        .await?;
+
+    let file_ids: Vec<i64> = file_id.into_iter().collect();
+    let media_paths = delete_orphaned_files(&mut tx, &file_ids).await?;
+
+    tx.commit().await?;
+    Ok(ItemDeletion { media_paths })
+}
+
+async fn delete_orphaned_files(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    file_ids: &[i64],
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut removed = Vec::new();
+    for fid in file_ids {
+        let path: Option<String> = sqlx::query_scalar!(
+            r#"
+            DELETE FROM files
+            WHERE id = ?
+              AND NOT EXISTS (SELECT 1 FROM items WHERE file_id = ?)
+            RETURNING relative_path
+            "#,
+            fid,
+            fid,
+        )
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(p) = path {
+            removed.push(p);
+        }
+    }
+    Ok(removed)
 }

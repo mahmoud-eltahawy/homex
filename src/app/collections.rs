@@ -101,17 +101,22 @@ pub async fn patch_item_title(id: u64, title: String) -> Result<(), ServerFnErro
 
 #[server]
 pub async fn delete_collection(id: u64) -> Result<(), ServerFnError> {
-    use crate::app::server::AppState;
+    use crate::app::server::{AppState, remove_media_files, remove_poster};
     let state: AppState = expect_context();
-    db::delete_collection(&state.db, id as i64).await.srv()?;
+    let del = db::delete_collection_cascade(&state.db, id as i64)
+        .await
+        .srv()?;
+    remove_poster(&state, del.poster_url.as_deref()).await;
+    remove_media_files(&state, &del.media_paths).await;
     Ok(())
 }
 
 #[server]
 pub async fn delete_item(id: u64) -> Result<(), ServerFnError> {
-    use crate::app::server::AppState;
+    use crate::app::server::{AppState, remove_media_files};
     let state: AppState = expect_context();
-    db::delete_item(&state.db, id as i64).await.srv()?;
+    let del = db::delete_item_cascade(&state.db, id as i64).await.srv()?;
+    remove_media_files(&state, &del.media_paths).await;
     Ok(())
 }
 
@@ -145,9 +150,15 @@ pub async fn upload_collection_poster(
     }
 
     let (ext, bytes) = bytes.ok_or_else(|| ServerFnError::new("لم يتم استلام صورة"))?;
+
+    let collection = db::fetch_collection_detail(&state.db, &section_slug, id)
+        .await
+        .srv()?
+        .ok_or_else(|| ServerFnError::new("collection not found"))?;
+
     let url = write_poster(
         &state.config.storage.data_dir,
-        &section_slug,
+        &collection.section_slug,
         id,
         &ext,
         &bytes,
