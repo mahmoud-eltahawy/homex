@@ -36,7 +36,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 tower-http = { version = "0.6.0",features = ["fs"], optional = true }
 leptos-use = "0.19"
 server_fn = { version = "0.8.13", features = ["multipart"] }
-toasty = { version = "0.10", features = ["sqlite","migration"], optional = true }
+toasty = { version = "0.10", features = ["sqlite"], optional = true }
 toml = { version = "1",optional = true}
 tower = { version = "0.5",optional = true}
 tokio-util = { version = "0.7", optional = true }

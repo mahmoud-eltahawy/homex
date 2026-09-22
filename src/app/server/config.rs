@@ -28,8 +28,4 @@ impl Config {
     pub fn db_path(&self) -> PathBuf {
         self.storage.data_dir.join("homex.db")
     }
-
-    pub fn db_url(&self) -> String {
-        format!("sqlite://{}?mode=rwc", self.db_path().display())
-    }
 }

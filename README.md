@@ -1,20 +1,12 @@
-## Updating the SQLx offline cache
+## Schema
 
-After changing any `sqlx::query!` / `query_scalar!` in `src/app/server/db.rs`,
-run with a live dev DB:
+The schema is derived from the `#[derive(toasty::Model)]` structs in
+`src/app/model.rs`. On startup the server calls `push_schema` on a fresh
+DB; if the DB already has tables it leaves them alone.
 
-    export DATABASE_URL="sqlite://$(pwd)/Downloads/homex.db"
-    cargo sqlx prepare --workspace -- --all-features
-    git add .sqlx && git commit -m "refresh sqlx offline cache"
+After changing a model, reset the dev DB:
 
-CI builds with `SQLX_OFFLINE=true`, so forgetting this step will fail the
-build, not ship a broken release.
+    HOMEX_RESET_SCHEMA=1 ./run
 
-
-## Config
-
-`homex.toml` ships production-shaped defaults (`/srv/homex/media`,
-`/var/lib/homex`). Local development uses `homex.dev.toml`, which `run`
-selects via `HOMEX_CONFIG`. To use a different file:
-
-    HOMEX_CONFIG=/path/to/your.toml cargo leptos watch --split --hot-reload
+That deletes `Downloads/homex.db` before boot, then recreates it from the
+current model.

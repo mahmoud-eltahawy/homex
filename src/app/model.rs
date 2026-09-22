@@ -40,9 +40,9 @@ impl TryFrom<&str> for MediaKind {
 // is gated behind `feature = "ssr"`. On the hydrate build the structs are
 // plain data types with no Toasty dependency in scope.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(toasty::Model))]
-#[cfg_attr(feature = "ssr", table = "files")]
+#[cfg(feature = "ssr")]
+#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
+#[table = "files"]
 pub struct File {
     #[cfg_attr(feature = "ssr", key)]
     #[cfg_attr(feature = "ssr", auto)]

@@ -1,11 +1,8 @@
 #!/usr/bin/sh
 
-# cargo binstall sqlx-cli
 export HOMEX_TOKEN="0000"
 export HOMEX_CONFIG="$(pwd)/homex.dev.toml"
-export DATABASE_URL="sqlite://$(pwd)/Downloads/homex.db"
 cargo leptos watch --split --hot-reload
 
-# After changing any sqlx::query!:
-#   cargo sqlx prepare --workspace -- --all-features
-#   git add .sqlx && git commit -m "refresh sqlx offline cache"
+# To reset the dev DB after a model change:
+#   HOMEX_RESET_SCHEMA=1 ./run
