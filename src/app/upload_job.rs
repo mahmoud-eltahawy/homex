@@ -3,80 +3,125 @@ use leptos::prelude::*;
 
 use crate::app::upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media};
 
-/// A tiny state machine for one media-upload job.
-/// Owns the `Action` that dispatches the FormData, the polling loop,
-/// and a signal that fires once when the job reaches `Done`.
+const POLL_INTERVAL_MS: u32 = 700;
+
 #[derive(Clone, Copy)]
 pub struct UploadJob {
     action: Action<web_sys::FormData, Result<UploadResult, ServerFnError>>,
     pub status: RwSignal<Option<ConversionStatus>>,
-    /// Monotonic counter — bumped each time a job finishes successfully.
-    /// Pages watch this in an `Effect` to refetch their list.
     pub done_tick: RwSignal<u32>,
     pub pending: Signal<bool>,
 }
 
+// ─── Signal bundle ────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct UploadSignals {
+    status: RwSignal<Option<ConversionStatus>>,
+    done_tick: RwSignal<u32>,
+    active_job: RwSignal<Option<String>>,
+}
+
+impl UploadSignals {
+    fn new() -> Self {
+        Self {
+            status: RwSignal::new(None),
+            done_tick: RwSignal::new(0),
+            active_job: RwSignal::new(None),
+        }
+    }
+
+    fn bump_done(&self) {
+        self.done_tick.update(|n| *n += 1);
+    }
+
+    fn clear_active_if(&self, id: &str) {
+        if self.active_job.get_untracked().as_deref() == Some(id) {
+            self.active_job.set(None);
+        }
+    }
+
+    fn mark_done_if_successful(&self) {
+        if matches!(self.status.get_untracked(), Some(ConversionStatus::Done)) {
+            self.bump_done();
+        }
+    }
+}
+
+// ─── Polling ──────────────────────────────────────────────────────────────
+
+fn is_terminal(s: &ConversionStatus) -> bool {
+    matches!(s, ConversionStatus::Done | ConversionStatus::Failed(_))
+}
+
+async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
+    loop {
+        match poll_conversion(job_id.clone()).await {
+            Ok(s) => {
+                let terminal = is_terminal(&s);
+                signals.status.set(Some(s));
+                if terminal {
+                    break;
+                }
+            }
+            Err(_) => { /* transient */ }
+        }
+        TimeoutFuture::new(POLL_INTERVAL_MS).await;
+    }
+    signals.clear_active_if(&job_id);
+    signals.mark_done_if_successful();
+}
+
+// ─── Effects ──────────────────────────────────────────────────────────────
+
+fn install_dispatch_result_effect(
+    action: Action<web_sys::FormData, Result<UploadResult, ServerFnError>>,
+    signals: UploadSignals,
+) {
+    Effect::new(move |_| {
+        let Some(Ok(result)) = action.value().get() else {
+            return;
+        };
+        match result.job_id {
+            Some(id) => signals.active_job.set(Some(id)),
+            None => signals.bump_done(),
+        }
+    });
+}
+
+fn install_polling_effect(signals: UploadSignals) {
+    Effect::new(move |_| {
+        let Some(id) = signals.active_job.get() else {
+            return;
+        };
+        signals.status.set(None);
+        leptos::task::spawn_local(poll_until_terminal(id, signals));
+    });
+}
+
+fn derive_pending(
+    action: Action<web_sys::FormData, Result<UploadResult, ServerFnError>>,
+    signals: UploadSignals,
+) -> Signal<bool> {
+    Signal::derive(move || action.pending().get() || signals.active_job.get().is_some())
+}
+
+// ─── Public ───────────────────────────────────────────────────────────────
+
 impl UploadJob {
     pub fn new() -> Self {
         let action = Action::new_local(|fd: &web_sys::FormData| upload_media(fd.clone().into()));
+        let signals = UploadSignals::new();
 
-        let status = RwSignal::new(None::<ConversionStatus>);
-        let done_tick = RwSignal::new(0u32);
-        let active_job = RwSignal::new(None::<String>);
+        install_dispatch_result_effect(action, signals);
+        install_polling_effect(signals);
 
-        // When the server hands us a job id, start polling it.
-        Effect::new(move |_| {
-            let Some(Ok(result)) = action.value().get() else {
-                return;
-            };
-            if let Some(id) = result.job_id {
-                active_job.set(Some(id));
-            } else {
-                // Fast path — no conversion, job is already done.
-                done_tick.update(|n| *n += 1);
-            }
-        });
-
-        // Poll until terminal.
-        Effect::new(move |_| {
-            let Some(my_id) = active_job.get() else {
-                return;
-            };
-            status.set(None);
-
-            leptos::task::spawn_local(async move {
-                loop {
-                    match poll_conversion(my_id.clone()).await {
-                        Ok(s) => {
-                            let terminal =
-                                matches!(s, ConversionStatus::Done | ConversionStatus::Failed(_));
-                            status.set(Some(s));
-                            if terminal {
-                                break;
-                            }
-                        }
-                        Err(_) => { /* transient */ }
-                    }
-                    TimeoutFuture::new(700).await;
-                }
-
-                // Clear the active job id so we don't re-poll.
-                if active_job.get_untracked().as_deref() == Some(my_id.as_str()) {
-                    active_job.set(None);
-                }
-
-                if matches!(status.get_untracked(), Some(ConversionStatus::Done)) {
-                    done_tick.update(|n| *n += 1);
-                }
-            });
-        });
-
-        let pending = Signal::derive(move || action.pending().get() || active_job.get().is_some());
+        let pending = derive_pending(action, signals);
 
         Self {
             action,
-            status,
-            done_tick,
+            status: signals.status,
+            done_tick: signals.done_tick,
             pending,
         }
     }

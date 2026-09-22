@@ -3,78 +3,120 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
-    use axum::{Extension, Router, extract::DefaultBodyLimit, middleware, routing::get};
     use homex::app::server::auth;
-    use homex::app::server::{AppState, Config};
-    use homex::app::{server::routes::stream_media, *};
-    use leptos::logging::{error, log};
     use leptos::prelude::*;
-    use leptos_axum::{LeptosRoutes, generate_route_list};
     use tokio_util::sync::CancellationToken;
-    use tower_http::services::ServeDir;
 
     auth::init_from_env();
 
-    let config = match Config::load() {
+    let config = load_config_or_exit();
+    let db = init_db_or_exit(&config).await;
+    ensure_storage_dirs(&config).await;
+    log_boot_info(&config);
+
+    let cancel = CancellationToken::new();
+    let state = build_app_state(db, config.clone(), cancel.clone());
+
+    let leptos_options = get_configuration(None).unwrap().leptos_options;
+    let router = build_router(state, leptos_options);
+
+    run_server(router, config.server.addr, cancel).await;
+}
+
+// ─── Bootstrap helpers ────────────────────────────────────────────────────
+
+#[cfg(feature = "ssr")]
+fn load_config_or_exit() -> homex::app::server::Config {
+    use homex::app::server::Config;
+    use leptos::logging::error;
+    match Config::load() {
         Ok(c) => c,
         Err(e) => {
             error!("[fatal] config: {e}");
             std::process::exit(1);
         }
-    };
-    let server_addr = config.server.addr;
+    }
+}
 
-    let db = match server::db::init(&config).await {
+#[cfg(feature = "ssr")]
+async fn init_db_or_exit(config: &homex::app::server::Config) -> sqlx::SqlitePool {
+    use leptos::logging::error;
+    match homex::app::server::db::init(config).await {
         Ok(p) => p,
         Err(e) => {
             error!("[fatal] db init: {e}");
             std::process::exit(1);
         }
-    };
+    }
+}
 
-    // Both storage roots must exist before anything tries to write into them.
-    for dir in [&config.storage.media_root, &config.storage.data_dir] {
-        if let Err(e) = tokio::fs::create_dir_all(dir).await {
+#[cfg(feature = "ssr")]
+async fn ensure_storage_dirs(config: &homex::app::server::Config) {
+    use leptos::logging::error;
+    let mut dirs = vec![
+        config.storage.media_root.clone(),
+        config.storage.data_dir.clone(),
+        config.storage.data_dir.join("posters"),
+    ];
+    for dir in dirs.drain(..) {
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
             error!("[fatal] mkdir {}: {e}", dir.display());
             std::process::exit(1);
         }
     }
-    let posters_dir = config.storage.data_dir.join("posters");
-    if let Err(e) = tokio::fs::create_dir_all(&posters_dir).await {
-        error!("[fatal] mkdir {}: {e}", posters_dir.display());
-        std::process::exit(1);
-    }
+}
 
+#[cfg(feature = "ssr")]
+fn log_boot_info(config: &homex::app::server::Config) {
+    use leptos::logging::log;
     log!(
         "[boot] media_root={} data_dir={} db={}",
         config.storage.media_root.display(),
         config.storage.data_dir.display(),
         config.db_path().display(),
     );
+}
 
-    let cancel = CancellationToken::new();
-
-    let state = AppState {
+#[cfg(feature = "ssr")]
+fn build_app_state(
+    db: sqlx::SqlitePool,
+    config: homex::app::server::Config,
+    cancel: tokio_util::sync::CancellationToken,
+) -> homex::app::server::AppState {
+    use homex::app::server::{AppState, convert};
+    AppState {
         db,
         config,
-        jobs: server::convert::new_jobs(),
-        cancel: cancel.clone(),
-    };
+        jobs: convert::new_jobs(),
+        cancel,
+    }
+}
 
-    let conf = get_configuration(None).unwrap();
-    let leptos_options = conf.leptos_options;
+// ─── Router assembly ──────────────────────────────────────────────────────
+
+#[cfg(feature = "ssr")]
+fn build_router(
+    state: homex::app::server::AppState,
+    leptos_options: leptos::prelude::LeptosOptions,
+) -> axum::Router {
+    use axum::{Extension, Router, extract::DefaultBodyLimit, middleware, routing::get};
+    use homex::app::{App, server::auth, server::routes::stream_media, shell};
+    use leptos::prelude::*;
+    use leptos_axum::LeptosRoutes;
+    use leptos_axum::generate_route_list;
+    use tower_http::services::ServeDir;
+
+    let posters_dir = state.config.storage.data_dir.join("posters");
     let routes = generate_route_list(App);
 
-    let app = Router::new()
+    Router::new()
         .nest_service("/posters", ServeDir::new(posters_dir))
         .leptos_routes_with_context(
             &leptos_options,
             routes,
             {
                 let state = state.clone();
-                move || {
-                    provide_context(state.clone());
-                }
+                move || provide_context(state.clone())
             },
             {
                 let leptos_options = leptos_options.clone();
@@ -86,25 +128,35 @@ async fn main() {
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024))
         .layer(Extension(state))
         .layer(middleware::from_fn(auth::middleware))
-        .with_state(leptos_options);
+        .with_state(leptos_options)
+}
 
-    let shutdown = {
-        let cancel = cancel.clone();
-        async move {
-            shutdown_signal().await;
-            log!("[shutdown] cancelling in-flight jobs");
-            cancel.cancel();
-            // Give background tasks a moment to kill their ffmpeg children.
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
-    };
+// ─── Server ───────────────────────────────────────────────────────────────
 
-    log!("listening on http://{}", &server_addr);
-    let listener = tokio::net::TcpListener::bind(&server_addr).await.unwrap();
-    axum::serve(listener, app.into_make_service())
+#[cfg(feature = "ssr")]
+async fn run_server(
+    router: axum::Router,
+    addr: std::net::SocketAddr,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    use leptos::logging::log;
+
+    let shutdown = shutdown_future(cancel);
+    log!("listening on http://{}", &addr);
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    axum::serve(listener, router.into_make_service())
         .with_graceful_shutdown(shutdown)
         .await
         .unwrap();
+}
+
+#[cfg(feature = "ssr")]
+async fn shutdown_future(cancel: tokio_util::sync::CancellationToken) {
+    use leptos::logging::log;
+    shutdown_signal().await;
+    log!("[shutdown] cancelling in-flight jobs");
+    cancel.cancel();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 }
 
 #[cfg(feature = "ssr")]

@@ -4,7 +4,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -112,7 +112,248 @@ pub async fn ffprobe_duration(path: &Path) -> f64 {
         .unwrap_or(0.0)
 }
 
-// ─── Public dispatcher ────────────────────────────────────────────────────
+// ─── Command builders (pure) ──────────────────────────────────────────────
+
+fn base_ffmpeg_cmd() -> Command {
+    let mut c = Command::new("ffmpeg");
+    c.arg("-hide_banner")
+        .arg("-y")
+        .arg("-nostats")
+        .args(["-progress", "pipe:1"]);
+    c
+}
+
+fn ffmpeg_remux_mp4_cmd(input: &Path, output: &Path) -> Command {
+    let mut c = base_ffmpeg_cmd();
+    c.arg("-i")
+        .arg(input)
+        .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-sn"])
+        .arg(output);
+    c
+}
+
+fn ffmpeg_transcode_mp4_cmd(input: &Path, output: &Path) -> Command {
+    let mut c = base_ffmpeg_cmd();
+    c.arg("-i")
+        .arg(input)
+        .args([
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "192k",
+            "-sn",
+        ])
+        .arg(output);
+    c
+}
+
+fn ffmpeg_mp3_cmd(input: &Path, output: &Path) -> Command {
+    let mut c = base_ffmpeg_cmd();
+    c.arg("-i")
+        .arg(input)
+        .args(["-vn", "-c:a", "libmp3lame", "-q:a", "2"])
+        .arg(output);
+    c
+}
+
+// ─── Process control ──────────────────────────────────────────────────────
+
+fn configure_pipes(cmd: &mut Command) {
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null());
+}
+
+async fn spawn_ffmpeg(mut cmd: Command) -> Result<Child, String> {
+    configure_pipes(&mut cmd);
+    cmd.spawn().map_err(|e| format!("فشل تشغيل ffmpeg: {e}"))
+}
+
+fn take_stdout(child: &mut Child) -> Result<ChildStdout, String> {
+    child
+        .stdout
+        .take()
+        .ok_or_else(|| "لا يمكن قراءة مخرجات ffmpeg".to_string())
+}
+
+async fn wait_ok(child: &mut Child) -> bool {
+    child.wait().await.map(|s| s.success()).unwrap_or(false)
+}
+
+async fn kill_silently(child: &mut Child) {
+    let _ = child.kill().await;
+}
+
+// ─── Progress line parsing ────────────────────────────────────────────────
+
+fn parse_progress_line(line: &str, total_secs: f64) -> Option<f32> {
+    if total_secs <= 0.0 {
+        return None;
+    }
+    let val = line.strip_prefix("out_time=")?;
+    let secs = parse_hms(val)?;
+    Some((secs / total_secs).clamp(0.0, 1.0) as f32)
+}
+
+fn parse_hms(s: &str) -> Option<f64> {
+    let mut p = s.split(':');
+    let h: f64 = p.next()?.parse().ok()?;
+    let m: f64 = p.next()?.parse().ok()?;
+    let sec: f64 = p.next()?.parse().ok()?;
+    Some(h * 3600.0 + m * 60.0 + sec)
+}
+
+/// Whole-percent throttle.
+struct ProgressTracker {
+    last_bucket: u32,
+}
+
+impl ProgressTracker {
+    fn new() -> Self {
+        Self {
+            last_bucket: u32::MAX,
+        }
+    }
+
+    fn observe(&mut self, pct: f32) -> Option<f32> {
+        let bucket = (pct * 100.0) as u32;
+        if bucket == self.last_bucket {
+            return None;
+        }
+        self.last_bucket = bucket;
+        Some(pct)
+    }
+}
+
+// ─── Context for one conversion ───────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct ConvertContext<'a> {
+    jobs: &'a Jobs,
+    job_id: Option<&'a str>,
+    conversion_index: usize,
+    conversion_count: usize,
+    display_name: &'a str,
+    total_secs: f64,
+}
+
+impl<'a> ConvertContext<'a> {
+    fn build(
+        jobs: &'a Jobs,
+        job_id: Option<&'a str>,
+        conversion_index: usize,
+        conversion_count: usize,
+        display_name: &'a str,
+        total_secs: f64,
+    ) -> Self {
+        Self {
+            jobs,
+            job_id,
+            conversion_index,
+            conversion_count,
+            display_name,
+            total_secs,
+        }
+    }
+}
+
+async fn publish_progress(ctx: &ConvertContext<'_>, pct: f32) {
+    job_set_phase(
+        ctx.jobs,
+        ctx.job_id,
+        JobPhase::Converting {
+            conversion_index: ctx.conversion_index,
+            conversion_count: ctx.conversion_count,
+            current_file: ctx.display_name.to_string(),
+            progress: pct,
+        },
+    )
+    .await;
+}
+
+// ─── Progress streaming ───────────────────────────────────────────────────
+
+async fn stream_ffmpeg_progress(stdout: ChildStdout, ctx: ConvertContext<'_>) {
+    let mut lines = BufReader::new(stdout).lines();
+    let mut tracker = ProgressTracker::new();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if let Some(pct) = parse_progress_line(&line, ctx.total_secs) {
+            if tracker.observe(pct).is_some() {
+                publish_progress(&ctx, pct).await;
+            }
+        }
+    }
+}
+
+// ─── One ffmpeg attempt ───────────────────────────────────────────────────
+
+async fn run_and_watch(
+    cmd: Command,
+    ctx: ConvertContext<'_>,
+    cancel: &CancellationToken,
+) -> Result<bool, String> {
+    let mut child = spawn_ffmpeg(cmd).await?;
+    let stdout = take_stdout(&mut child)?;
+
+    tokio::select! {
+        _ = cancel.cancelled() => {
+            kill_silently(&mut child).await;
+            return Err("تم إلغاء التحويل".into());
+        }
+        _ = stream_ffmpeg_progress(stdout, ctx) => {}
+    }
+
+    Ok(wait_ok(&mut child).await)
+}
+
+async fn attempt_conversion(
+    cmd: Command,
+    output: &Path,
+    ctx: ConvertContext<'_>,
+    cancel: &CancellationToken,
+) -> Result<bool, String> {
+    let ok = run_and_watch(cmd, ctx, cancel).await?;
+    if ok && file_ok(output).await {
+        return Ok(true);
+    }
+    let _ = tokio::fs::remove_file(output).await;
+    Ok(false)
+}
+
+async fn file_ok(p: &Path) -> bool {
+    tokio::fs::metadata(p)
+        .await
+        .map(|m| m.len() > 0)
+        .unwrap_or(false)
+}
+
+// ─── Format-specific attempts ─────────────────────────────────────────────
+
+async fn ensure_mp4(
+    input: &Path,
+    output: &Path,
+    ctx: ConvertContext<'_>,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    if attempt_conversion(ffmpeg_remux_mp4_cmd(input, output), output, ctx, cancel).await? {
+        return Ok(());
+    }
+    if attempt_conversion(ffmpeg_transcode_mp4_cmd(input, output), output, ctx, cancel).await? {
+        return Ok(());
+    }
+    Err("فشل تحويل الفيديو (ffmpeg)".into())
+}
+
+async fn ensure_mp3(
+    input: &Path,
+    output: &Path,
+    ctx: ConvertContext<'_>,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    if attempt_conversion(ffmpeg_mp3_cmd(input, output), output, ctx, cancel).await? {
+        return Ok(());
+    }
+    Err("فشل تحويل الصوت (ffmpeg)".into())
+}
+
+// ─── Public entry point ───────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
 pub async fn convert_file(
@@ -127,226 +368,16 @@ pub async fn convert_file(
     job_id: Option<&str>,
     cancel: &CancellationToken,
 ) -> Result<(), String> {
+    let ctx = ConvertContext::build(
+        jobs,
+        job_id,
+        conversion_index,
+        conversion_count,
+        display_name,
+        total_secs,
+    );
     match target {
-        TargetFormat::Mp4 => {
-            ensure_mp4(
-                input,
-                output,
-                total_secs,
-                conversion_index,
-                conversion_count,
-                display_name,
-                jobs,
-                job_id,
-                cancel,
-            )
-            .await
-        }
-        TargetFormat::Mp3 => {
-            ensure_mp3(
-                input,
-                output,
-                total_secs,
-                conversion_index,
-                conversion_count,
-                display_name,
-                jobs,
-                job_id,
-                cancel,
-            )
-            .await
-        }
+        TargetFormat::Mp4 => ensure_mp4(input, output, ctx, cancel).await,
+        TargetFormat::Mp3 => ensure_mp3(input, output, ctx, cancel).await,
     }
-}
-
-// ─── Video → MP4 ──────────────────────────────────────────────────────────
-
-#[allow(clippy::too_many_arguments)]
-async fn ensure_mp4(
-    input: &Path,
-    output: &Path,
-    total_secs: f64,
-    conversion_index: usize,
-    conversion_count: usize,
-    display_name: &str,
-    jobs: &Jobs,
-    job_id: Option<&str>,
-    cancel: &CancellationToken,
-) -> Result<(), String> {
-    // Attempt 1: remux video, transcode audio to AAC, drop subtitles.
-    let mut cmd = Command::new("ffmpeg");
-    cmd.arg("-hide_banner")
-        .arg("-y")
-        .arg("-i")
-        .arg(input)
-        .args(["-nostats", "-progress", "pipe:1"])
-        .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-sn"])
-        .arg(output);
-
-    let ok = run_and_watch(
-        cmd,
-        total_secs,
-        conversion_index,
-        conversion_count,
-        display_name,
-        jobs,
-        job_id,
-        cancel,
-    )
-    .await?;
-    if ok && file_ok(output).await {
-        return Ok(());
-    }
-
-    let _ = tokio::fs::remove_file(output).await;
-
-    // Attempt 2: full transcode.
-    let mut cmd = Command::new("ffmpeg");
-    cmd.arg("-hide_banner")
-        .arg("-y")
-        .arg("-i")
-        .arg(input)
-        .args(["-nostats", "-progress", "pipe:1"])
-        .args([
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "192k",
-            "-sn",
-        ])
-        .arg(output);
-
-    let ok = run_and_watch(
-        cmd,
-        total_secs,
-        conversion_index,
-        conversion_count,
-        display_name,
-        jobs,
-        job_id,
-        cancel,
-    )
-    .await?;
-    if ok && file_ok(output).await {
-        Ok(())
-    } else {
-        Err("فشل تحويل الفيديو (ffmpeg)".into())
-    }
-}
-
-// ─── Audio → MP3 ──────────────────────────────────────────────────────────
-
-#[allow(clippy::too_many_arguments)]
-async fn ensure_mp3(
-    input: &Path,
-    output: &Path,
-    total_secs: f64,
-    conversion_index: usize,
-    conversion_count: usize,
-    display_name: &str,
-    jobs: &Jobs,
-    job_id: Option<&str>,
-    cancel: &CancellationToken,
-) -> Result<(), String> {
-    let mut cmd = Command::new("ffmpeg");
-    cmd.arg("-hide_banner")
-        .arg("-y")
-        .arg("-i")
-        .arg(input)
-        .args(["-nostats", "-progress", "pipe:1"])
-        .args(["-vn", "-c:a", "libmp3lame", "-q:a", "2"])
-        .arg(output);
-
-    let ok = run_and_watch(
-        cmd,
-        total_secs,
-        conversion_index,
-        conversion_count,
-        display_name,
-        jobs,
-        job_id,
-        cancel,
-    )
-    .await?;
-    if ok && file_ok(output).await {
-        Ok(())
-    } else {
-        Err("فشل تحويل الصوت (ffmpeg)".into())
-    }
-}
-
-// ─── Shared runner ────────────────────────────────────────────────────────
-
-#[allow(clippy::too_many_arguments)]
-async fn run_and_watch(
-    mut cmd: Command,
-    total_secs: f64,
-    conversion_index: usize,
-    conversion_count: usize,
-    display_name: &str,
-    jobs: &Jobs,
-    job_id: Option<&str>,
-    cancel: &CancellationToken,
-) -> Result<bool, String> {
-    cmd.stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null());
-
-    let mut child = cmd.spawn().map_err(|e| format!("فشل تشغيل ffmpeg: {e}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "لا يمكن قراءة مخرجات ffmpeg".to_string())?;
-
-    let mut lines = BufReader::new(stdout).lines();
-    let mut last_bucket: u32 = u32::MAX;
-
-    // Scoped so we can cancel the reader if `cancel` fires.
-    let reader = async {
-        while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(val) = line.strip_prefix("out_time=")
-                && total_secs > 0.0
-                && let Some(secs) = parse_hms(val)
-            {
-                let pct = (secs / total_secs).clamp(0.0, 1.0) as f32;
-                let bucket = (pct * 100.0) as u32;
-                if bucket != last_bucket {
-                    last_bucket = bucket;
-                    job_set_phase(
-                        jobs,
-                        job_id,
-                        JobPhase::Converting {
-                            conversion_index,
-                            conversion_count,
-                            current_file: display_name.to_string(),
-                            progress: pct,
-                        },
-                    )
-                    .await;
-                }
-            }
-        }
-    };
-
-    tokio::select! {
-        _ = cancel.cancelled() => {
-            let _ = child.kill().await;
-            return Err("تم إلغاء التحويل".into());
-        }
-        _ = reader => {}
-    }
-
-    Ok(child.wait().await.map(|s| s.success()).unwrap_or(false))
-}
-
-fn parse_hms(s: &str) -> Option<f64> {
-    let mut p = s.split(':');
-    let h: f64 = p.next()?.parse().ok()?;
-    let m: f64 = p.next()?.parse().ok()?;
-    let sec: f64 = p.next()?.parse().ok()?;
-    Some(h * 3600.0 + m * 60.0 + sec)
-}
-
-async fn file_ok(p: &Path) -> bool {
-    tokio::fs::metadata(p)
-        .await
-        .map(|m| m.len() > 0)
-        .unwrap_or(false)
 }

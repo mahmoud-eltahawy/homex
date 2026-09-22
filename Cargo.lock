@@ -979,6 +979,7 @@ dependencies = [
  "leptos_axum",
  "leptos_meta",
  "leptos_router",
+ "multer",
  "serde",
  "server_fn",
  "sqlx",

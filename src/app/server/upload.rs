@@ -5,10 +5,12 @@ mod persist;
 mod types;
 mod validate;
 
+use std::path::Path;
 use std::time::Duration;
 
 pub use multipart::parse_upload_multipart;
 pub use naming::{extension_of, new_job_id, new_storage_token, sanitize_filename, slugify};
+use sqlx::SqlitePool;
 use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};
@@ -17,7 +19,7 @@ use leptos::prelude::ServerFnError;
 
 use crate::app::model::MediaKind;
 use crate::app::server::convert::{JobPhase, job_set_phase};
-use crate::app::server::{AppState, Jobs, SqlErr};
+use crate::app::server::{AppState, Config, Jobs, SqlErr};
 
 const JOB_RETENTION: Duration = Duration::from_secs(60);
 
@@ -28,42 +30,89 @@ pub fn schedule_job_eviction(jobs: Jobs, job_id: String) {
     });
 }
 
+// ─── Cleanup ──────────────────────────────────────────────────────────────
+
+async fn wipe_temp_dir(dir: &Path) {
+    let _ = tokio::fs::remove_dir_all(dir).await;
+}
+
+// ─── Phases ───────────────────────────────────────────────────────────────
+
+async fn stage_phase(
+    payload: &UploadPayload,
+    state: &AppState,
+    kind: MediaKind,
+    job_id: Option<&str>,
+) -> Result<Vec<StagedFile>, ServerFnError> {
+    job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
+    files::stage_files(payload, state, kind, job_id).await
+}
+
+async fn commit_items_and_poster(
+    db: &SqlitePool,
+    config: &Config,
+    payload: &UploadPayload,
+    file_rows: &[(i64, String)],
+) -> Result<(), ServerFnError> {
+    let mut tx = db.begin().await.srv()?;
+    persist::insert_items(
+        &mut tx,
+        payload.collection_id,
+        payload.season_number,
+        file_rows,
+    )
+    .await?;
+    persist::attach_poster(
+        &mut tx,
+        payload,
+        payload.collection_id,
+        &config.storage.data_dir,
+    )
+    .await?;
+    tx.commit().await.srv()?;
+    Ok(())
+}
+
+async fn persist_phase(
+    state: &AppState,
+    payload: &UploadPayload,
+    staged: &[StagedFile],
+    job_id: Option<&str>,
+) -> Result<(), ServerFnError> {
+    job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
+    let file_rows = persist::insert_files(&state.db, staged).await?;
+    commit_items_and_poster(&state.db, &state.config, payload, &file_rows).await
+}
+
+async fn finish_job(state: &AppState, job_id: Option<&str>) {
+    job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
+    if let Some(id) = job_id {
+        schedule_job_eviction(state.jobs.clone(), id.to_string());
+    }
+}
+
+async fn execute_upload(
+    payload: &UploadPayload,
+    state: &AppState,
+    kind: MediaKind,
+    job_id: Option<&str>,
+) -> Result<String, ServerFnError> {
+    let staged = stage_phase(payload, state, kind, job_id).await?;
+    persist_phase(state, payload, &staged, job_id).await?;
+    finish_job(state, job_id).await;
+    Ok(format!("تم رفع {} ملف بنجاح", staged.len()))
+}
+
+// ─── Public entry point ───────────────────────────────────────────────────
+
 pub async fn process_upload(
     payload: UploadPayload,
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
 ) -> Result<String, ServerFnError> {
-    let collection_id = payload.collection_id;
     let temp_dir = payload.temp_dir.clone();
-
-    let result = async {
-        job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
-        let staged = files::stage_files(&payload, state, kind, job_id).await?;
-
-        job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
-        let file_rows = persist::insert_files(&state.db, &staged).await?;
-
-        let mut tx = state.db.begin().await.srv()?;
-        persist::insert_items(&mut tx, collection_id, payload.season_number, &file_rows).await?;
-        persist::attach_poster(
-            &mut tx,
-            &payload,
-            collection_id,
-            &state.config.storage.data_dir,
-        )
-        .await?;
-        tx.commit().await.srv()?;
-
-        job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
-        if let Some(id) = job_id {
-            schedule_job_eviction(state.jobs.clone(), id.to_string());
-        }
-        Ok::<_, ServerFnError>(format!("تم رفع {} ملف بنجاح", file_rows.len()))
-    }
-    .await;
-
-    // Always wipe scratch space — success, failure, or panic-unwind.
-    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    let result = execute_upload(&payload, state, kind, job_id).await;
+    wipe_temp_dir(&temp_dir).await;
     result
 }
