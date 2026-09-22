@@ -6,14 +6,17 @@ use web_sys::wasm_bindgen::JsCast;
 
 use crate::app::icons::{EditIcon, UploadIcon, XIcon};
 
-pub const INPUT: &str = "w-full bg-white/10 backdrop-blur-md text-white rounded-lg py-1.5 px-3 focus:outline-none focus:ring-2 focus:ring-cyan-400/50";
-pub const TEXTAREA: &str = "w-full bg-white/10 backdrop-blur-md text-white rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 resize-none";
+pub const INPUT: &str = "w-full bg-white/10 backdrop-blur-md text-white rounded-lg py-1.5 px-3 \
+                         focus:outline-none focus:ring-2 focus:ring-cyan-400/50";
+pub const TEXTAREA: &str = "w-full bg-white/10 backdrop-blur-md text-white rounded-xl py-2 px-3 \
+                            focus:outline-none focus:ring-2 focus:ring-cyan-400/50 resize-none";
 
-const BTN_EDIT: &str = "p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition shrink-0";
-const BTN_OK: &str =
-    "p-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 transition shrink-0";
-const BTN_X: &str =
-    "p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 transition shrink-0";
+const BTN_EDIT: &str = "p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 \
+                        hover:text-white transition shrink-0";
+const BTN_OK: &str = "p-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 \
+                      transition shrink-0";
+const BTN_X: &str = "p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 \
+                     transition shrink-0";
 
 #[derive(Clone, Copy)]
 pub struct EditMode(pub RwSignal<bool>);
@@ -37,6 +40,38 @@ pub struct EditableCtl {
     pub cancel: Callback<()>,
 }
 
+// ─── Draft state machine ──────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct EditDraft {
+    draft: RwSignal<String>,
+    on_begin: Callback<()>,
+    commit: Callback<()>,
+}
+
+/// Seeds the draft from the current value when editing starts, and fires
+/// `on_commit` with the draft only if it actually changed.
+fn use_edit_draft(value: Signal<String>, on_commit: Callback<String>) -> EditDraft {
+    let draft = RwSignal::new(String::new());
+
+    let on_begin = Callback::new(move |_: ()| draft.set(value.get_untracked()));
+
+    let commit = Callback::new(move |_: ()| {
+        let v = draft.get_untracked();
+        if v != value.get_untracked() {
+            on_commit.run(v);
+        }
+    });
+
+    EditDraft {
+        draft,
+        on_begin,
+        commit,
+    }
+}
+
+// ─── Generic editable shell ───────────────────────────────────────────────
+
 #[component]
 pub fn Editable<D, E>(
     #[prop(into)] display: Callback<(), D>,
@@ -54,11 +89,11 @@ where
     let editing = RwSignal::new(false);
     collapse_when_locked(editing);
 
-    let commit = Callback::new(move |_| {
+    let commit = Callback::new(move |_: ()| {
         editing.set(false);
         on_commit.run(());
     });
-    let cancel = Callback::new(move |_| editing.set(false));
+    let cancel = Callback::new(move |_: ()| editing.set(false));
 
     let begin = move |_| {
         if let Some(cb) = on_begin {
@@ -115,7 +150,7 @@ where
     }
 }
 
-// ─── Single-line text ───────────────────────────────────────────────────────
+// ─── Single-line text ─────────────────────────────────────────────────────
 
 #[component]
 pub fn EditableText(
@@ -127,36 +162,25 @@ pub fn EditableText(
     let display_class = class.unwrap_or_else(|| "text-white".into());
     let placeholder = placeholder.unwrap_or_else(|| "أدخل نصاً".into());
 
-    let draft = RwSignal::new(String::new());
+    let edit = use_edit_draft(value, on_commit);
     let input_ref = NodeRef::<html::Input>::new();
-
-    // Seed the draft from the current value the moment editing starts.
-    let on_begin = Callback::new(move |_| draft.set(value.get_untracked()));
-
-    // Read the draft, fire the outer commit only if it actually changed.
-    let commit = Callback::new(move |_| {
-        let v = draft.get_untracked();
-        if v != value.get_untracked() {
-            on_commit.run(v);
-        }
-    });
 
     view! {
         <Editable
-            on_begin=on_begin
-            on_commit=commit
-            display=Callback::new(move |_| view! {
+            on_begin=edit.on_begin
+            on_commit=edit.commit
+            display=Callback::new(move |_: ()| view! {
                 <span class=display_class.clone()>{move || value.get()}</span>
             })
-            editor=Callback::new(move |ctl : EditableCtl| view! {
+            editor=Callback::new(move |ctl: EditableCtl| view! {
                 <input
                     node_ref=input_ref
                     autofocus=true
                     type="text"
                     class=INPUT
                     placeholder=placeholder.clone()
-                    prop:value=move || draft.get()
-                    on:input=move |ev| draft.set(event_target_value(&ev))
+                    prop:value=move || edit.draft.get()
+                    on:input=move |ev| edit.draft.set(event_target_value(&ev))
                     on:keydown=move |ev| match ev.key().as_str() {
                         "Enter" => { ev.prevent_default(); ctl.commit.run(()); }
                         "Escape" => ctl.cancel.run(()),
@@ -168,7 +192,7 @@ pub fn EditableText(
     }
 }
 
-// ─── Multi-line text ────────────────────────────────────────────────────────
+// ─── Multi-line text ──────────────────────────────────────────────────────
 
 #[component]
 pub fn EditableTextArea(
@@ -180,22 +204,17 @@ pub fn EditableTextArea(
     let display_class = class.unwrap_or_else(|| "text-gray-300".into());
     let placeholder = placeholder.unwrap_or_else(|| "لا يوجد وصف".into());
 
-    let draft = RwSignal::new(String::new());
+    let edit = use_edit_draft(value, on_commit);
     let ta_ref = NodeRef::<html::Textarea>::new();
-
-    let on_begin = Callback::new(move |_| draft.set(value.get_untracked()));
-    let commit = Callback::new(move |_| {
-        let v = draft.get_untracked();
-        if v != value.get_untracked() {
-            on_commit.run(v);
-        }
-    });
 
     let display = Callback::new({
         let placeholder = placeholder.clone();
-        move |_| {
+        let display_class = display_class.clone();
+        move |_: ()| {
+            let placeholder = placeholder.clone();
+            let display_class = display_class.clone();
             view! {
-                <p class=display_class.clone()>
+                <p class=display_class>
                     {
                         let placeholder = placeholder.clone();
                         move || {
@@ -218,8 +237,8 @@ pub fn EditableTextArea(
                     rows=3
                     class=TEXTAREA
                     placeholder=placeholder.clone()
-                    prop:value=move || draft.get()
-                    on:input=move |ev| draft.set(event_target_value(&ev))
+                    prop:value=move || edit.draft.get()
+                    on:input=move |ev| edit.draft.set(event_target_value(&ev))
                     on:keydown=move |ev| {
                         if ev.key() == "Enter" && (ev.ctrl_key() || ev.meta_key()) {
                             ev.prevent_default();
@@ -232,17 +251,19 @@ pub fn EditableTextArea(
             }
         }
     });
+
     view! {
         <Editable
-            on_begin=on_begin
-            on_commit=commit
+            on_begin=edit.on_begin
+            on_commit=edit.commit
             display=display
             editor=editor
         />
     }
 }
 
-// ─── Poster (upload/replace inline) ─────────────────────────────────────────
+// ─── Poster (upload/replace inline) ───────────────────────────────────────
+
 #[component]
 pub fn EditablePoster(
     src: Signal<Option<String>>,
@@ -259,9 +280,14 @@ pub fn EditablePoster(
                 <FilePicker
                     id=input_id_for_input.clone()
                     accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                    class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md hover:bg-black/80 text-white text-xs font-medium cursor-pointer opacity-80 group-hover:opacity-100 transition"
-                    on_files=Callback::new(move |files : Vec<web_sys::File>| {
-                        if let Some(f) = files.into_iter().next() { on_file.run(f); }
+                    class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 \
+                           px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md \
+                           hover:bg-black/80 text-white text-xs font-medium cursor-pointer \
+                           opacity-80 group-hover:opacity-100 transition"
+                    on_files=Callback::new(move |files: Vec<web_sys::File>| {
+                        if let Some(f) = files.into_iter().next() {
+                            on_file.run(f);
+                        }
                     })
                 >
                     <UploadIcon/> "تغيير الصورة"
@@ -286,6 +312,8 @@ pub fn EditablePoster(
         </div>
     }
 }
+
+// ─── Edit-mode toggle ─────────────────────────────────────────────────────
 
 #[component]
 pub fn EditModeToggle(#[prop(optional, into)] wrap_class: Option<String>) -> impl IntoView {
@@ -318,6 +346,8 @@ pub fn EditModeToggle(#[prop(optional, into)] wrap_class: Option<String>) -> imp
         </button>
     }
 }
+
+// ─── File picker ──────────────────────────────────────────────────────────
 
 #[component]
 pub fn FilePicker(

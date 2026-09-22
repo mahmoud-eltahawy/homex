@@ -13,6 +13,7 @@ use crate::app::{
     sections::fetch_section_by_slug,
 };
 use leptos::prelude::*;
+use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
 use server_fn::ServerFnError;
 
@@ -109,18 +110,15 @@ fn SectionListingBody(
     }
 }
 
-#[component]
-fn CreateNewButton(
-    #[prop(into)] section_slug: String,
-    #[prop(into)] label: String,
-) -> impl IntoView {
-    use leptos_router::hooks::use_navigate;
+// ─── Create-new-collection flow ───────────────────────────────────────────
 
-    let slug_for_action = section_slug.clone();
+/// Dispatches `create_empty_collection` and navigates to the new collection
+/// on success. Returns the action so the caller can wire the button.
+fn use_create_collection_nav(section_slug: String) -> Action<String, Result<u64, ServerFnError>> {
     let action = Action::new_local(move |s: &String| create_empty_collection(s.clone()));
     let navigate = use_navigate();
+    let slug_for_nav = section_slug;
 
-    let slug_for_nav = section_slug.clone();
     Effect::new(move |_| {
         if let Some(Ok(id)) = action.value().get() {
             let href = format!("/s/{}/{}", slug_for_nav, id);
@@ -128,29 +126,44 @@ fn CreateNewButton(
         }
     });
 
-    let label_for_view = label.clone();
+    action
+}
+
+#[component]
+fn CreateNewButton(
+    #[prop(into)] section_slug: String,
+    #[prop(into)] label: String,
+) -> impl IntoView {
+    let action = use_create_collection_nav(section_slug.clone());
+    let slug_for_action = section_slug;
+    let label_for_view = label;
     let edit_on = use_edit_mode();
+
     view! {
         <Show when=move || edit_on.get()>
-        <button
-            type="button"
-            on:click={
-                let slug = slug_for_action.clone();
-                move |_| {action.dispatch(slug.clone());}
-            }
-            disabled=move || action.pending().get()
-            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 disabled:opacity-50"
-        >
-            <span class="text-lg leading-none">"+"</span>
-            {
-                let label_for_view= label_for_view.clone();
-
-                move || if action.pending().get() {
-                "جاري الإنشاء...".to_string()
-            } else {
-                label_for_view.clone()
-            }}
-        </button>
+            <button
+                type="button"
+                on:click={
+                    let slug = slug_for_action.clone();
+                    move |_| { let _ = action.dispatch(slug.clone()); }
+                }
+                disabled=move || action.pending().get()
+                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl \
+                       bg-gradient-to-r from-cyan-500 to-blue-500 \
+                       hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
+                       shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 \
+                       disabled:opacity-50"
+            >
+                <span class="text-lg leading-none">"+"</span>
+                {
+                    let label_for_view = label_for_view.clone();
+                    move || if action.pending().get() {
+                        "جاري الإنشاء...".to_string()
+                    } else {
+                        label_for_view.clone()
+                    }
+                }
+            </button>
         </Show>
     }
 }

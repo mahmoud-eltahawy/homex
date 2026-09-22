@@ -2,19 +2,16 @@ use leptos::{either::Either, prelude::*};
 
 use crate::app::icons::{NextPageIcon, PrevPageIcon};
 
-#[component]
-pub fn PaginationControls(
-    offset: RwSignal<usize>,
-    count: usize,
+// ─── Window-slide effect ──────────────────────────────────────────────────
+
+/// Keeps `window_start` aligned so the current page is always inside the
+/// visible window of `[window_start, window_start + window_size - 1]`.
+fn use_window_slide(
+    total_pages: usize,
     window_size: usize,
-    page_size: usize,
-) -> impl IntoView {
-    let total_pages = count.saturating_add(page_size - 1) / page_size;
-
-    let current_page = move || offset.get() / page_size + 1;
-
-    let window_start = RwSignal::new(1usize);
-
+    current_page: impl Fn() -> usize + 'static,
+    window_start: RwSignal<usize>,
+) {
     Effect::new(move || {
         let total = total_pages.max(1);
         let current = current_page().min(total);
@@ -33,33 +30,37 @@ pub fn PaginationControls(
             window_start.set(new_start);
         }
     });
+}
+
+// ─── Public ───────────────────────────────────────────────────────────────
+
+#[component]
+pub fn PaginationControls(
+    offset: RwSignal<usize>,
+    count: usize,
+    window_size: usize,
+    page_size: usize,
+) -> impl IntoView {
+    let total_pages = count.saturating_add(page_size - 1) / page_size;
+    let current_page = move || offset.get() / page_size + 1;
+
+    let window_start = RwSignal::new(1usize);
+    use_window_slide(total_pages, window_size, current_page, window_start);
 
     view! {
         <Transition>
-        <div class="flex items-center justify-center gap-2 mt-8">
-            <NavButton
-                forward=false
-                window_size
-                window_start
-                total_pages
-            />
-
-            <PagesNumber
-                offset
-                window_start
-                window_size
-                total_pages
-                current_page
-                page_size
-            />
-
-            <NavButton
-                forward=true
-                window_size
-                window_start
-                total_pages
-            />
-        </div>
+            <div class="flex items-center justify-center gap-2 mt-8">
+                <NavButton forward=false window_size window_start total_pages/>
+                <PagesNumber
+                    offset
+                    window_start
+                    window_size
+                    total_pages
+                    current_page
+                    page_size
+                />
+                <NavButton forward=true window_size window_start total_pages/>
+            </div>
         </Transition>
     }
 }
@@ -77,12 +78,10 @@ fn NavButton(
         Either::Right(PrevPageIcon())
     };
 
-    let can_shift = {
-        move || {
-            let total = total_pages.max(1);
-            (!forward && window_start.get() > 1)
-                || forward && window_start.get() + window_size - 1 < total
-        }
+    let can_shift = move || {
+        let total = total_pages.max(1);
+        (!forward && window_start.get() > 1)
+            || forward && window_start.get() + window_size - 1 < total
     };
 
     let shift = move |_| {
@@ -107,7 +106,10 @@ fn NavButton(
         <button
             on:click=shift
             disabled=move || !can_shift()
-            class="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-30"
+            class="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 \
+                   transition hover:bg-white/10 hover:text-white focus:outline-none \
+                   focus-visible:ring-2 focus-visible:ring-cyan-400 \
+                   disabled:cursor-not-allowed disabled:opacity-30"
             aria-label=label
         >
             {icon}
@@ -142,31 +144,28 @@ where
     };
 
     view! {
-         <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur">
-             <For
-                 each=pages
-                 key=|page| *page
-                 let:page
-             >
-                 <button
-                     on:click=move |_| go_to_page(page)
-                     class={
+        <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur">
+            <For each=pages key=|page| *page let:page>
+                <button
+                    on:click=move |_| go_to_page(page)
+                    class={
                         let current_page = current_page.clone();
                         move || {
                             format!(
-                             "flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-medium transition {}",
-                             if page == current_page() {
-                                 "bg-cyan-500/20 text-cyan-400"
-                             } else {
-                                 "text-slate-300 hover:bg-white/10 hover:text-white"
-                             }
-                         )
+                                "flex h-8 min-w-8 items-center justify-center rounded-full px-2 \
+                                 text-sm font-medium transition {}",
+                                if page == current_page() {
+                                    "bg-cyan-500/20 text-cyan-400"
+                                } else {
+                                    "text-slate-300 hover:bg-white/10 hover:text-white"
+                                }
+                            )
                         }
                     }
-                 >
-                     {page}
-                 </button>
-             </For>
-         </div>
+                >
+                    {page}
+                </button>
+            </For>
+        </div>
     }
 }
