@@ -1,5 +1,9 @@
+use crate::app::constants::routes;
 use leptos::prelude::*;
 use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
+
+#[cfg(feature = "ssr")]
+use crate::app::constants::{auth as auth_consts, messages};
 
 #[server(endpoint = "login")]
 pub async fn login(token: String) -> Result<(), ServerFnError> {
@@ -11,10 +15,14 @@ pub async fn login(token: String) -> Result<(), ServerFnError> {
         return Err(ServerFnError::new("auth disabled"));
     };
     if token != expected {
-        return Err(ServerFnError::new("Invalid token"));
+        return Err(ServerFnError::new(messages::INVALID_TOKEN));
     }
 
-    let cookie = format!("homex_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000");
+    let cookie = format!(
+        "{name}={token}{attrs}",
+        name = auth_consts::COOKIE_NAME,
+        attrs = auth_consts::COOKIE_ATTRS,
+    );
     let value = cookie
         .parse()
         .map_err(|_| ServerFnError::new("invalid cookie"))?;
@@ -40,7 +48,7 @@ impl LazyRoute for LoginPage {
 
         Effect::new(move |_| {
             if matches!(submit.value().get(), Some(Ok(()))) {
-                navigate("/", Default::default());
+                navigate(routes::HOME, Default::default());
             }
         });
 

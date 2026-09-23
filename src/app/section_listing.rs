@@ -1,3 +1,4 @@
+use crate::app::constants::routes;
 use crate::app::{
     collections::create_empty_collection,
     common::{
@@ -112,8 +113,6 @@ fn SectionListingBody(
 
 // ─── Create-new-collection flow ───────────────────────────────────────────
 
-/// Dispatches `create_empty_collection` and navigates to the new collection
-/// on success. Returns the action so the caller can wire the button.
 fn use_create_collection_nav(section_slug: String) -> Action<String, Result<u64, ServerFnError>> {
     let action = Action::new_local(move |s: &String| create_empty_collection(s.clone()));
     let navigate = use_navigate();
@@ -121,7 +120,7 @@ fn use_create_collection_nav(section_slug: String) -> Action<String, Result<u64,
 
     Effect::new(move |_| {
         if let Some(Ok(id)) = action.value().get() {
-            let href = format!("/s/{}/{}", slug_for_nav, id);
+            let href = routes::collection(&slug_for_nav, id);
             navigate(&href, Default::default());
         }
     });
@@ -158,7 +157,7 @@ fn CreateNewButton(
                 {
                     let label_for_view = label_for_view.clone();
                     move || if action.pending().get() {
-                        "جاري الإنشاء...".to_string()
+                        "Creating...".to_string()
                     } else {
                         label_for_view.clone()
                     }

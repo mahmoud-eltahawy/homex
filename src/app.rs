@@ -1,3 +1,4 @@
+use crate::app::constants::{APP_TITLE, HTML_DIR, HTML_LANG, STYLESHEET_URL};
 use crate::app::{
     collection_detail::CollectionDetailPage, home::HomePage, layout::Layout, login::LoginPage,
     section_listing::SectionListingPage,
@@ -7,7 +8,6 @@ use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
     Lazy,
     components::{ParentRoute, Route, Router, Routes},
-    path,
 };
 
 mod collection_detail;
@@ -19,6 +19,7 @@ mod section_listing;
 mod sections;
 
 mod common;
+pub mod constants;
 pub mod detail;
 mod icons;
 mod inline_edit;
@@ -32,10 +33,24 @@ pub mod server;
 mod upload_api;
 mod upload_job;
 
+// ─── Route table ──────────────────────────────────────────────────────────
+//
+// `StaticSegment<T>` and `ParamSegment<T>` are generic over `T: AsPath`.
+// Rather than threading raw `&'static str` literals through the route
+// table, we define two closed enums and implement `AsPath` for each. That
+// makes the set of static pieces and parameter names exhaustive and
+// typo-proof, and lets the route consts read like the original `path!`
+// invocations did.
+//
+// The `s` / `p` helpers are `const fn` constructors so the const route
+// tuples stay short.
+
+mod route;
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
-        <html lang="en" dir="ltr">
+        <html lang=HTML_LANG dir=HTML_DIR>
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -54,19 +69,16 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 pub fn App() -> impl IntoView {
     provide_meta_context();
     view! {
-        <Stylesheet id="leptos" href="/pkg/homex.css"/>
-        <Title text="HomeX"/>
+        <Stylesheet id="leptos" href=STYLESHEET_URL/>
+        <Title text=APP_TITLE/>
         <Router>
             <Routes fallback=|| "Page not found.".into_view()>
-                <Route path=path!("/login") view={Lazy::<LoginPage>::new()}/>
-                <ParentRoute path=path!("") view=Layout>
-                    <Route path=path!("/")            view={Lazy::<HomePage>::new()}/>
-                    <Route path=path!("/s/:slug")     view={Lazy::<SectionListingPage>::new()}/>
-                    <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
-                    <Route
-                        path=path!("/s/:slug/:id/item/:item_id")
-                        view={Lazy::<CollectionDetailPage>::new()}
-                    />
+                <Route path=route::LOGIN view={Lazy::<LoginPage>::new()}/>
+                <ParentRoute path=route::PARENT view=Layout>
+                    <Route path=route::ROOT       view={Lazy::<HomePage>::new()}/>
+                    <Route path=route::section()    view={Lazy::<SectionListingPage>::new()}/>
+                    <Route path=route::collection() view={Lazy::<CollectionDetailPage>::new()}/>
+                    <Route path=route::item()       view={Lazy::<CollectionDetailPage>::new()}/>
                 </ParentRoute>
             </Routes>
         </Router>

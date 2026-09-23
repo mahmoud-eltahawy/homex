@@ -22,6 +22,13 @@ use crate::app::{
     upload_job::{UploadJob, UploadProgress},
 };
 
+// ─── Multipart form field names (client-side) ─────────────────────────────
+//
+// These are the keys the browser sends on the append-media / append-poster
+// requests. They MUST match the classifier in `server/upload/multipart.rs`.
+
+mod fields;
+
 // ─── Action type aliases ──────────────────────────────────────────────────
 
 type PatchAction = Action<(u64, String, Option<String>), Result<(), ServerFnError>>;
@@ -37,12 +44,10 @@ struct CollectionActions {
     poster_upload: PosterUploadAction,
     rename_item: RenameItemAction,
     delete_item: DeleteItemAction,
-    move_item: Action<(u64, bool), Result<(), ServerFnError>>, // NEW
+    move_item: Action<(u64, bool), Result<(), ServerFnError>>,
 }
 
 impl CollectionActions {
-    /// Builds the four collection/item actions and wires the two that
-    /// affect the items list into a refetch.
     fn new(items: Resource<Result<Vec<Item>, ServerFnError>>) -> Self {
         let patch = Action::new_local(|(id, field, value): &(u64, String, Option<String>)| {
             patch_collection_field(*id, field.clone(), value.clone())
@@ -128,8 +133,6 @@ impl CollectionEditState {
 
 // ─── Poster upload ────────────────────────────────────────────────────────
 
-/// Builds the `Callback<File>` that `EditablePoster` expects, and installs
-/// the `Effect` that copies the returned URL back into the `poster` signal.
 fn use_poster_upload(
     section_slug: String,
     collection_id: u64,
@@ -270,11 +273,9 @@ fn CollectionContent(
 
     let selected_season = RwSignal::new(None::<i64>);
 
-    // Actions + edit state
     let actions = CollectionActions::new(items);
     let edit = CollectionEditState::new(&collection, actions.patch);
 
-    // Refresh the items list when an upload finishes
     let upload = UploadJob::new();
     Effect::new(move |_| {
         if upload.done_tick.get() > 0 {
@@ -282,7 +283,6 @@ fn CollectionContent(
         }
     });
 
-    // Poster upload wiring
     let on_poster_file = use_poster_upload(
         section_slug.clone(),
         collection_id,
@@ -290,11 +290,9 @@ fn CollectionContent(
         actions.poster_upload,
     );
 
-    // Item edit/delete callbacks
     let on_rename = actions.rename_callback();
     let on_delete = actions.delete_callback();
 
-    // Snapshots for the initial render + playlist adapter
     let poster_for_shell = edit.poster.get_untracked();
     let placeholder = make_poster_placeholder(is_audio);
     let icon = icon_for(section.media_kind(), section.nested);
@@ -387,11 +385,11 @@ fn build_append_formdata(
     season: Option<i64>,
 ) -> web_sys::FormData {
     let fd = web_sys::FormData::new().unwrap();
-    let _ = fd.append_with_str("section_slug", section_slug);
-    let _ = fd.append_with_str("collection_id", &collection_id.to_string());
+    let _ = fd.append_with_str(fields::SECTION_SLUG, section_slug);
+    let _ = fd.append_with_str(fields::COLLECTION_ID, &collection_id.to_string());
 
     if let Some(season) = season {
-        let _ = fd.append_with_str("season_number", &season.to_string());
+        let _ = fd.append_with_str(fields::SEASON_NUMBER, &season.to_string());
     }
 
     for i in 0..files.length() {
@@ -399,8 +397,8 @@ fn build_append_formdata(
             let file: web_sys::File = f.unchecked_into();
             let name = file.name();
             let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-            let _ = fd.append_with_blob_and_filename(&format!("file_{i}"), &file, &name);
-            let _ = fd.append_with_str(&format!("file_title_{i}"), &stem);
+            let _ = fd.append_with_blob_and_filename(&fields::file(i as usize), &file, &name);
+            let _ = fd.append_with_str(&fields::file_title(i as usize), &stem);
         }
     }
     fd

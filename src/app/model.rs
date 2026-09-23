@@ -1,3 +1,4 @@
+use crate::app::constants::routes;
 use serde::{Deserialize, Serialize};
 
 // ─── MediaKind ────────────────────────────────────────────────────────────
@@ -110,9 +111,8 @@ impl Section {
         MediaKind::try_from(self.media_kind.as_str()).unwrap_or(MediaKind::Video)
     }
     pub fn href(&self) -> String {
-        format!("/s/{}", self.slug)
+        routes::section(&self.slug)
     }
-
     pub fn new_label(&self) -> &'static str {
         match (self.media_kind(), self.nested) {
             (MediaKind::Video, false) => "Add new video",
@@ -133,26 +133,20 @@ impl Section {
 
 impl Collection {
     pub fn href(&self) -> String {
-        format!("/s/{}/{}", self.section_slug, self.id)
+        routes::collection(&self.section_slug, self.id)
     }
 }
 
 impl Item {
-    /// Was `Item.file.path` in the SQLx model, where `file` was a nested
-    /// `MediaFile` struct. Now it is derived from `file_id`.
-    pub fn file_path(&self) -> String {
-        format!("/media/{}", self.file_id)
-    }
-    pub fn href(&self, section_slug: &str) -> String {
-        format!(
-            "/s/{}/{}/item/{}",
-            section_slug, self.collection_id, self.id
-        )
-    }
-
     pub fn display_title(&self) -> String {
         self.title
             .clone()
             .unwrap_or_else(|| format!("Item {}", self.number + 1))
+    }
+    pub fn file_path(&self) -> String {
+        routes::media(self.file_id)
+    }
+    pub fn href(&self, section_slug: &str) -> String {
+        routes::item(section_slug, self.collection_id, self.id)
     }
 }

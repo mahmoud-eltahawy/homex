@@ -2,6 +2,9 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 
+#[cfg(feature = "ssr")]
+use crate::app::constants::messages;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadResult {
     pub success: bool,
@@ -39,7 +42,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
     let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
         .await
         .srv()?
-        .ok_or_else(|| ServerFnError::new("section not found"))?;
+        .ok_or_else(|| ServerFnError::new(messages::SECTION_NOT_FOUND))?;
     let kind = MediaKind::try_from(kind_str.as_str()).map_err(ServerFnError::new)?;
 
     validate_extensions(&payload, kind)?;
@@ -82,7 +85,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
 
     Ok(UploadResult {
         success: true,
-        message: "Upload and conversion started in the background".into(),
+        message: messages::UPLOAD_STARTED_BG.into(),
         job_id: Some(job_id),
     })
 }
@@ -96,7 +99,7 @@ pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, ServerF
     let jobs = state.jobs.read().await;
     let job = jobs
         .get(&job_id)
-        .ok_or_else(|| ServerFnError::new("job not found"))?;
+        .ok_or_else(|| ServerFnError::new(messages::JOB_NOT_FOUND))?;
 
     Ok(match &job.phase {
         JobPhase::Writing => ConversionStatus::Writing,

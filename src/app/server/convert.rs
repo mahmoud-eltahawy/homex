@@ -62,29 +62,31 @@ impl TargetFormat {
 
 // ─── Container classification ─────────────────────────────────────────────
 
+pub const VIDEO_SUPPORTED_EXTS: &[&str] = &["mp4", "m4v", "webm"];
+pub const AUDIO_SUPPORTED_EXTS: &[&str] = &["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus"];
+pub const VIDEO_CONVERTIBLE_EXTS: &[&str] = &[
+    "mkv", "mov", "avi", "wmv", "flv", "ts", "mpg", "mpeg", "3gp", "ogv",
+];
+pub const AUDIO_CONVERTIBLE_EXTS: &[&str] = &["flac", "wma", "aiff", "aif", "alac", "ape"];
+
+fn in_list(list: &[&str], ext: &str) -> bool {
+    list.iter().any(|e| e.eq_ignore_ascii_case(ext))
+}
+
 pub fn is_video_container_supported(ext: &str) -> bool {
-    matches!(ext.to_ascii_lowercase().as_str(), "mp4" | "m4v" | "webm")
+    in_list(VIDEO_SUPPORTED_EXTS, ext)
 }
 
 pub fn is_audio_container_supported(ext: &str) -> bool {
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "mp3" | "m4a" | "aac" | "wav" | "ogg" | "oga" | "opus"
-    )
+    in_list(AUDIO_SUPPORTED_EXTS, ext)
 }
 
 pub fn is_convertible_video(ext: &str) -> bool {
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "mkv" | "mov" | "avi" | "wmv" | "flv" | "ts" | "mpg" | "mpeg" | "3gp" | "ogv"
-    )
+    in_list(VIDEO_CONVERTIBLE_EXTS, ext)
 }
 
 pub fn is_convertible_audio(ext: &str) -> bool {
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "flac" | "wma" | "aiff" | "aif" | "alac" | "ape"
-    )
+    in_list(AUDIO_CONVERTIBLE_EXTS, ext)
 }
 
 // ─── ffprobe ──────────────────────────────────────────────────────────────
@@ -201,7 +203,6 @@ fn parse_hms(s: &str) -> Option<f64> {
     Some(h * 3600.0 + m * 60.0 + sec)
 }
 
-/// Whole-percent throttle.
 struct ProgressTracker {
     last_bucket: u32,
 }

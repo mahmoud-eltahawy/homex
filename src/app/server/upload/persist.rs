@@ -1,3 +1,4 @@
+use crate::app::constants::messages;
 use leptos::prelude::ServerFnError;
 use std::path::Path;
 use toasty::{Db, Transaction};
@@ -9,10 +10,8 @@ use crate::app::server::poster::write_poster;
 
 fn toasty_err(e: toasty::Error) -> ServerFnError {
     leptos::logging::error!("[upload] {e}");
-    ServerFnError::new("Internal error")
+    ServerFnError::new(messages::INTERNAL_ERROR)
 }
-
-// ─── Files ────────────────────────────────────────────────────────────────
 
 pub async fn insert_files(
     db: &mut Db,
@@ -27,8 +26,6 @@ pub async fn insert_files(
     }
     Ok(out)
 }
-
-// ─── Items + poster, one transaction ──────────────────────────────────────
 
 async fn next_item_number_tx(
     tx: &mut Transaction<'_>,
@@ -76,7 +73,6 @@ pub async fn insert_items_and_poster(
         .map_err(toasty_err)?;
     }
 
-    // Bump the denormalized counter by the number of items just inserted.
     let mut collection = Collection::get_by_id(&mut tx, &collection_id)
         .await
         .map_err(toasty_err)?;

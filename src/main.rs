@@ -23,8 +23,6 @@ async fn main() {
     run_server(router, config.server.addr, cancel).await;
 }
 
-// ─── Bootstrap helpers ────────────────────────────────────────────────────
-
 #[cfg(feature = "ssr")]
 fn load_config_or_exit() -> homex::app::server::Config {
     use homex::app::server::Config;
@@ -52,11 +50,12 @@ async fn init_db_or_exit(config: &homex::app::server::Config) -> toasty::Db {
 
 #[cfg(feature = "ssr")]
 async fn ensure_storage_dirs(config: &homex::app::server::Config) {
+    use homex::app::constants::storage;
     use leptos::logging::error;
     let mut dirs = vec![
         config.storage.media_root.clone(),
         config.storage.data_dir.clone(),
-        config.storage.data_dir.join("posters"),
+        config.storage.data_dir.join(storage::POSTERS_DIR),
     ];
     for dir in dirs.drain(..) {
         if let Err(e) = tokio::fs::create_dir_all(&dir).await {
@@ -92,28 +91,27 @@ fn build_app_state(
     }
 }
 
-// ─── Router assembly ──────────────────────────────────────────────────────
-
 #[cfg(feature = "ssr")]
 fn build_router(
     state: homex::app::server::AppState,
     leptos_options: leptos::prelude::LeptosOptions,
 ) -> axum::Router {
     use axum::{Extension, Router, extract::DefaultBodyLimit, middleware, routing::get};
+    use homex::app::constants::{routes, storage};
     use homex::app::{App, server::auth, server::routes::stream_media, shell};
     use leptos::prelude::*;
     use leptos_axum::LeptosRoutes;
     use leptos_axum::generate_route_list;
     use tower_http::services::ServeDir;
 
-    let posters_dir = state.config.storage.data_dir.join("posters");
-    let routes = generate_route_list(App);
+    let posters_dir = state.config.storage.data_dir.join(storage::POSTERS_DIR);
+    let routes_list = generate_route_list(App);
 
     Router::new()
-        .nest_service("/posters", ServeDir::new(posters_dir))
+        .nest_service(routes::POSTERS_SERVE_PREFIX, ServeDir::new(posters_dir))
         .leptos_routes_with_context(
             &leptos_options,
-            routes,
+            routes_list,
             {
                 let state = state.clone();
                 move || provide_context(state.clone())
@@ -123,15 +121,13 @@ fn build_router(
                 move || shell(leptos_options.clone())
             },
         )
-        .route("/media/{id}", get(stream_media))
+        .route(routes::MEDIA_STREAM_PATTERN, get(stream_media))
         .fallback(leptos_axum::file_and_error_handler(shell))
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024))
         .layer(Extension(state))
         .layer(middleware::from_fn(auth::middleware))
         .with_state(leptos_options)
 }
-
-// ─── Server ───────────────────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 async fn run_server(

@@ -27,8 +27,6 @@ fn Icon(
     }
 }
 
-// ─── Search & navigation ─────────────────────────────────────────────────
-
 #[component]
 pub fn SearchIcon() -> impl IntoView {
     view! {
@@ -78,8 +76,6 @@ pub fn NextPageIcon() -> impl IntoView {
         </Icon>
     }
 }
-
-// ─── Actions ─────────────────────────────────────────────────────────────
 
 #[component]
 pub fn DownloadIcon() -> impl IntoView {
@@ -142,15 +138,6 @@ pub fn ViewAllIcon() -> impl IntoView {
     }
 }
 
-// ─── Section kind icons ──────────────────────────────────────────────────
-//
-// Four distinct icons for the four (media_kind, nested) combinations:
-//
-//   (Video, false) → MovieIcon        amber   — flat list of movies
-//   (Video, true)  → SeriesIcon       purple  — seasons / episodes
-//   (Audio, false) → AudioIcon        cyan    — flat list of tracks
-//   (Audio, true)  → AudioGroupIcon   pink    — albums / playlists
-
 #[component]
 pub fn MovieIcon() -> impl IntoView {
     view! {
@@ -190,19 +177,14 @@ pub fn AudioIcon() -> impl IntoView {
 pub fn AudioGroupIcon() -> impl IntoView {
     view! {
         <Icon class="w-6 h-6 text-pink-400" label="Audio Group" filled=true>
-            // Back cover — dimmer, offset up-right to read as a stack
             <rect x="5" y="4" width="14" height="14" rx="2" opacity="0.45" />
-            // Front cover — solid
             <rect x="3" y="6" width="14" height="14" rx="2" />
-            // Vinyl disc punched into the front cover
             <circle cx="10" cy="13" r="4" fill="#0c0b1a" />
             <circle cx="10" cy="13" r="1.5" fill="currentColor" />
         </Icon>
     }
 }
 
-/// Pick the icon for a section based on its media kind and nesting.
-/// The four combinations map to four visually distinct icons.
 pub fn icon_for(kind: MediaKind, nested: bool) -> AnyView {
     match (kind, nested) {
         (MediaKind::Video, false) => view! { <MovieIcon/> }.into_any(),
@@ -211,8 +193,6 @@ pub fn icon_for(kind: MediaKind, nested: bool) -> AnyView {
         (MediaKind::Audio, true) => view! { <AudioGroupIcon/> }.into_any(),
     }
 }
-
-// ─── Status ──────────────────────────────────────────────────────────────
 
 #[component]
 pub fn LoadingIcon() -> impl IntoView {
@@ -267,8 +247,6 @@ pub fn ClockIcon() -> impl IntoView {
     }
 }
 
-// ─── Branding ────────────────────────────────────────────────────────────
-
 #[component]
 pub fn MediaCubeLogo() -> impl IntoView {
     view! {
@@ -285,8 +263,6 @@ pub fn MediaCubeLogo() -> impl IntoView {
         </svg>
     }
 }
-
-// ─── Poster placeholders ─────────────────────────────────────────────────
 
 #[component]
 pub fn MoviePosterSvg() -> impl IntoView {

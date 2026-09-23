@@ -1,3 +1,4 @@
+use crate::app::constants::{messages, storage};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -8,11 +9,18 @@ use tokio::io::AsyncWriteExt;
 use super::naming::{extension_of, new_job_id};
 use super::types::{UploadFile, UploadPayload};
 
+// ─── Multipart form field names (server-side) ─────────────────────────────
+//
+// These MUST stay in sync with the field names built on the client
+// (`app/collection_detail.rs`).
+
+mod fields;
+
 // ─── Temp dir management ──────────────────────────────────────────────────
 
 fn fresh_temp_dir() -> PathBuf {
     std::env::temp_dir()
-        .join("homex-uploads")
+        .join(storage::UPLOAD_TEMP_DIR)
         .join(new_job_id())
 }
 
@@ -61,24 +69,27 @@ enum FieldKind {
 }
 
 fn classify_field(name: &str) -> FieldKind {
-    if name == "poster_file" {
+    if name == fields::POSTER_FILE {
         return FieldKind::Poster;
     }
     if let Some(idx) = name
-        .strip_prefix("file_title_")
+        .strip_prefix(fields::FILE_TITLE_PREFIX)
         .and_then(|s| s.parse().ok())
     {
         return FieldKind::FileTitle(idx);
     }
-    if let Some(idx) = name.strip_prefix("file_").and_then(|s| s.parse().ok()) {
+    if let Some(idx) = name
+        .strip_prefix(fields::FILE_PREFIX)
+        .and_then(|s| s.parse().ok())
+    {
         return FieldKind::File(idx);
     }
     match name {
-        "title" => FieldKind::Title,
-        "section_slug" => FieldKind::SectionSlug,
-        "description" => FieldKind::Description,
-        "collection_id" => FieldKind::CollectionId,
-        "season_number" => FieldKind::SeasonNumber,
+        fields::TITLE => FieldKind::Title,
+        fields::SECTION_SLUG => FieldKind::SectionSlug,
+        fields::DESCRIPTION => FieldKind::Description,
+        fields::COLLECTION_ID => FieldKind::CollectionId,
+        fields::SEASON_NUMBER => FieldKind::SeasonNumber,
         _ => FieldKind::Unknown,
     }
 }
@@ -226,10 +237,10 @@ fn build_upload_files(
 
 fn finalize(acc: Accumulator, temp_dir: PathBuf) -> Result<UploadPayload, ServerFnError> {
     if acc.files.is_empty() {
-        return Err(ServerFnError::new("No files were received"));
+        return Err(ServerFnError::new(messages::NO_FILES_RECEIVED));
     }
     if acc.section_slug.is_empty() {
-        return Err(ServerFnError::new("section_slug is missing"));
+        return Err(ServerFnError::new(messages::SECTION_SLUG_MISSING));
     }
     let files = build_upload_files(acc.files, acc.file_titles);
     Ok(UploadPayload {

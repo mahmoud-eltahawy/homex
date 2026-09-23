@@ -2,6 +2,9 @@ use crate::app::model::Section;
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
+use crate::app::constants::messages;
+
+#[cfg(feature = "ssr")]
 use crate::app::server::{ToastyErr, db};
 
 #[server]
@@ -10,7 +13,7 @@ pub async fn patch_section_title(id: u64, title: String) -> Result<(), ServerFnE
     let mut state: AppState = expect_context();
     let t = title.trim();
     if t.is_empty() {
-        return Err(ServerFnError::new("Title is required"));
+        return Err(ServerFnError::new(messages::TITLE_REQUIRED));
     }
     db::update_section_title(&mut state.db, id as i64, t)
         .await
@@ -32,7 +35,7 @@ pub async fn fetch_section_by_slug(slug: String) -> Result<Section, ServerFnErro
     db::fetch_section_by_slug(&mut state.db, &slug)
         .await
         .srv()?
-        .ok_or_else(|| ServerFnError::new("section not found"))
+        .ok_or_else(|| ServerFnError::new(messages::SECTION_NOT_FOUND))
 }
 
 #[server]
@@ -70,7 +73,7 @@ pub async fn create_section(
 
     let title = title.trim().to_string();
     if title.is_empty() {
-        return Err(ServerFnError::new("Name is required"));
+        return Err(ServerFnError::new(messages::NAME_REQUIRED));
     }
 
     let kind = MediaKind::try_from(media_kind.as_str()).map_err(ServerFnError::new)?;
@@ -87,9 +90,7 @@ pub async fn create_section(
             if attempt < 3 {
                 continue;
             }
-            return Err(ServerFnError::new(
-                "Could not generate a unique section identifier",
-            ));
+            return Err(ServerFnError::new(messages::UNIQUE_SECTION_ID_FAILED));
         }
 
         match db::insert_section(&mut state.db, &slug, &title, media_kind.as_str(), nested).await {
@@ -99,13 +100,11 @@ pub async fn create_section(
                 if attempt < 3 {
                     continue;
                 }
-                return Err(ServerFnError::new("Could not create the section"));
+                return Err(ServerFnError::new(messages::CREATE_SECTION_FAILED));
             }
         }
     }
-    Err(ServerFnError::new(
-        "Could not generate a unique section identifier",
-    ))
+    Err(ServerFnError::new(messages::UNIQUE_SECTION_ID_FAILED))
 }
 
 #[server]

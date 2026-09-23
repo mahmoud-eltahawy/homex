@@ -40,8 +40,6 @@ pub struct EditableCtl {
     pub cancel: Callback<()>,
 }
 
-// ─── Draft state machine ──────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 struct EditDraft {
     draft: RwSignal<String>,
@@ -49,8 +47,6 @@ struct EditDraft {
     commit: Callback<()>,
 }
 
-/// Seeds the draft from the current value when editing starts, and fires
-/// `on_commit` with the draft only if it actually changed.
 fn use_edit_draft(value: Signal<String>, on_commit: Callback<String>) -> EditDraft {
     let draft = RwSignal::new(String::new());
 
@@ -69,8 +65,6 @@ fn use_edit_draft(value: Signal<String>, on_commit: Callback<String>) -> EditDra
         commit,
     }
 }
-
-// ─── Generic editable shell ───────────────────────────────────────────────
 
 #[component]
 pub fn Editable<D, E>(
@@ -150,8 +144,6 @@ where
     }
 }
 
-// ─── Single-line text ─────────────────────────────────────────────────────
-
 #[component]
 pub fn EditableText(
     value: Signal<String>,
@@ -191,8 +183,6 @@ pub fn EditableText(
         />
     }
 }
-
-// ─── Multi-line text ──────────────────────────────────────────────────────
 
 #[component]
 pub fn EditableTextArea(
@@ -262,8 +252,6 @@ pub fn EditableTextArea(
     }
 }
 
-// ─── Poster (upload/replace inline) ───────────────────────────────────────
-
 #[component]
 pub fn EditablePoster(
     src: Signal<Option<String>>,
@@ -313,8 +301,6 @@ pub fn EditablePoster(
     }
 }
 
-// ─── Edit-mode toggle ─────────────────────────────────────────────────────
-
 #[component]
 pub fn EditModeToggle(#[prop(optional, into)] wrap_class: Option<String>) -> impl IntoView {
     let edit_on = use_edit_mode();
@@ -346,8 +332,6 @@ pub fn EditModeToggle(#[prop(optional, into)] wrap_class: Option<String>) -> imp
         </button>
     }
 }
-
-// ─── File picker ──────────────────────────────────────────────────────────
 
 #[component]
 pub fn FilePicker(

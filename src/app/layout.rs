@@ -1,4 +1,5 @@
 use crate::app::common::ContextBundle;
+use crate::app::constants::HTML_DIR;
 use crate::app::icons::icon_for;
 use crate::app::{
     icons::{MediaCubeLogo, MenuIcon, XIcon},
@@ -9,8 +10,6 @@ use crate::app::{
 use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
-
-// ─── Shared sections resource ─────────────────────────────────────────────
 
 type Sections = Resource<Result<Vec<Section>, ServerFnError>>;
 impl ContextBundle for Sections {}
@@ -24,7 +23,7 @@ pub fn Layout() -> impl IntoView {
     Sections::provide(sections);
 
     view! {
-        <div class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased" dir="ltr">
+        <div class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased" dir=HTML_DIR>
             <Navbar/>
             <main class="flex-1 bg-gradient-to-b from-[#0a0a0f] via-[#12121a] to-[#0a0a0f] pt-20 md:pt-24 lg:pt-28 pb-8 md:pb-12">
                 <Outlet/>

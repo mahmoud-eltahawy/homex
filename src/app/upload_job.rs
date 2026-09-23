@@ -13,8 +13,6 @@ pub struct UploadJob {
     pub pending: Signal<bool>,
 }
 
-// ─── Signal bundle ────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 struct UploadSignals {
     status: RwSignal<Option<ConversionStatus>>,
@@ -48,8 +46,6 @@ impl UploadSignals {
     }
 }
 
-// ─── Polling ──────────────────────────────────────────────────────────────
-
 fn is_terminal(s: &ConversionStatus) -> bool {
     matches!(s, ConversionStatus::Done | ConversionStatus::Failed(_))
 }
@@ -71,8 +67,6 @@ async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
     signals.clear_active_if(&job_id);
     signals.mark_done_if_successful();
 }
-
-// ─── Effects ──────────────────────────────────────────────────────────────
 
 fn install_dispatch_result_effect(
     action: Action<web_sys::FormData, Result<UploadResult, ServerFnError>>,
@@ -106,8 +100,6 @@ fn derive_pending(
     Signal::derive(move || action.pending().get() || signals.active_job.get().is_some())
 }
 
-// ─── Public ───────────────────────────────────────────────────────────────
-
 impl UploadJob {
     pub fn new() -> Self {
         let action = Action::new_local(|fd: &web_sys::FormData| upload_media(fd.clone().into()));
@@ -138,8 +130,6 @@ impl UploadJob {
         })
     }
 }
-
-// ─── Progress view ────────────────────────────────────────────────────────
 
 #[component]
 pub fn UploadProgress(status: Signal<Option<ConversionStatus>>) -> impl IntoView {

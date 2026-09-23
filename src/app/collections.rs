@@ -2,7 +2,22 @@ use crate::app::model::{Collection, Item};
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
+use crate::app::constants::messages;
+
+#[cfg(feature = "ssr")]
 use crate::app::server::{ToastyErr, db};
+
+// ─── Multipart form field names (poster upload) ───────────────────────────
+//
+// Only reachable from inside `upload_collection_poster`, which is a
+// `#[server]` fn whose body is compiled only on the SSR build.
+
+#[cfg(feature = "ssr")]
+mod fields {
+    pub const SECTION: &str = "section";
+    pub const ID: &str = "id";
+    pub const POSTER_FILE: &str = "poster_file";
+}
 
 #[server]
 pub async fn fetch_collections(
@@ -47,7 +62,7 @@ pub async fn fetch_collection_detail(
     db::fetch_collection_detail(&mut state.db, &section_slug, collection_id as i64)
         .await
         .srv()?
-        .ok_or_else(|| ServerFnError::new("collection not found"))
+        .ok_or_else(|| ServerFnError::new(messages::COLLECTION_NOT_FOUND))
 }
 
 #[server]
@@ -80,14 +95,14 @@ pub async fn patch_collection_field(
     let mut state: AppState = expect_context();
 
     if field == "title" && value.as_deref().map(str::trim).unwrap_or("").is_empty() {
-        return Err(ServerFnError::new("Title is required"));
+        return Err(ServerFnError::new(messages::TITLE_REQUIRED));
     }
 
     let f = match field.as_str() {
         "title" => CollectionField::Title,
         "description" => CollectionField::Description,
         "poster" => CollectionField::Poster,
-        _ => return Err(ServerFnError::new("unknown field")),
+        _ => return Err(ServerFnError::new(messages::UNKNOWN_FIELD)),
     };
 
     db::update_collection_field(&mut state.db, id as i64, f, value.as_deref())
@@ -150,9 +165,9 @@ pub async fn upload_collection_poster(
 
     while let Some(f) = mp.next_field().await? {
         match f.name().unwrap_or("") {
-            "section" => section_slug = f.text().await?,
-            "id" => id = f.text().await?.parse().unwrap_or(0),
-            "poster_file" => {
+            fields::SECTION => section_slug = f.text().await?,
+            fields::ID => id = f.text().await?.parse().unwrap_or(0),
+            fields::POSTER_FILE => {
                 let fname = f.file_name().unwrap_or("").to_string();
                 let b = f.bytes().await?.to_vec();
                 if !b.is_empty() {
@@ -165,12 +180,12 @@ pub async fn upload_collection_poster(
         }
     }
 
-    let (ext, bytes) = bytes.ok_or_else(|| ServerFnError::new("No image was received"))?;
+    let (ext, bytes) = bytes.ok_or_else(|| ServerFnError::new(messages::NO_IMAGE_RECEIVED))?;
 
     let collection = db::fetch_collection_detail(&mut state.db, &section_slug, id)
         .await
         .srv()?
-        .ok_or_else(|| ServerFnError::new("collection not found"))?;
+        .ok_or_else(|| ServerFnError::new(messages::COLLECTION_NOT_FOUND))?;
 
     let url = write_poster(
         &state.config.storage.data_dir,

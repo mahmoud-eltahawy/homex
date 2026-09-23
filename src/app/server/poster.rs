@@ -1,3 +1,4 @@
+use crate::app::constants::{routes, storage};
 use leptos::prelude::ServerFnError;
 use std::path::Path;
 
@@ -29,7 +30,7 @@ pub async fn write_poster(
     bytes: &[u8],
 ) -> Result<String, ServerFnError> {
     validate_poster(ext, bytes)?;
-    let dir = data_dir.join("posters").join(subdir);
+    let dir = data_dir.join(storage::POSTERS_DIR).join(subdir);
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| ServerFnError::new(format!("mkdir posters: {e}")))?;
@@ -39,5 +40,5 @@ pub async fn write_poster(
         .await
         .map_err(|e| ServerFnError::new(format!("write poster: {e}")))?;
 
-    Ok(format!("/posters/{subdir}/{filename}"))
+    Ok(routes::poster(subdir, &filename))
 }

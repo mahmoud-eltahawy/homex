@@ -1,3 +1,4 @@
+use crate::app::constants::{self, messages, protocols, storage};
 use leptos::prelude::ServerFnError;
 use toasty::Db;
 use tokio_util::sync::CancellationToken;
@@ -31,15 +32,14 @@ impl<T> ToastyErr<T> for toasty::Result<T> {
     fn srv(self) -> Result<T, ServerFnError> {
         self.map_err(|e| {
             leptos::logging::error!("[db] {e}");
-            ServerFnError::new("Internal error")
+            ServerFnError::new(messages::INTERNAL_ERROR)
         })
     }
 }
 
-// remove_media_files / remove_poster unchanged
 pub async fn remove_media_files(state: &AppState, rel_paths: &[String]) {
     for rel in rel_paths {
-        if rel.starts_with("http://") || rel.starts_with("https://") {
+        if rel.starts_with(protocols::HTTP) || rel.starts_with(protocols::HTTPS) {
             continue;
         }
         let abs = state.config.storage.media_root.join(rel);
@@ -51,10 +51,15 @@ pub async fn remove_media_files(state: &AppState, rel_paths: &[String]) {
 
 pub async fn remove_poster(state: &AppState, url: Option<&str>) {
     let Some(url) = url else { return };
-    let Some(rest) = url.strip_prefix("/posters/") else {
+    let Some(rest) = url.strip_prefix(constants::routes::POSTERS_URL_PREFIX) else {
         return;
     };
-    let abs = state.config.storage.data_dir.join("posters").join(rest);
+    let abs = state
+        .config
+        .storage
+        .data_dir
+        .join(storage::POSTERS_DIR)
+        .join(rest);
     if let Err(e) = tokio::fs::remove_file(&abs).await {
         leptos::logging::warn!("[cleanup] remove poster {}: {e}", abs.display());
     }

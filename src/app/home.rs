@@ -18,8 +18,6 @@ use crate::app::{
 
 const MEDIA_LIST_SIZE: usize = 6;
 
-// ─── Page ─────────────────────────────────────────────────────────────────
-
 pub struct HomePage {
     search_query: RwSignal<Option<String>>,
     sections: Resource<Result<Vec<Section>, ServerFnError>>,
@@ -56,8 +54,6 @@ impl LazyRoute for HomePage {
     }
 }
 
-// ─── Section list ─────────────────────────────────────────────────────────
-
 #[component]
 fn AllSections(
     sections: Vec<Section>,
@@ -87,8 +83,6 @@ fn AllSections(
     }
 }
 
-// ─── Section teaser ───────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 struct SectionTeaserState {
     folded: RwSignal<bool>,
@@ -97,8 +91,6 @@ struct SectionTeaserState {
     count: CollectionCount,
 }
 
-/// All state for one section teaser: fold toggle, pagination offset,
-/// items list, and item count. Resets `offset` when the search query changes.
 fn use_section_teaser_state(
     slug: String,
     search_query: RwSignal<Option<String>>,
@@ -176,8 +168,6 @@ fn SectionTeaser(
     }
 }
 
-// ─── Section header ───────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 struct SectionHeaderState {
     title: RwSignal<String>,
@@ -185,8 +175,6 @@ struct SectionHeaderState {
     delete_action: Action<u64, Result<(), ServerFnError>>,
 }
 
-/// Local title signal + the two server actions. Wires both actions to
-/// refetch the sections list on success.
 fn use_section_header_state(
     section: &Section,
     sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
@@ -377,8 +365,6 @@ fn CollectionStrip(collections: Vec<Collection>) -> impl IntoView {
     Either::Right(view! { <CollectionGrid collections=collections/> })
 }
 
-// ─── New-section form ─────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 struct NewSectionFormState {
     title: RwSignal<String>,
@@ -388,8 +374,6 @@ struct NewSectionFormState {
     create: Action<(String, String, bool), Result<u64, ServerFnError>>,
 }
 
-/// The form's signals, the create action, and the effect that resets
-/// the form on success or surfaces the server error on failure.
 fn use_new_section_form(
     sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
 ) -> NewSectionFormState {
