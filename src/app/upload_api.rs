@@ -82,7 +82,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
 
     Ok(UploadResult {
         success: true,
-        message: "بدأ رفع الملفات وتحويلها في الخلفية".into(),
+        message: "Upload and conversion started in the background".into(),
         job_id: Some(job_id),
     })
 }

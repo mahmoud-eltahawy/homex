@@ -9,7 +9,7 @@ use crate::app::server::poster::write_poster;
 
 fn toasty_err(e: toasty::Error) -> ServerFnError {
     leptos::logging::error!("[upload] {e}");
-    ServerFnError::new("حدث خطأ داخلي")
+    ServerFnError::new("Internal error")
 }
 
 // ─── Files ────────────────────────────────────────────────────────────────

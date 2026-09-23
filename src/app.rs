@@ -35,7 +35,7 @@ mod upload_job;
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
-        <html lang="ar" dir="rtl">
+        <html lang="en" dir="ltr">
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>

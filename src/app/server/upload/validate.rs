@@ -21,7 +21,7 @@ pub fn validate_extensions(payload: &UploadPayload, kind: MediaKind) -> Result<(
         };
         if !ok {
             return Err(ServerFnError::new(format!(
-                "صيغة غير مدعومة: {}",
+                "Unsupported format: {}",
                 f.filename
             )));
         }

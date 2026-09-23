@@ -333,7 +333,7 @@ fn CollectionContent(
                     <span class="flex items-center gap-1">
                         <ClockIcon/>
                         {move || format!(
-                            "{} عنصر",
+                            "{} items",
                             items.get()
                                 .map(|r| r.map(|v| v.len()).unwrap_or(0))
                                 .unwrap_or(0)
@@ -344,7 +344,7 @@ fn CollectionContent(
                     <EditableTextArea
                         value=Signal::derive(move || edit.description.get())
                         on_commit=edit.commit_desc
-                        placeholder="أضف وصفاً..."
+                        placeholder="Add a description..."
                         class="text-gray-300 leading-relaxed text-base sm:text-lg"
                     />
                 </div>
@@ -442,11 +442,11 @@ fn make_file_input_handler(
 fn upload_button_label_text(is_series: bool, season: Option<i64>) -> String {
     if is_series {
         let season_label = season
-            .map(|s| format!(" إلى الموسم {s}"))
+            .map(|s| format!(" to season {s}"))
             .unwrap_or_default();
-        format!("إضافة حلقات{season_label}")
+        format!("Add episodes{season_label}")
     } else {
-        "إضافة ملفات".to_string()
+        "Add files".to_string()
     }
 }
 
@@ -510,7 +510,7 @@ fn AppendItems(
                     {move || upload_button_label_text(is_series, selected_season.get())}
                 </label>
                 <Show when=move || upload_pending.get()>
-                    <span class="text-cyan-300 text-sm">"جاري الرفع..."</span>
+                    <span class="text-cyan-300 text-sm">"Uploading..."</span>
                 </Show>
             </div>
             <div class="mt-3">
@@ -568,9 +568,9 @@ fn Playlist(
 
         if filtered.is_empty() {
             let msg = if is_series {
-                "لا توجد حلقات في هذا الموسم بعد. اضغط «تعديل» ثم «إضافة حلقات»."
+                "No episodes in this season yet. Click \"Edit\" then \"Add episodes\"."
             } else {
-                "لا توجد ملفات بعد. اضغط «تعديل» ثم «إضافة ملفات»."
+                "No files yet. Click \"Edit\" then \"Add files\"."
             };
             return Either::Left(view! {
                 <div class="py-12 text-center text-gray-500 text-sm">{msg}</div>
@@ -596,7 +596,7 @@ fn Playlist(
             <WatchPage
                 edit_mode=use_edit_mode()
                 items=media_items.into()
-                current_idx=RwSignal::new(initial_index)
+                initial_idx=initial_index
                 audio=audio
                 artwork=artwork.clone()
                 playlist_title=playlist_title.clone()
@@ -660,9 +660,9 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
                     on:click=add_season.clone()
                     class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 \
                            text-white text-sm transition"
-                    aria-label="إضافة موسم جديد"
+                    aria-label="Add new season"
                 >
-                    "+ موسم"
+                    "+ Season"
                 </button>
             }
         })
@@ -670,7 +670,7 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
 
     view! {
         <div class="flex items-center gap-2 mb-4 flex-wrap">
-            <span class="text-gray-300 text-sm">"الموسم:"</span>
+            <span class="text-gray-300 text-sm">"Season:"</span>
             <select
                 class="bg-white/10 backdrop-blur-md text-white rounded-xl py-1.5 px-3 \
                        focus:outline-none focus:ring-1 focus:ring-cyan-400"
@@ -689,7 +689,7 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
             >
                 <For each=options key=|s| *s let:season>
                     <option value=season.to_string()>
-                        {format!("الموسم {}", season)}
+                        {format!("Season {}", season)}
                     </option>
                 </For>
             </select>

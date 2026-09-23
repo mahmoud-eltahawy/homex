@@ -117,7 +117,7 @@ where
                                     type="button"
                                     class=BTN_EDIT
                                     on:click=begin
-                                    aria-label="تعديل"
+                                    aria-label="Edit"
                                 >
                                     <EditIcon/>
                                 </button>
@@ -132,7 +132,7 @@ where
                         type="button"
                         class=BTN_OK
                         on:click=move |_| ctl.commit.run(())
-                        aria-label="حفظ"
+                        aria-label="Save"
                     >
                         "✓"
                     </button>
@@ -140,7 +140,7 @@ where
                         type="button"
                         class=BTN_X
                         on:click=move |_| ctl.cancel.run(())
-                        aria-label="إلغاء"
+                        aria-label="Cancel"
                     >
                         <XIcon/>
                     </button>
@@ -160,7 +160,7 @@ pub fn EditableText(
     #[prop(optional, into)] placeholder: Option<String>,
 ) -> impl IntoView {
     let display_class = class.unwrap_or_else(|| "text-white".into());
-    let placeholder = placeholder.unwrap_or_else(|| "أدخل نصاً".into());
+    let placeholder = placeholder.unwrap_or_else(|| "Enter text".into());
 
     let edit = use_edit_draft(value, on_commit);
     let input_ref = NodeRef::<html::Input>::new();
@@ -202,7 +202,7 @@ pub fn EditableTextArea(
     #[prop(optional, into)] placeholder: Option<String>,
 ) -> impl IntoView {
     let display_class = class.unwrap_or_else(|| "text-gray-300".into());
-    let placeholder = placeholder.unwrap_or_else(|| "لا يوجد وصف".into());
+    let placeholder = placeholder.unwrap_or_else(|| "No description".into());
 
     let edit = use_edit_draft(value, on_commit);
     let ta_ref = NodeRef::<html::Textarea>::new();
@@ -290,7 +290,7 @@ pub fn EditablePoster(
                         }
                     })
                 >
-                    <UploadIcon/> "تغيير الصورة"
+                    <UploadIcon/> "Change image"
                 </FilePicker>
             })
         }
@@ -337,11 +337,11 @@ pub fn EditModeToggle(#[prop(optional, into)] wrap_class: Option<String>) -> imp
             class=class
             on:click=move |_| edit_on.update(|x| *x = !*x)
             aria-pressed=move || edit_on.get().to_string()
-            aria-label="تبديل وضع التعديل"
+            aria-label="Toggle edit mode"
         >
             <EditIcon/>
             <span class="hidden sm:inline">
-                {move || if edit_on.get() { "إنهاء التعديل" } else { "تعديل" }}
+                {move || if edit_on.get() { "Done editing" } else { "Edit" }}
             </span>
         </button>
     }

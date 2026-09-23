@@ -325,7 +325,7 @@ fn SectionHeaderActions(
                     type="button"
                     on:click=move |_| on_delete.run(())
                     class="p-1 rounded hover:bg-red-500/20 text-red-300 transition-colors"
-                    aria-label="حذف القسم"
+                    aria-label="Delete section"
                 >
                     <DeleteIcon/>
                 </button>
@@ -432,7 +432,7 @@ fn NewSectionForm(
         ev.prevent_default();
         let t = state.title.get_untracked().trim().to_string();
         if t.is_empty() {
-            state.error.set(Some("الاسم مطلوب".into()));
+            state.error.set(Some("Name is required".into()));
             return;
         }
         state.error.set(None);
@@ -443,27 +443,27 @@ fn NewSectionForm(
 
     view! {
         <div class="mt-12 border-2 border-dashed border-cyan-400/30 rounded-2xl p-6 bg-cyan-500/[0.03]">
-            <h3 class="text-lg font-bold text-white mb-4">"إضافة قسم جديد"</h3>
+            <h3 class="text-lg font-bold text-white mb-4">"Add new section"</h3>
             <form on:submit=submit class="flex flex-wrap gap-3 items-end">
                 <label class="flex flex-col text-sm flex-1 min-w-48">
-                    <span class="mb-1 text-gray-300">"الاسم"</span>
+                    <span class="mb-1 text-gray-300">"Name"</span>
                     <input
                         type="text"
                         prop:value=move || state.title.get()
                         on:input=move |e| state.title.set(event_target_value(&e))
-                        placeholder="أفلام، مسلسلات، ألبومات..."
+                        placeholder="Movies, series, albums..."
                         class="bg-white/10 rounded-lg px-3 py-1.5 text-white w-full"
                     />
                 </label>
                 <label class="flex flex-col text-sm">
-                    <span class="mb-1 text-gray-300">"النوع"</span>
+                    <span class="mb-1 text-gray-300">"Type"</span>
                     <select
                         prop:value=move || state.kind.get()
                         on:change=move |e| state.kind.set(event_target_value(&e))
                         class="bg-white/10 rounded-lg px-3 py-1.5 text-white"
                     >
-                        <option value="video">"فيديو"</option>
-                        <option value="audio">"صوت"</option>
+                        <option value="video">"Video"</option>
+                        <option value="audio">"Audio"</option>
                     </select>
                 </label>
                 <label class="flex items-center gap-2 text-sm pb-2 text-gray-300">
@@ -472,7 +472,7 @@ fn NewSectionForm(
                         prop:checked=move || state.nested.get()
                         on:change=move |e| state.nested.set(event_target_checked(&e))
                     />
-                    <span>"مجموعات"</span>
+                    <span>"Groups"</span>
                 </label>
                 <button
                     type="submit"
@@ -482,9 +482,9 @@ fn NewSectionForm(
                            disabled:opacity-50"
                 >
                     {move || if state.create.pending().get() {
-                        "جاري الإضافة..."
+                        "Adding..."
                     } else {
-                        "إضافة"
+                        "Add"
                     }}
                 </button>
             </form>

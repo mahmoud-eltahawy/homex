@@ -17,8 +17,8 @@ impl MediaKind {
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::Video => "فيديو",
-            Self::Audio => "صوت",
+            Self::Video => "Video",
+            Self::Audio => "Audio",
         }
     }
 }
@@ -112,20 +112,21 @@ impl Section {
     pub fn href(&self) -> String {
         format!("/s/{}", self.slug)
     }
+
     pub fn new_label(&self) -> &'static str {
         match (self.media_kind(), self.nested) {
-            (MediaKind::Video, false) => "إضافة فيديو جديد",
-            (MediaKind::Video, true) => "إضافة مسلسل جديد",
-            (MediaKind::Audio, false) => "إضافة مقطع صوتي جديد",
-            (MediaKind::Audio, true) => "إضافة مجموعة صوتية جديدة",
+            (MediaKind::Video, false) => "Add new video",
+            (MediaKind::Video, true) => "Add new series",
+            (MediaKind::Audio, false) => "Add new audio track",
+            (MediaKind::Audio, true) => "Add new audio group",
         }
     }
     pub fn badge_label(&self) -> &'static str {
         match (self.media_kind(), self.nested) {
-            (MediaKind::Video, false) => "فيديو",
-            (MediaKind::Video, true) => "مسلسل",
-            (MediaKind::Audio, false) => "مقطع صوتي",
-            (MediaKind::Audio, true) => "مجموعة صوتية",
+            (MediaKind::Video, false) => "Video",
+            (MediaKind::Video, true) => "Series",
+            (MediaKind::Audio, false) => "Audio track",
+            (MediaKind::Audio, true) => "Audio group",
         }
     }
 }
@@ -137,11 +138,6 @@ impl Collection {
 }
 
 impl Item {
-    pub fn display_title(&self) -> String {
-        self.title
-            .clone()
-            .unwrap_or_else(|| format!("المقطع {}", self.number + 1))
-    }
     /// Was `Item.file.path` in the SQLx model, where `file` was a nested
     /// `MediaFile` struct. Now it is derived from `file_id`.
     pub fn file_path(&self) -> String {
@@ -152,5 +148,11 @@ impl Item {
             "/s/{}/{}/item/{}",
             section_slug, self.collection_id, self.id
         )
+    }
+
+    pub fn display_title(&self) -> String {
+        self.title
+            .clone()
+            .unwrap_or_else(|| format!("Item {}", self.number + 1))
     }
 }

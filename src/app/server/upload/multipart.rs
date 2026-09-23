@@ -226,10 +226,10 @@ fn build_upload_files(
 
 fn finalize(acc: Accumulator, temp_dir: PathBuf) -> Result<UploadPayload, ServerFnError> {
     if acc.files.is_empty() {
-        return Err(ServerFnError::new("لم يتم استلام أي ملف"));
+        return Err(ServerFnError::new("No files were received"));
     }
     if acc.section_slug.is_empty() {
-        return Err(ServerFnError::new("section_slug مفقود"));
+        return Err(ServerFnError::new("section_slug is missing"));
     }
     let files = build_upload_files(acc.files, acc.file_titles);
     Ok(UploadPayload {

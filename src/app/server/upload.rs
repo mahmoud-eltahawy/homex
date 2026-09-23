@@ -72,7 +72,7 @@ async fn execute_upload(
     let staged = stage_phase(payload, state, kind, job_id).await?;
     persist_phase(state, payload, &staged, job_id).await?;
     finish_job(state, job_id).await;
-    Ok(format!("تم رفع {} ملف بنجاح", staged.len()))
+    Ok(format!("Successfully uploaded {} file(s)", staged.len()))
 }
 
 pub async fn process_upload(

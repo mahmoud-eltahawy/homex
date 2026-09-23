@@ -163,14 +163,15 @@ fn configure_pipes(cmd: &mut Command) {
 
 async fn spawn_ffmpeg(mut cmd: Command) -> Result<Child, String> {
     configure_pipes(&mut cmd);
-    cmd.spawn().map_err(|e| format!("فشل تشغيل ffmpeg: {e}"))
+    cmd.spawn()
+        .map_err(|e| format!("Failed to start ffmpeg: {e}"))
 }
 
 fn take_stdout(child: &mut Child) -> Result<ChildStdout, String> {
     child
         .stdout
         .take()
-        .ok_or_else(|| "لا يمكن قراءة مخرجات ffmpeg".to_string())
+        .ok_or_else(|| "Cannot read ffmpeg output".to_string())
 }
 
 async fn wait_ok(child: &mut Child) -> bool {
@@ -295,7 +296,7 @@ async fn run_and_watch(
     tokio::select! {
         _ = cancel.cancelled() => {
             kill_silently(&mut child).await;
-            return Err("تم إلغاء التحويل".into());
+            return Err("Conversion cancelled".into());
         }
         _ = stream_ffmpeg_progress(stdout, ctx) => {}
     }
@@ -338,7 +339,7 @@ async fn ensure_mp4(
     if attempt_conversion(ffmpeg_transcode_mp4_cmd(input, output), output, ctx, cancel).await? {
         return Ok(());
     }
-    Err("فشل تحويل الفيديو (ffmpeg)".into())
+    Err("Video conversion failed (ffmpeg)".into())
 }
 
 async fn ensure_mp3(
@@ -350,7 +351,7 @@ async fn ensure_mp3(
     if attempt_conversion(ffmpeg_mp3_cmd(input, output), output, ctx, cancel).await? {
         return Ok(());
     }
-    Err("فشل تحويل الصوت (ffmpeg)".into())
+    Err("Audio conversion failed (ffmpeg)".into())
 }
 
 // ─── Public entry point ───────────────────────────────────────────────────

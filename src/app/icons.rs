@@ -53,7 +53,7 @@ pub fn XIcon() -> impl IntoView {
 #[component]
 pub fn MenuIcon() -> impl IntoView {
     view! {
-        <Icon class="h-6 w-6" label="القائمة">
+        <Icon class="h-6 w-6" label="Menu">
             <line x1="4" y1="6" x2="20" y2="6" />
             <line x1="4" y1="12" x2="20" y2="12" />
             <line x1="4" y1="18" x2="20" y2="18" />
@@ -106,7 +106,7 @@ pub fn UploadIcon() -> impl IntoView {
 #[component]
 pub fn EditIcon() -> impl IntoView {
     view! {
-        <Icon class="h-5 w-5" label="تعديل">
+        <Icon class="h-5 w-5" label="Edit">
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
         </Icon>

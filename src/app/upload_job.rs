@@ -172,14 +172,14 @@ pub fn UploadProgress(status: Signal<Option<ConversionStatus>>) -> impl IntoView
 #[component]
 fn WritingStage() -> impl IntoView {
     view! {
-        <div class="text-cyan-300 text-sm">"💾 جاري حفظ الملفات..."</div>
+        <div class="text-cyan-300 text-sm">"💾 Saving files..."</div>
     }
 }
 
 #[component]
 fn FinalizingStage() -> impl IntoView {
     view! {
-        <div class="text-cyan-300 text-sm">"💾 جاري حفظ البيانات..."</div>
+        <div class="text-cyan-300 text-sm">"💾 Saving data..."</div>
     }
 }
 
@@ -188,7 +188,7 @@ fn DoneStage() -> impl IntoView {
     view! {
         <div class="bg-green-500/15 border border-green-500/30 rounded-xl p-3 \
                     text-green-300 text-sm">
-            "✓ تم التحويل بنجاح"
+            "✓ Conversion successful"
         </div>
     }
 }
@@ -198,7 +198,7 @@ fn FailedStage(#[prop(into)] error: String) -> impl IntoView {
     view! {
         <div class="bg-red-500/15 border border-red-500/30 rounded-xl p-3 \
                     text-red-300 text-sm">
-            <div class="font-bold mb-1">"فشل التحويل"</div>
+            <div class="font-bold mb-1">"Conversion failed"</div>
             <div class="text-xs break-all">{error}</div>
         </div>
     }
@@ -214,7 +214,7 @@ fn ConvertingStage(
     let pct = (progress * 100.0).round() as u32;
     let subtitle = if conversion_count > 1 {
         format!(
-            "ملف {} من {} — {}",
+            "File {} of {} — {}",
             conversion_index + 1,
             conversion_count,
             current_file
@@ -225,7 +225,7 @@ fn ConvertingStage(
 
     view! {
         <div class="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-4 space-y-2">
-            <div class="text-cyan-300 text-sm font-bold">"🎬 جاري تحويل الملف..."</div>
+            <div class="text-cyan-300 text-sm font-bold">"🎬 Converting file..."</div>
             <div class="text-xs text-gray-400 truncate font-mono">{subtitle}</div>
             <div class="w-full h-2 bg-white/10 rounded-full overflow-hidden">
                 <div

@@ -31,7 +31,7 @@ impl<T> ToastyErr<T> for toasty::Result<T> {
     fn srv(self) -> Result<T, ServerFnError> {
         self.map_err(|e| {
             leptos::logging::error!("[db] {e}");
-            ServerFnError::new("حدث خطأ داخلي")
+            ServerFnError::new("Internal error")
         })
     }
 }

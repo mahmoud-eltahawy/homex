@@ -8,11 +8,13 @@ const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 fn validate_poster(ext: &str, bytes: &[u8]) -> Result<(), ServerFnError> {
     let lower = ext.to_ascii_lowercase();
     if !ALLOWED_POSTER_EXTS.contains(&lower.as_str()) {
-        return Err(ServerFnError::new(format!("صيغة صورة غير مدعومة: .{ext}")));
+        return Err(ServerFnError::new(format!(
+            "Unsupported image format: .{ext}"
+        )));
     }
     if bytes.len() > MAX_POSTER_BYTES {
         return Err(ServerFnError::new(format!(
-            "حجم الصورة يتجاوز {} ميجابايت",
+            "Image size exceeds {} MB",
             MAX_POSTER_BYTES / 1024 / 1024
         )));
     }

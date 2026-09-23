@@ -11,7 +11,7 @@ pub async fn login(token: String) -> Result<(), ServerFnError> {
         return Err(ServerFnError::new("auth disabled"));
     };
     if token != expected {
-        return Err(ServerFnError::new("رمز غير صحيح"));
+        return Err(ServerFnError::new("Invalid token"));
     }
 
     let cookie = format!("homex_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000");
@@ -64,7 +64,7 @@ impl LazyRoute for LoginPage {
                     class="w-full max-w-sm bg-[#12121a] border border-white/10 rounded-2xl p-8 space-y-4 shadow-2xl"
                 >
                     <h1 class="text-lg font-bold text-white text-center">
-                        "HomeX — أدخل رمز الوصول"
+                        "HomeX — Enter access token"
                     </h1>
 
                     <input
@@ -85,7 +85,7 @@ impl LazyRoute for LoginPage {
                                    hover:from-cyan-400 hover:to-blue-400 \
                                    disabled:opacity-50 transition"
                     >
-                        {move || if submit.pending().get() { "جارٍ الدخول..." } else { "دخول" }}
+                        {move || if submit.pending().get() { "Logging in..." } else { "Login" }}
                     </button>
 
                     {move || error().map(|e| view! {

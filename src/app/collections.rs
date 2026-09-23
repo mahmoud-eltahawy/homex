@@ -80,7 +80,7 @@ pub async fn patch_collection_field(
     let mut state: AppState = expect_context();
 
     if field == "title" && value.as_deref().map(str::trim).unwrap_or("").is_empty() {
-        return Err(ServerFnError::new("العنوان مطلوب"));
+        return Err(ServerFnError::new("Title is required"));
     }
 
     let f = match field.as_str() {
@@ -165,7 +165,7 @@ pub async fn upload_collection_poster(
         }
     }
 
-    let (ext, bytes) = bytes.ok_or_else(|| ServerFnError::new("لم يتم استلام صورة"))?;
+    let (ext, bytes) = bytes.ok_or_else(|| ServerFnError::new("No image was received"))?;
 
     let collection = db::fetch_collection_detail(&mut state.db, &section_slug, id)
         .await

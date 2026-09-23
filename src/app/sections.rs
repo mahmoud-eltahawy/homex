@@ -10,7 +10,7 @@ pub async fn patch_section_title(id: u64, title: String) -> Result<(), ServerFnE
     let mut state: AppState = expect_context();
     let t = title.trim();
     if t.is_empty() {
-        return Err(ServerFnError::new("العنوان مطلوب"));
+        return Err(ServerFnError::new("Title is required"));
     }
     db::update_section_title(&mut state.db, id as i64, t)
         .await
@@ -70,7 +70,7 @@ pub async fn create_section(
 
     let title = title.trim().to_string();
     if title.is_empty() {
-        return Err(ServerFnError::new("الاسم مطلوب"));
+        return Err(ServerFnError::new("Name is required"));
     }
 
     let kind = MediaKind::try_from(media_kind.as_str()).map_err(ServerFnError::new)?;
@@ -87,7 +87,9 @@ pub async fn create_section(
             if attempt < 3 {
                 continue;
             }
-            return Err(ServerFnError::new("تعذّر توليد معرّف فريد للقسم"));
+            return Err(ServerFnError::new(
+                "Could not generate a unique section identifier",
+            ));
         }
 
         match db::insert_section(&mut state.db, &slug, &title, media_kind.as_str(), nested).await {
@@ -97,11 +99,13 @@ pub async fn create_section(
                 if attempt < 3 {
                     continue;
                 }
-                return Err(ServerFnError::new("تعذّر إنشاء القسم"));
+                return Err(ServerFnError::new("Could not create the section"));
             }
         }
     }
-    Err(ServerFnError::new("تعذّر توليد معرّف فريد للقسم"))
+    Err(ServerFnError::new(
+        "Could not generate a unique section identifier",
+    ))
 }
 
 #[server]
