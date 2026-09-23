@@ -167,7 +167,6 @@ fn make_poster_placeholder(is_audio: bool) -> ViewFn {
 
 #[allow(clippy::too_many_arguments)]
 fn make_playlist_adapter(
-    section_slug: String,
     playlist_title: String,
     poster: Option<String>,
     is_audio: bool,
@@ -185,7 +184,6 @@ fn make_playlist_adapter(
         selected_season,
         artwork: poster.clone(),
         playlist_title: playlist_title.clone(),
-        section_slug: section_slug.clone(),
         initial_item_id,
         on_rename,
         on_delete,
@@ -304,7 +302,6 @@ fn CollectionContent(
     let on_move = actions.move_callback();
 
     let playlist_adapter = make_playlist_adapter(
-        section_slug.clone(),
         edit.title.get_untracked(),
         edit.poster.get_untracked(),
         is_audio,
@@ -534,7 +531,6 @@ fn Playlist(
     selected_season: RwSignal<Option<i64>>,
     artwork: Option<String>,
     playlist_title: String,
-    section_slug: String,
     initial_item_id: Option<u64>,
     on_rename: Callback<(u64, String)>,
     on_delete: Callback<u64>,
@@ -603,10 +599,10 @@ fn Playlist(
                 current_idx=RwSignal::new(initial_index)
                 audio=audio
                 artwork=artwork.clone()
-                playlist_title=Some(playlist_title.clone())
-                on_rename=Some(on_rename)
-                on_delete=Some(on_delete)
-                on_move=Some(on_move)
+                playlist_title=playlist_title.clone()
+                on_rename=on_rename
+                on_delete=on_delete
+                on_move=on_move
                 show_download=true
             />
         })
@@ -615,8 +611,6 @@ fn Playlist(
     let selector = is_series.then(|| {
         view! { <SeasonBar seasons=all_seasons.clone() selected_season=selected_season/> }
     });
-
-    let _ = section_slug;
 
     view! {
         {selector}
