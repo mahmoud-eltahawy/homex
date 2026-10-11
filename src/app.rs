@@ -5,6 +5,7 @@ use crate::app::{
 };
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_router::path;
 use leptos_router::{
     Lazy,
     components::{ParentRoute, Route, Router, Routes},
@@ -33,20 +34,6 @@ pub mod server;
 mod upload_api;
 mod upload_job;
 
-// ─── Route table ──────────────────────────────────────────────────────────
-//
-// `StaticSegment<T>` and `ParamSegment<T>` are generic over `T: AsPath`.
-// Rather than threading raw `&'static str` literals through the route
-// table, we define two closed enums and implement `AsPath` for each. That
-// makes the set of static pieces and parameter names exhaustive and
-// typo-proof, and lets the route consts read like the original `path!`
-// invocations did.
-//
-// The `s` / `p` helpers are `const fn` constructors so the const route
-// tuples stay short.
-
-mod route;
-
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -73,12 +60,12 @@ pub fn App() -> impl IntoView {
         <Title text=APP_TITLE/>
         <Router>
             <Routes fallback=|| "Page not found.".into_view()>
-                <Route path=route::LOGIN view={Lazy::<LoginPage>::new()}/>
-                <ParentRoute path=route::PARENT view=Layout>
-                    <Route path=route::ROOT       view={Lazy::<HomePage>::new()}/>
-                    <Route path=route::section()    view={Lazy::<SectionListingPage>::new()}/>
-                    <Route path=route::collection() view={Lazy::<CollectionDetailPage>::new()}/>
-                    <Route path=route::item()       view={Lazy::<CollectionDetailPage>::new()}/>
+                <Route path=path!("/login") view={Lazy::<LoginPage>::new()}/>
+                <ParentRoute path=path!("") view=Layout>
+                    <Route path=path!("/") view={Lazy::<HomePage>::new()}/>
+                    <Route path=path!("/s/:slug") view={Lazy::<SectionListingPage>::new()}/>
+                    <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
+                    <Route path=path!("/s/:slug/:id/item/:item_id") view={Lazy::<CollectionDetailPage>::new()}/>
                 </ParentRoute>
             </Routes>
         </Router>

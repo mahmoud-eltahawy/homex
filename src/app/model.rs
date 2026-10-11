@@ -1,5 +1,6 @@
-use crate::app::constants::routes;
 use serde::{Deserialize, Serialize};
+
+use crate::app::constants::routes;
 
 // ─── MediaKind ────────────────────────────────────────────────────────────
 

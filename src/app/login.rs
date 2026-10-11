@@ -1,4 +1,3 @@
-use crate::app::constants::routes;
 use leptos::prelude::*;
 use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
 
@@ -48,7 +47,7 @@ impl LazyRoute for LoginPage {
 
         Effect::new(move |_| {
             if matches!(submit.value().get(), Some(Ok(()))) {
-                navigate(routes::HOME, Default::default());
+                navigate("/", Default::default());
             }
         });
 

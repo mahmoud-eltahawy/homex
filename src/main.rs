@@ -98,7 +98,8 @@ fn build_router(
 ) -> axum::Router {
     use axum::{Extension, Router, extract::DefaultBodyLimit, middleware, routing::get};
     use homex::app::constants::{routes, storage};
-    use homex::app::{App, server::auth, server::routes::stream_media, shell};
+    use homex::app::shell;
+    use homex::app::{App, server::auth, server::routes::stream_media};
     use leptos::prelude::*;
     use leptos_axum::LeptosRoutes;
     use leptos_axum::generate_route_list;
@@ -117,6 +118,8 @@ fn build_router(
                 move || provide_context(state.clone())
             },
             {
+                use homex::app::shell;
+
                 let leptos_options = leptos_options.clone();
                 move || shell(leptos_options.clone())
             },
