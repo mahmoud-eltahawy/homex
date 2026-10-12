@@ -123,24 +123,11 @@ pub fn collections_paginated(
         },
     );
 
-    let slug_count = slug.clone();
+    let slug_count = slug;
     let count = Resource::new(
         move || (slug_count(), search.get()),
         |(s, q)| fetch_collections_count(s, q),
     );
 
     (items, count)
-}
-
-#[derive(Clone, Copy)]
-struct Bundle<T>(T);
-
-pub trait ContextBundle: Clone + Send + Sync + 'static {
-    fn provide(self) {
-        provide_context(Bundle(self));
-    }
-
-    fn expect() -> Self {
-        expect_context::<Bundle<Self>>().0
-    }
 }

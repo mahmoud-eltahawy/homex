@@ -1,4 +1,3 @@
-use crate::app::common::ContextBundle;
 use crate::app::constants::HTML_DIR;
 use crate::app::icons::icon_for;
 use crate::app::{
@@ -13,15 +12,14 @@ use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
 type Sections = Resource<Result<Vec<Section>, ServerFnError>>;
-impl ContextBundle for Sections {}
 
 #[component(transparent)]
 pub fn Layout() -> impl IntoView {
     let edit_on = RwSignal::new(false);
     provide_context(EditMode(edit_on));
 
-    let sections = Resource::new(|| (), |_| fetch_sections());
-    Sections::provide(sections);
+    let sections: Sections = Resource::new(|| (), |_| fetch_sections());
+    provide_context(sections);
 
     // Shared tag-name cache for autocompletion in every `TagEditor`.
     TagsCache::new().provide();
@@ -128,7 +126,7 @@ where
     F: Fn(Section) -> V + Copy + Send + Sync + 'static,
     V: IntoView + 'static,
 {
-    let sections = Sections::expect();
+    let sections: Sections = expect_context();
     view! {
         <Transition fallback=|| ()>
             {move || sections.get().map(|r| {
