@@ -234,37 +234,55 @@ fn SectionHeader(
         let _ = state.tags_action.dispatch((id, names));
     });
 
+    let delete_error = {
+        let action = state.delete_action;
+        Signal::derive(move || {
+            action
+                .value()
+                .get()
+                .and_then(|r| r.err())
+                .map(|e| e.to_string())
+        })
+    };
+
     view! {
-        <div class="flex items-center justify-between mb-6 gap-3">
-            <div class="flex items-center gap-3 min-w-0 flex-1 flex-wrap">
-                <Show
-                    when=move || edit_on.get()
-                    fallback=move || view! {
-                        <SectionHeaderViewMode
-                            href=href_display.clone()
+        <div class="mb-6">
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0 flex-1 flex-wrap">
+                    <Show
+                        when=move || edit_on.get()
+                        fallback=move || view! {
+                            <SectionHeaderViewMode
+                                href=href_display.clone()
+                                title=state.title
+                                count
+                                kind
+                                nested
+                            />
+                        }
+                    >
+                        <SectionHeaderEditMode
                             title=state.title
+                            on_commit=state.commit_title
                             count
                             kind
                             nested
                         />
-                    }
-                >
-                    <SectionHeaderEditMode
-                        title=state.title
-                        on_commit=state.commit_title
-                        count
-                        kind
-                        nested
-                    />
-                </Show>
-                <TagEditor tags=tags_signal on_commit=on_tags_commit/>
+                    </Show>
+                    <TagEditor tags=tags_signal on_commit=on_tags_commit/>
+                </div>
+                <SectionHeaderActions
+                    view_all_href=href_actions
+                    edit_on=edit_on
+                    on_delete=on_delete
+                    folded=folded
+                />
             </div>
-            <SectionHeaderActions
-                view_all_href=href_actions
-                edit_on=edit_on
-                on_delete=on_delete
-                folded=folded
-            />
+            <Show when=move || delete_error.get().is_some()>
+                <div class="text-red-300 text-xs mt-2 text-right">
+                    {move || delete_error.get().unwrap_or_default()}
+                </div>
+            </Show>
         </div>
     }
 }

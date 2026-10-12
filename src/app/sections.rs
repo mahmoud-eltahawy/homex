@@ -135,7 +135,16 @@ pub async fn update_section(
 #[server]
 pub async fn delete_section(id: u64) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
+    use crate::app::server::db::DeleteSectionOutcome;
+
     let mut state: AppState = expect_context();
-    db::delete_section(&mut state.db, id as i64).await.srv()?;
-    Ok(())
+    match db::delete_section(&mut state.db, id as i64).await.srv()? {
+        DeleteSectionOutcome::Deleted => Ok(()),
+        DeleteSectionOutcome::NotEmpty { collection_count } => Err(ServerFnError::new(format!(
+            "{} ({} collection{})",
+            messages::SECTION_NOT_EMPTY,
+            collection_count,
+            if collection_count == 1 { "" } else { "s" },
+        ))),
+    }
 }
