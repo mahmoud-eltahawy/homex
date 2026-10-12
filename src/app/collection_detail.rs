@@ -1,15 +1,15 @@
 use std::collections::BTreeSet;
 
 use leptos::{either::Either, prelude::*};
-use leptos_router::{LazyRoute, lazy_route};
+use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
 use web_sys::wasm_bindgen::JsCast;
 
 use leptos_media_player::{MediaItem, WatchPage};
 
 use crate::app::{
     collections::{
-        delete_item, fetch_collection_detail, fetch_items, move_item, patch_collection_field,
-        patch_collection_tags, patch_item_title, upload_collection_poster,
+        delete_item, fetch_collection_detail, fetch_items, move_collection_to_section, move_item,
+        patch_collection_field, patch_collection_tags, patch_item_title, upload_collection_poster,
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
@@ -275,6 +275,7 @@ fn CollectionContent(
     let is_series = section.nested && !is_audio;
 
     let selected_season = RwSignal::new(None::<i64>);
+    let edit_on = use_edit_mode();
 
     let actions = CollectionActions::new(items);
     let edit = CollectionEditState::new(&collection, actions.patch);
@@ -319,6 +320,8 @@ fn CollectionContent(
         on_move,
     );
 
+    let slug_for_picker = section_slug.clone();
+
     view! {
         <DetailShell poster=poster_for_shell>
             <DetailHero poster=view! {
@@ -330,6 +333,15 @@ fn CollectionContent(
                 />
             }>
                 <HeroBadge label=badge_label.to_string() icon=icon/>
+                <Show when=move || edit_on.get()>
+                    <div class="mb-3">
+                        <MoveCollectionPicker
+                            collection_id=collection_id
+                            current_slug=slug_for_picker.clone()
+                            media_kind=section.media_kind()
+                        />
+                    </div>
+                </Show>
                 <EditableText
                     value=Signal::derive(move || edit.title.get())
                     on_commit=edit.commit_title
@@ -701,5 +713,67 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
             </select>
             {add_button}
         </div>
+    }
+}
+
+#[component]
+fn MoveCollectionPicker(
+    collection_id: u64,
+    current_slug: String,
+    media_kind: MediaKind,
+) -> impl IntoView {
+    let sections: Resource<Result<Vec<Section>, ServerFnError>> = expect_context();
+    let navigate = use_navigate();
+
+    let action =
+        Action::new_local(|(id, to): &(u64, String)| move_collection_to_section(*id, to.clone()));
+
+    let destination = RwSignal::new(String::new());
+
+    let current_for_options = current_slug.clone();
+    let options: Signal<Vec<Section>> = Signal::derive(move || {
+        sections
+            .get()
+            .and_then(|r| r.ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| s.media_kind() == media_kind && s.slug != current_for_options)
+            .collect()
+    });
+
+    let current_for_change = current_slug;
+    let on_change = move |ev: web_sys::Event| {
+        let to = event_target_value(&ev);
+        if to.is_empty() || to == current_for_change {
+            return;
+        }
+        destination.set(to.clone());
+        action.dispatch((collection_id, to));
+    };
+
+    Effect::new(move |_| {
+        if matches!(action.value().get(), Some(Ok(()))) {
+            let to = destination.get_untracked();
+            if !to.is_empty() {
+                navigate(&format!("/s/{to}"), Default::default());
+            }
+        }
+    });
+
+    view! {
+        <Show when=move || !options.get().is_empty()>
+            <select
+                on:change=on_change.clone()
+                disabled=move || action.pending().get()
+                class="bg-white/10 backdrop-blur-md text-white text-xs rounded-lg \
+                       py-1 px-2 focus:outline-none focus:ring-1 focus:ring-cyan-400 \
+                       disabled:opacity-50"
+            >
+                <option value="">"Move to…"</option>
+                <For each=move || options.get() key=|s| s.slug.clone() let:s>
+                    <option value=s.slug.clone()>{s.title.clone()}</option>
+                </For>
+            </select>
+        </Show>
     }
 }

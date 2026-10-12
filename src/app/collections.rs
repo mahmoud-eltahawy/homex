@@ -219,3 +219,38 @@ pub async fn move_item(id: u64, is_up: bool) -> Result<(), ServerFnError> {
         .srv()?;
     Ok(())
 }
+
+#[server]
+pub async fn move_collection_to_section(
+    collection_id: u64,
+    to_section_slug: String,
+) -> Result<(), ServerFnError> {
+    use crate::app::server::db::{self, CollectionField};
+    use crate::app::server::{AppState, poster};
+
+    let mut state: AppState = expect_context();
+    let mv = db::move_collection_to_section(&mut state.db, collection_id as i64, &to_section_slug)
+        .await
+        .srv()?;
+
+    if let Some(url) = mv.poster_url.as_deref()
+        && let Some(new_url) = poster::move_poster_to_subdir(
+            &state.config.storage.data_dir,
+            &mv.from_slug,
+            &to_section_slug,
+            url,
+        )
+        .await
+    {
+        db::update_collection_field(
+            &mut state.db,
+            collection_id as i64,
+            CollectionField::Poster,
+            Some(&new_url),
+        )
+        .await
+        .srv()?;
+    }
+
+    Ok(())
+}

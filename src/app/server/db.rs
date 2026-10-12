@@ -692,3 +692,36 @@ pub async fn swap_item_order(db: &mut Db, id: i64, is_up: bool) -> toasty::Resul
     tx.commit().await?;
     Ok(())
 }
+
+pub struct CollectionMove {
+    pub from_slug: String,
+    pub poster_url: Option<String>,
+}
+
+pub async fn move_collection_to_section(
+    db: &mut Db,
+    collection_id: i64,
+    to_section_slug: &str,
+) -> toasty::Result<CollectionMove> {
+    let to_section =
+        SectionRow::filter(SectionRow::fields().slug().eq(to_section_slug.to_string()))
+            .first()
+            .exec(db)
+            .await?
+            .ok_or_else(|| err_not_found("section"))?;
+
+    let mut c = CollectionRow::get_by_id(db, &(collection_id as u64)).await?;
+    let from_slug = c.section_slug.clone();
+    let poster_url = c.poster.clone();
+
+    c.update()
+        .section_id(to_section.id)
+        .section_slug(to_section.slug.clone())
+        .exec(db)
+        .await?;
+
+    Ok(CollectionMove {
+        from_slug,
+        poster_url,
+    })
+}
