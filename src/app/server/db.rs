@@ -45,6 +45,13 @@ fn err_not_found(what: &str) -> toasty::Error {
 
 // ─── Tags ─────────────────────────────────────────────────────────────────
 
+pub async fn fetch_all_tags(db: &mut Db) -> toasty::Result<Vec<Tag>> {
+    Tag::all()
+        .order_by(Tag::fields().name().asc())
+        .exec(db)
+        .await
+}
+
 /// Find a tag by name, or create it. Called inside a tag-set transaction.
 async fn upsert_tag_tx(tx: &mut toasty::Transaction<'_>, name: &str) -> toasty::Result<Tag> {
     if let Some(t) = Tag::filter(Tag::fields().name().eq(name.to_string()))

@@ -6,6 +6,7 @@ use crate::app::{
     inline_edit::{EditMode, EditModeToggle},
     model::Section,
     sections::fetch_sections,
+    tags::TagsCache,
 };
 use leptos::either::Either;
 use leptos::prelude::*;
@@ -21,6 +22,9 @@ pub fn Layout() -> impl IntoView {
 
     let sections = Resource::new(|| (), |_| fetch_sections());
     Sections::provide(sections);
+
+    // Shared tag-name cache for autocompletion in every `TagEditor`.
+    TagsCache::new().provide();
 
     view! {
         <div class="flex flex-col min-h-screen bg-[#0a0a0f] text-white font-sans antialiased" dir=HTML_DIR>
