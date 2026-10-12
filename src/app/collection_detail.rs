@@ -8,20 +8,22 @@ use leptos_media_player::{MediaItem, WatchPage};
 
 use crate::app::{
     collections::{
-        delete_item, fetch_collection_detail, fetch_items, move_collection_to_section, move_item,
-        patch_collection_field, patch_collection_tags, patch_item_title, upload_collection_poster,
+        delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
+        move_collection_to_section, move_item, move_items_to_collection, patch_collection_field,
+        patch_collection_tags, patch_item_title, upload_collection_poster,
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
-    model::{Collection, Item, MediaKind, Section},
+    model::{Collection, CollectionSummary, Item, MediaKind, Section},
     resource_view::ResourceView,
     route_params::{use_optional_u64_param, use_string_param, use_u64_param},
     sections::fetch_section_by_slug,
     tags::TagEditor,
     upload_job::{UploadJob, UploadProgress},
 };
+use std::sync::Arc;
 
 // ─── Multipart form field names (client-side) ─────────────────────────────
 
@@ -276,6 +278,7 @@ fn CollectionContent(
 
     let selected_season = RwSignal::new(None::<i64>);
     let edit_on = use_edit_mode();
+    let organizing = RwSignal::new(false);
 
     let actions = CollectionActions::new(items);
     let edit = CollectionEditState::new(&collection, actions.patch);
@@ -292,8 +295,12 @@ fn CollectionContent(
         }
     });
 
+    let slug_for_poster = section_slug.clone();
+    let slug_for_picker = section_slug.clone();
+    let slug_for_append = section_slug;
+
     let on_poster_file = use_poster_upload(
-        section_slug.clone(),
+        slug_for_poster,
         collection_id,
         edit.poster,
         actions.poster_upload,
@@ -307,8 +314,9 @@ fn CollectionContent(
     let icon = icon_for(section.media_kind(), section.nested);
     let badge_label = section.badge_label();
     let on_move = actions.move_callback();
+    let kind = section.media_kind();
 
-    let playlist_adapter = make_playlist_adapter(
+    let playlist_adapter = Arc::new(make_playlist_adapter(
         edit.title.get_untracked(),
         edit.poster.get_untracked(),
         is_audio,
@@ -318,9 +326,7 @@ fn CollectionContent(
         on_rename,
         on_delete,
         on_move,
-    );
-
-    let slug_for_picker = section_slug.clone();
+    ));
 
     view! {
         <DetailShell poster=poster_for_shell>
@@ -334,12 +340,27 @@ fn CollectionContent(
             }>
                 <HeroBadge label=badge_label.to_string() icon=icon/>
                 <Show when=move || edit_on.get()>
-                    <div class="mb-3">
+                    <div class="mb-3 flex items-center gap-2 flex-wrap">
                         <MoveCollectionPicker
                             collection_id=collection_id
                             current_slug=slug_for_picker.clone()
-                            media_kind=section.media_kind()
+                            media_kind=kind
                         />
+                        <button
+                            type="button"
+                            on:click=move |_| organizing.update(|o| *o = !*o)
+                            class=move || format!(
+                                "text-xs px-3 py-1 rounded-lg border transition \
+                                 {}",
+                                if organizing.get() {
+                                    "bg-cyan-500/20 border-cyan-400/50 text-white"
+                                } else {
+                                    "bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white"
+                                }
+                            )
+                        >
+                            {move || if organizing.get() { "Done organizing" } else { "Organize items" }}
+                        </button>
                     </div>
                 </Show>
                 <EditableText
@@ -371,7 +392,7 @@ fn CollectionContent(
                 </div>
                 <AppendItems
                     upload=upload
-                    section_slug=section_slug.clone()
+                    section_slug=slug_for_append
                     collection_id=collection_id
                     is_audio=is_audio
                     is_series=is_series
@@ -380,11 +401,37 @@ fn CollectionContent(
             </DetailHero>
 
             <div class="mt-10">
-                <ResourceView
-                    resource=items
-                    view_fn=Playlist
-                    adapter=playlist_adapter
-                />
+                {{
+                    let adapter_source = Arc::clone(&playlist_adapter);
+                    move || {
+                        if organizing.get() {
+                            Either::Left(
+                                view! {
+                                    <OrganizeItemsPanel
+                                        items=items
+                                        current_collection_id=collection_id
+                                        media_kind=kind
+                                        on_close=Callback::new(move |_| organizing.set(false))
+                                    />
+                                }
+                                .into_any(),
+                            )
+                        } else {
+                            let adapter = Arc::clone(&adapter_source);
+                            let adapter_fn = move |v: Vec<Item>| adapter(v);
+                            Either::Right(
+                                view! {
+                                    <ResourceView
+                                        resource=items
+                                        view_fn=Playlist
+                                        adapter=adapter_fn
+                                    />
+                                }
+                                .into_any(),
+                            )
+                        }
+                    }
+                }}
             </div>
         </DetailShell>
     }
@@ -775,5 +822,189 @@ fn MoveCollectionPicker(
                 </For>
             </select>
         </Show>
+    }
+}
+
+#[component]
+fn OrganizeItemsPanel(
+    items: Resource<Result<Vec<Item>, ServerFnError>>,
+    current_collection_id: u64,
+    media_kind: MediaKind,
+    on_close: Callback<()>,
+) -> impl IntoView {
+    let kind_str = media_kind.as_str().to_string();
+    let destinations: Resource<Result<Vec<CollectionSummary>, ServerFnError>> =
+        Resource::new(move || kind_str.clone(), fetch_collection_summaries);
+
+    let selected: RwSignal<Vec<u64>> = RwSignal::new(Vec::new());
+    let destination_id: RwSignal<Option<u64>> = RwSignal::new(None);
+
+    let move_action =
+        Action::new_local(|(ids, to): &(Vec<u64>, u64)| move_items_to_collection(ids.clone(), *to));
+
+    Effect::new(move |_| {
+        if matches!(move_action.value().get(), Some(Ok(()))) {
+            items.refetch();
+            selected.set(Vec::new());
+            destination_id.set(None);
+            on_close.run(());
+        }
+    });
+
+    let toggle_all = Callback::new(move |_: ()| {
+        if !selected.get_untracked().is_empty() {
+            selected.set(Vec::new());
+            return;
+        }
+        if let Some(Ok(list)) = items.get_untracked() {
+            selected.set(list.into_iter().map(|i| i.id).collect());
+        }
+    });
+
+    let on_submit = move |_| {
+        let ids = selected.get_untracked();
+        let Some(to) = destination_id.get_untracked() else {
+            return;
+        };
+        if ids.is_empty() {
+            return;
+        }
+        move_action.dispatch((ids, to));
+    };
+
+    view! {
+        <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4 md:p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-white">"Move items to another collection"</h3>
+                <button
+                    type="button"
+                    on:click=move |_| on_close.run(())
+                    class="text-gray-400 hover:text-white transition text-sm"
+                >
+                    "Close"
+                </button>
+            </div>
+
+            <div class="flex items-center gap-3 mb-3 text-sm">
+                <button
+                    type="button"
+                    on:click=move |_| toggle_all.run(())
+                    class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 transition"
+                >
+                    {move || if selected.get().is_empty() { "Select all" } else { "Clear" }}
+                </button>
+                <span class="text-gray-500">
+                    {move || format!("{} selected", selected.get().len())}
+                </span>
+            </div>
+
+            {
+                move || match items.get() {
+                    None => view! {
+                        <div class="py-8 text-center text-gray-500 text-sm">"Loading…"</div>
+                    }.into_any(),
+                    Some(Err(e)) => view! {
+                        <div class="py-8 text-center text-red-300 text-sm">{e.to_string()}</div>
+                    }.into_any(),
+                    Some(Ok(list)) if list.is_empty() => view! {
+                        <div class="py-8 text-center text-gray-500 text-sm">
+                            "No items to move."
+                        </div>
+                    }.into_any(),
+                    Some(Ok(list)) => view! {
+                        <div class="space-y-px max-h-[400px] overflow-auto rounded-lg border border-white/5">
+                            <For each=move || list.clone() key=|i| i.id let:item>
+                                {
+                                    let id = item.id;
+                                    let label = item.display_title();
+                                    let season = item.season_number;
+                                    view! {
+                                        <label class="flex items-center gap-3 px-3 py-2 hover:bg-white/5 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                prop:checked=move || selected.get().contains(&id)
+                                                on:change=move |_| {
+                                                    selected.update(|ids| {
+                                                        if let Some(pos) = ids.iter().position(|x| *x == id) {
+                                                            ids.remove(pos);
+                                                        } else {
+                                                            ids.push(id);
+                                                        }
+                                                    });
+                                                }
+                                                class="accent-cyan-400 w-4 h-4 shrink-0"
+                                            />
+                                            <span class="text-sm text-white truncate flex-1">
+                                                {label}
+                                            </span>
+                                            {season.map(|s| view! {
+                                                <span class="text-[10px] font-mono text-gray-500 shrink-0">
+                                                    {format!("S{s:02}")}
+                                                </span>
+                                            })}
+                                        </label>
+                                    }
+                                }
+                            </For>
+                        </div>
+                    }.into_any(),
+                }
+            }
+
+            <div class="mt-4 flex items-center gap-3 flex-wrap">
+                <select
+                    on:change=move |ev| {
+                        let v = event_target_value(&ev);
+                        destination_id.set(v.parse::<u64>().ok());
+                    }
+                    class="bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
+                           focus:outline-none focus:ring-1 focus:ring-cyan-400 min-w-64"
+                >
+                    <option value="">"Choose destination…"</option>
+                    {
+                        move || destinations
+                            .get()
+                            .and_then(|r| r.ok())
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|c| c.id != current_collection_id)
+                            .map(|c| view! {
+                                <option value=c.id.to_string()>
+                                    {format!("{} — {}", c.section_title, c.title)}
+                                </option>
+                            })
+                            .collect_view()
+                    }
+                </select>
+
+                <button
+                    type="button"
+                    on:click=on_submit
+                    disabled=move || {
+                        selected.get().is_empty()
+                            || destination_id.get().is_none()
+                            || move_action.pending().get()
+                    }
+                    class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 \
+                           hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
+                           disabled:opacity-50 transition"
+                >
+                    {move || {
+                        let n = selected.get().len();
+                        if move_action.pending().get() {
+                            "Moving…".to_string()
+                        } else if n == 0 {
+                            "Move items".to_string()
+                        } else {
+                            format!("Move {n} item{}", if n == 1 { "" } else { "s" })
+                        }
+                    }}
+                </button>
+
+                {move || move_action.value().get().and_then(|r| r.err()).map(|e| view! {
+                    <span class="text-red-300 text-sm">{e.to_string()}</span>
+                })}
+            </div>
+        </div>
     }
 }

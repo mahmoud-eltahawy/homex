@@ -1,10 +1,10 @@
-use toasty::Db;
-
 use super::Config;
 use crate::app::model::{
-    Collection, CollectionRow, CollectionTag, File, Item, Section, SectionRow, SectionTag, Tag,
-    canonicalize_tags, parse_search,
+    Collection, CollectionRow, CollectionSummary, CollectionTag, File, Item, Section, SectionRow,
+    SectionTag, Tag, canonicalize_tags, parse_search,
 };
+use std::collections::HashMap;
+use toasty::Db;
 
 // ─── Pool init ────────────────────────────────────────────────────────────
 
@@ -724,4 +724,142 @@ pub async fn move_collection_to_section(
         from_slug,
         poster_url,
     })
+}
+
+/// All collections in sections of the given `media_kind`, ordered by
+/// `(section_title, title)`. Used to populate the destination dropdown.
+pub async fn fetch_collection_summaries(
+    db: &mut Db,
+    media_kind: &str,
+) -> toasty::Result<Vec<CollectionSummary>> {
+    let sections = SectionRow::filter(SectionRow::fields().media_kind().eq(media_kind.to_string()))
+        .exec(db)
+        .await?;
+
+    let titles: HashMap<String, String> = sections
+        .iter()
+        .map(|s| (s.slug.clone(), s.title.clone()))
+        .collect();
+
+    let mut out: Vec<CollectionSummary> = CollectionRow::all()
+        .exec(db)
+        .await?
+        .into_iter()
+        .filter(|c| titles.contains_key(&c.section_slug))
+        .map(|c| CollectionSummary {
+            section_title: titles.get(&c.section_slug).cloned().unwrap_or_default(),
+            id: c.id,
+            title: c.title,
+            section_slug: c.section_slug,
+        })
+        .collect();
+
+    out.sort_by(|a, b| {
+        a.section_title
+            .cmp(&b.section_title)
+            .then(a.title.cmp(&b.title))
+    });
+    Ok(out)
+}
+
+/// Move a batch of items into `to_collection_id`. Renumbers the destination
+/// per-season (append) and compacts the source(s) per-season. Both
+/// collections' `items_count` are updated inside the same transaction.
+pub async fn move_items_to_collection(
+    db: &mut Db,
+    item_ids: &[u64],
+    to_collection_id: u64,
+) -> toasty::Result<()> {
+    if item_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut tx = db.transaction().await?;
+
+    // Ensure destination exists.
+    let _ = CollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
+
+    // Fetch items that actually exist and aren't already at the destination.
+    let mut moved: Vec<Item> = Vec::with_capacity(item_ids.len());
+    for &id in item_ids {
+        if let Ok(item) = Item::get_by_id(&mut tx, &id).await
+            && item.collection_id != to_collection_id
+        {
+            moved.push(item);
+        }
+    }
+    if moved.is_empty() {
+        return Ok(());
+    }
+
+    // How many items left each source collection.
+    let mut from_counts: HashMap<u64, i64> = HashMap::new();
+    for item in &moved {
+        *from_counts.entry(item.collection_id).or_insert(0) += 1;
+    }
+
+    // Append each moved item to the destination, numbering within its season.
+    for item in &moved {
+        let mut q = Item::filter(Item::fields().collection_id().eq(to_collection_id));
+        q = match item.season_number {
+            Some(s) => q.filter(Item::fields().season_number().eq(s)),
+            None => q.filter(Item::fields().season_number().is_none()),
+        };
+        let next = q
+            .order_by(Item::fields().number().desc())
+            .limit(1)
+            .exec(&mut tx)
+            .await?
+            .first()
+            .map(|i| i.number + 1)
+            .unwrap_or(0);
+
+        let mut m = Item::get_by_id(&mut tx, &item.id).await?;
+        m.update()
+            .collection_id(to_collection_id)
+            .number(next)
+            .exec(&mut tx)
+            .await?;
+    }
+
+    // Compact each source collection, per season.
+    for &from_id in from_counts.keys() {
+        let remaining = Item::filter(Item::fields().collection_id().eq(from_id))
+            .order_by((
+                Item::fields().season_number().asc(),
+                Item::fields().number().asc(),
+                Item::fields().id().asc(),
+            ))
+            .exec(&mut tx)
+            .await?;
+
+        let mut counters: HashMap<Option<i64>, i64> = HashMap::new();
+        for item in remaining {
+            let n = counters.entry(item.season_number).or_insert(0);
+            if item.number != *n {
+                let mut m = Item::get_by_id(&mut tx, &item.id).await?;
+                m.update().number(*n).exec(&mut tx).await?;
+            }
+            *n += 1;
+        }
+    }
+
+    // Update the denormalized counters.
+    for (&from_id, &count) in &from_counts {
+        let mut c = CollectionRow::get_by_id(&mut tx, &from_id).await?;
+        let items_count = c.items_count;
+        c.update()
+            .items_count((items_count - count).max(0))
+            .exec(&mut tx)
+            .await?;
+    }
+    let mut to_c = CollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
+    let items_count = to_c.items_count;
+    to_c.update()
+        .items_count(items_count + moved.len() as i64)
+        .exec(&mut tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(())
 }

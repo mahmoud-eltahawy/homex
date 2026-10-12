@@ -254,3 +254,27 @@ pub async fn move_collection_to_section(
 
     Ok(())
 }
+
+#[server]
+pub async fn fetch_collection_summaries(
+    media_kind: String,
+) -> Result<Vec<crate::app::model::CollectionSummary>, ServerFnError> {
+    use crate::app::server::AppState;
+    let mut state: AppState = expect_context();
+    db::fetch_collection_summaries(&mut state.db, &media_kind)
+        .await
+        .srv()
+}
+
+#[server]
+pub async fn move_items_to_collection(
+    item_ids: Vec<u64>,
+    to_collection_id: u64,
+) -> Result<(), ServerFnError> {
+    use crate::app::server::AppState;
+    let mut state: AppState = expect_context();
+    db::move_items_to_collection(&mut state.db, &item_ids, to_collection_id)
+        .await
+        .srv()?;
+    Ok(())
+}

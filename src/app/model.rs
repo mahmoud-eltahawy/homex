@@ -320,3 +320,13 @@ impl Item {
         routes::item(section_slug, self.collection_id, self.id)
     }
 }
+
+/// Lightweight shape used by the "move items" destination picker.
+/// No tags, no timestamps — just enough to identify a target in a dropdown.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollectionSummary {
+    pub id: u64,
+    pub title: String,
+    pub section_slug: String,
+    pub section_title: String,
+}
