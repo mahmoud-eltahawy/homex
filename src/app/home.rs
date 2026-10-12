@@ -9,11 +9,12 @@ use crate::app::{
     },
     icons::{DeleteIcon, ViewAllIcon, icon_for},
     inline_edit::{EditableText, use_edit_mode},
-    model::{Collection, MediaKind, Section},
+    model::{Collection, MediaKind, Section, Tag},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
     search::SearchBar,
     sections::{create_section, delete_section, fetch_sections, patch_section_title},
+    tags::TagList,
 };
 
 const MEDIA_LIST_SIZE: usize = 6;
@@ -219,6 +220,7 @@ fn SectionHeader(
         let _ = state.delete_action.dispatch(id);
     });
     let nested = section.nested;
+    let tags: Vec<Tag> = section.tags.clone();
 
     view! {
         <div class="flex items-center justify-between mb-6 gap-3">
@@ -231,6 +233,7 @@ fn SectionHeader(
                         count
                         kind
                         nested
+                        tags=tags.clone()
                     />
                 }
             >
@@ -259,6 +262,7 @@ fn SectionHeaderViewMode(
     count: usize,
     kind: MediaKind,
     nested: bool,
+    tags: Vec<Tag>,
 ) -> impl IntoView {
     view! {
         <a
@@ -272,6 +276,7 @@ fn SectionHeaderViewMode(
             <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
                 {count}
             </span>
+            <TagList tags=tags max=3/>
         </a>
     }
 }

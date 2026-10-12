@@ -1,6 +1,7 @@
 use crate::app::collections::{fetch_collections, fetch_collections_count};
 use crate::app::icons::EmptyStateIcon;
 use crate::app::model::Collection;
+use crate::app::tags::TagList;
 use leptos::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -34,6 +35,7 @@ pub fn CollectionCard(collection: Collection) -> impl IntoView {
     let title = collection.title.clone();
     let poster = collection.poster.clone();
     let count = collection.items_count;
+    let tags = collection.tags.clone();
 
     view! {
         <a
@@ -52,8 +54,9 @@ pub fn CollectionCard(collection: Collection) -> impl IntoView {
                     {count}
                 </div>
             </div>
-            <div class="p-3">
+            <div class="p-3 space-y-1.5">
                 <div class="text-sm text-white font-semibold truncate">{title}</div>
+                <TagList tags=tags max=2/>
             </div>
         </a>
     }

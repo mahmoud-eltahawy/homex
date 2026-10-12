@@ -19,6 +19,7 @@ use crate::app::{
     resource_view::ResourceView,
     route_params::{use_optional_u64_param, use_string_param, use_u64_param},
     sections::fetch_section_by_slug,
+    tags::TagList,
     upload_job::{UploadJob, UploadProgress},
 };
 
@@ -267,6 +268,7 @@ fn CollectionContent(
     initial_item_id: Option<u64>,
 ) -> impl IntoView {
     let collection_id = collection.id;
+    let collection_tags = collection.tags.clone();
     let section_slug = section.slug.clone();
     let is_audio = matches!(section.media_kind(), MediaKind::Audio);
     let is_series = section.nested && !is_audio;
@@ -345,6 +347,9 @@ fn CollectionContent(
                         placeholder="Add a description..."
                         class="text-gray-300 leading-relaxed text-base sm:text-lg"
                     />
+                </div>
+                <div class="mt-4 max-w-2xl">
+                    <TagList tags=collection_tags/>
                 </div>
                 <AppendItems
                     upload=upload

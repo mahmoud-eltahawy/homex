@@ -18,6 +18,7 @@ mod layout;
 mod login;
 mod section_listing;
 mod sections;
+mod tags;
 
 mod common;
 pub mod constants;
