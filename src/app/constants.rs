@@ -110,4 +110,7 @@ pub mod messages {
     pub const UPLOAD_STARTED_BG: &str = "Upload and conversion started in the background";
     pub const SECTION_NOT_EMPTY: &str =
         "Section is not empty — move or delete its collections first";
+
+    pub const MEDIA_KIND_MISMATCH: &str =
+        "Cannot move a collection across media kinds (video ↔ audio)";
 }

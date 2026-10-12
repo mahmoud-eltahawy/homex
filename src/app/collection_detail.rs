@@ -807,20 +807,35 @@ fn MoveCollectionPicker(
         }
     });
 
+    let error = Signal::derive(move || {
+        action
+            .value()
+            .get()
+            .and_then(|r| r.err())
+            .map(|e| e.to_string())
+    });
+
     view! {
         <Show when=move || !options.get().is_empty()>
-            <select
-                on:change=on_change.clone()
-                disabled=move || action.pending().get()
-                class="bg-white/10 backdrop-blur-md text-white text-xs rounded-lg \
-                       py-1 px-2 focus:outline-none focus:ring-1 focus:ring-cyan-400 \
-                       disabled:opacity-50"
-            >
-                <option value="">"Move to…"</option>
-                <For each=move || options.get() key=|s| s.slug.clone() let:s>
-                    <option value=s.slug.clone()>{s.title.clone()}</option>
-                </For>
-            </select>
+            <div class="flex items-center gap-2 flex-wrap">
+                <select
+                    on:change=on_change.clone()
+                    disabled=move || action.pending().get()
+                    class="bg-white/10 backdrop-blur-md text-white text-xs rounded-lg \
+                           py-1 px-2 focus:outline-none focus:ring-1 focus:ring-cyan-400 \
+                           disabled:opacity-50"
+                >
+                    <option value="">"Move to…"</option>
+                    <For each=move || options.get() key=|s| s.slug.clone() let:s>
+                        <option value=s.slug.clone()>{s.title.clone()}</option>
+                    </For>
+                </select>
+                <Show when=move || error.get().is_some()>
+                    <span class="text-red-300 text-xs">
+                        {move || error.get().unwrap_or_default()}
+                    </span>
+                </Show>
+            </div>
         </Show>
     }
 }

@@ -225,13 +225,23 @@ pub async fn move_collection_to_section(
     collection_id: u64,
     to_section_slug: String,
 ) -> Result<(), ServerFnError> {
-    use crate::app::server::db::{self, CollectionField};
+    use crate::app::server::db::{self, CollectionField, MoveCollectionError};
     use crate::app::server::{AppState, poster};
 
     let mut state: AppState = expect_context();
+
     let mv = db::move_collection_to_section(&mut state.db, collection_id as i64, &to_section_slug)
         .await
-        .srv()?;
+        .map_err(|e| match e {
+            MoveCollectionError::SectionNotFound => ServerFnError::new(messages::SECTION_NOT_FOUND),
+            MoveCollectionError::MediaKindMismatch => {
+                ServerFnError::new(messages::MEDIA_KIND_MISMATCH)
+            }
+            MoveCollectionError::Db(e) => {
+                leptos::logging::error!("[db] {e}");
+                ServerFnError::new(messages::INTERNAL_ERROR)
+            }
+        })?;
 
     if let Some(url) = mv.poster_url.as_deref()
         && let Some(new_url) = poster::move_poster_to_subdir(

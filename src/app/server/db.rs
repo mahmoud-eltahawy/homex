@@ -6,6 +6,19 @@ use crate::app::model::{
 use std::collections::HashMap;
 use toasty::Db;
 
+#[derive(Debug)]
+pub enum MoveCollectionError {
+    SectionNotFound,
+    MediaKindMismatch,
+    Db(toasty::Error),
+}
+
+impl From<toasty::Error> for MoveCollectionError {
+    fn from(e: toasty::Error) -> Self {
+        MoveCollectionError::Db(e)
+    }
+}
+
 // ─── Pool init ────────────────────────────────────────────────────────────
 
 pub async fn init(config: &Config) -> Result<Db, Box<dyn std::error::Error>> {
@@ -726,15 +739,30 @@ pub async fn move_collection_to_section(
     db: &mut Db,
     collection_id: i64,
     to_section_slug: &str,
-) -> toasty::Result<CollectionMove> {
+) -> Result<CollectionMove, MoveCollectionError> {
     let to_section =
         SectionRow::filter(SectionRow::fields().slug().eq(to_section_slug.to_string()))
             .first()
             .exec(db)
             .await?
-            .ok_or_else(|| err_not_found("section"))?;
+            .ok_or(MoveCollectionError::SectionNotFound)?;
 
     let mut c = CollectionRow::get_by_id(db, &(collection_id as u64)).await?;
+
+    // Look up the current section. If it's missing (collection was orphaned
+    // by a previous section delete), allow the move — it reattaches the
+    // collection to a valid tree.
+    let from_section = SectionRow::filter(SectionRow::fields().slug().eq(c.section_slug.clone()))
+        .first()
+        .exec(db)
+        .await?;
+
+    if let Some(from) = from_section
+        && from.media_kind != to_section.media_kind
+    {
+        return Err(MoveCollectionError::MediaKindMismatch);
+    }
+
     let from_slug = c.section_slug.clone();
     let poster_url = c.poster.clone();
 
