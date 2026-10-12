@@ -7,6 +7,7 @@ use axum::{
 };
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
+use uuid::Uuid;
 
 use crate::app::server::db;
 
@@ -14,7 +15,7 @@ use super::AppState;
 
 pub async fn stream_media(
     Extension(state): Extension<AppState>,
-    Path(file_id): Path<i64>,
+    Path(file_id): Path<Uuid>,
     req: Request<Body>,
 ) -> Response {
     let mut db = state.db.clone();

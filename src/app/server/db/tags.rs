@@ -1,4 +1,5 @@
 use toasty::Db;
+use uuid::Uuid;
 
 use crate::app::model::{CollectionTag, SectionTag, Tag, canonicalize_tags};
 
@@ -12,7 +13,7 @@ pub async fn fetch_all_tags(db: &mut Db) -> toasty::Result<Vec<Tag>> {
 }
 
 /// Case-insensitive lookup of a tag by name. Returns `None` if absent.
-async fn find_tag_id_by_name(db: &mut Db, name: &str) -> toasty::Result<Option<u64>> {
+async fn find_tag_id_by_name(db: &mut Db, name: &str) -> toasty::Result<Option<Uuid>> {
     let candidates = Tag::filter(Tag::fields().name().like(name.to_string()))
         .exec(db)
         .await?;
@@ -38,8 +39,8 @@ async fn upsert_tag_tx(tx: &mut toasty::Transaction<'_>, name: &str) -> toasty::
     .await
 }
 
-/// Resolve a set of `tag_id`s to sorted `Tag` rows.
-async fn tags_for_joins(db: &mut Db, tag_ids: &[u64]) -> toasty::Result<Vec<Tag>> {
+/// Resolve a set of tag ids to sorted `Tag` rows.
+async fn tags_for_joins(db: &mut Db, tag_ids: &[Uuid]) -> toasty::Result<Vec<Tag>> {
     let mut out = Vec::with_capacity(tag_ids.len());
     for id in tag_ids {
         if let Ok(t) = Tag::get_by_id(db, id).await {
@@ -50,8 +51,8 @@ async fn tags_for_joins(db: &mut Db, tag_ids: &[u64]) -> toasty::Result<Vec<Tag>
     Ok(out)
 }
 
-pub async fn fetch_section_tags(db: &mut Db, section_id: u64) -> toasty::Result<Vec<Tag>> {
-    let ids: Vec<u64> = SectionTag::filter(SectionTag::fields().section_id().eq(section_id))
+pub async fn fetch_section_tags(db: &mut Db, section_id: Uuid) -> toasty::Result<Vec<Tag>> {
+    let ids: Vec<Uuid> = SectionTag::filter(SectionTag::fields().section_id().eq(section_id))
         .exec(db)
         .await?
         .into_iter()
@@ -60,8 +61,8 @@ pub async fn fetch_section_tags(db: &mut Db, section_id: u64) -> toasty::Result<
     tags_for_joins(db, &ids).await
 }
 
-pub async fn fetch_collection_tags(db: &mut Db, collection_id: u64) -> toasty::Result<Vec<Tag>> {
-    let ids: Vec<u64> =
+pub async fn fetch_collection_tags(db: &mut Db, collection_id: Uuid) -> toasty::Result<Vec<Tag>> {
+    let ids: Vec<Uuid> =
         CollectionTag::filter(CollectionTag::fields().collection_id().eq(collection_id))
             .exec(db)
             .await?
@@ -73,7 +74,7 @@ pub async fn fetch_collection_tags(db: &mut Db, collection_id: u64) -> toasty::R
 
 pub async fn set_section_tags(
     db: &mut Db,
-    section_id: u64,
+    section_id: Uuid,
     names: &[String],
 ) -> toasty::Result<()> {
     let normalized = canonicalize_tags(names);
@@ -102,7 +103,7 @@ pub async fn set_section_tags(
 
 pub async fn set_collection_tags(
     db: &mut Db,
-    collection_id: u64,
+    collection_id: Uuid,
     names: &[String],
 ) -> toasty::Result<()> {
     let normalized = canonicalize_tags(names);
@@ -136,14 +137,14 @@ pub async fn set_collection_tags(
 pub(crate) async fn collection_ids_with_all_tags(
     db: &mut Db,
     tag_names: &[String],
-) -> toasty::Result<Vec<u64>> {
-    let mut intersection: Option<Vec<u64>> = None;
+) -> toasty::Result<Vec<Uuid>> {
+    let mut intersection: Option<Vec<Uuid>> = None;
 
     for name in tag_names {
         let Some(tag_id) = find_tag_id_by_name(db, name).await? else {
             return Ok(Vec::new());
         };
-        let ids: Vec<u64> = CollectionTag::filter(CollectionTag::fields().tag_id().eq(tag_id))
+        let ids: Vec<Uuid> = CollectionTag::filter(CollectionTag::fields().tag_id().eq(tag_id))
             .exec(db)
             .await?
             .into_iter()

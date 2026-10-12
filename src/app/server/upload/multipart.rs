@@ -5,22 +5,16 @@ use std::path::{Path, PathBuf};
 use leptos::prelude::ServerFnError;
 use server_fn::codec::MultipartData;
 use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 use super::naming::extension_of;
 use super::types::{UploadFile, UploadPayload};
 
 // ─── Multipart form field names (server-side) ─────────────────────────────
-//
-// These MUST stay in sync with the field names built on the client
-// (`app/collection_detail.rs`).
 
 mod fields;
 
 // ─── Temp dir management ──────────────────────────────────────────────────
-//
-// `TempDir` wipes its contents on drop, so there is no manual cleanup path.
-// The directory is created here and moved into the `UploadPayload`, which
-// owns it until `process_upload` returns.
 
 fn fresh_temp_dir() -> Result<tempfile::TempDir, ServerFnError> {
     tempfile::Builder::new()
@@ -42,7 +36,7 @@ struct Accumulator {
     title: String,
     section_slug: String,
     description: String,
-    collection_id: i64,
+    collection_id: Uuid,
     season_number: Option<i64>,
     files: BTreeMap<usize, StagedTempFile>,
     file_titles: BTreeMap<usize, String>,
@@ -111,8 +105,9 @@ async fn handle_text_field(
     Ok(())
 }
 
-async fn handle_i64_field(dest: &mut i64, field: multer::Field<'_>) -> Result<(), ServerFnError> {
-    *dest = field.text().await?.parse()?;
+async fn handle_uuid_field(dest: &mut Uuid, field: multer::Field<'_>) -> Result<(), ServerFnError> {
+    *dest = Uuid::parse_str(&field.text().await?)
+        .map_err(|e| ServerFnError::new(format!("collection_id: {e}")))?;
     Ok(())
 }
 
@@ -189,7 +184,7 @@ async fn handle_field(
         FieldKind::Title => handle_text_field(&mut acc.title, field).await,
         FieldKind::SectionSlug => handle_text_field(&mut acc.section_slug, field).await,
         FieldKind::Description => handle_text_field(&mut acc.description, field).await,
-        FieldKind::CollectionId => handle_i64_field(&mut acc.collection_id, field).await,
+        FieldKind::CollectionId => handle_uuid_field(&mut acc.collection_id, field).await,
         FieldKind::SeasonNumber => handle_optional_i64_field(&mut acc.season_number, field).await,
         FieldKind::FileTitle(idx) => handle_file_title_field(acc, idx, field).await,
         FieldKind::File(idx) => handle_file_field(acc, temp_dir, idx, field).await,
@@ -256,8 +251,6 @@ pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload
     let mut multipart = data.into_inner().unwrap();
     let temp_dir = fresh_temp_dir()?;
 
-    // If either of the following steps fails, `temp_dir` is dropped and its
-    // contents are wiped automatically — no manual cleanup path.
     let acc = run_parse_loop(&mut multipart, temp_dir.path()).await?;
     finalize(acc, temp_dir)
 }

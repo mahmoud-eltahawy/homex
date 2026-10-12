@@ -31,8 +31,8 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
     use crate::app::model::MediaKind;
     use crate::app::server::convert::{Job, JobPhase};
     use crate::app::server::upload::{
-        needs_conversion, new_job_id, parse_upload_multipart, process_upload,
-        schedule_job_eviction, validate_extensions,
+        needs_conversion, parse_upload_multipart, process_upload, schedule_job_eviction,
+        validate_extensions,
     };
     use crate::app::server::{AppState, ToastyErr, db};
 
@@ -56,7 +56,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
         });
     }
 
-    let job_id = new_job_id();
+    let job_id = uuid::Uuid::new_v4().to_string();
     {
         let mut jobs = state.jobs.write().await;
         jobs.insert(

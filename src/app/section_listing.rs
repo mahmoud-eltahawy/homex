@@ -17,6 +17,7 @@ use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
 use server_fn::ServerFnError;
+use uuid::Uuid;
 
 const LISTING_PAGE_SIZE: usize = 18;
 
@@ -113,7 +114,7 @@ fn SectionListingBody(
 
 // ─── Create-new-collection flow ───────────────────────────────────────────
 
-fn use_create_collection_nav(section_slug: String) -> Action<String, Result<u64, ServerFnError>> {
+fn use_create_collection_nav(section_slug: String) -> Action<String, Result<Uuid, ServerFnError>> {
     let action = Action::new_local(move |s: &String| create_empty_collection(s.clone()));
     let navigate = use_navigate();
     let slug_for_nav = section_slug;

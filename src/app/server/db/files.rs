@@ -1,4 +1,5 @@
 use toasty::Db;
+use uuid::Uuid;
 
 use crate::app::model::{File, Item};
 
@@ -9,7 +10,7 @@ pub async fn insert_file(
     relative_path: &str,
     size_bytes: i64,
     duration_secs: i64,
-) -> toasty::Result<u64> {
+) -> toasty::Result<Uuid> {
     let f = toasty::create!(File {
         relative_path: relative_path.to_string(),
         size_bytes,
@@ -20,8 +21,8 @@ pub async fn insert_file(
     Ok(f.id)
 }
 
-pub async fn fetch_file_path(db: &mut Db, file_id: i64) -> toasty::Result<Option<String>> {
-    Ok(File::get_by_id(db, &(file_id as u64))
+pub async fn fetch_file_path(db: &mut Db, file_id: Uuid) -> toasty::Result<Option<String>> {
+    Ok(File::get_by_id(db, &file_id)
         .await
         .ok()
         .map(|f| f.relative_path))
@@ -29,11 +30,9 @@ pub async fn fetch_file_path(db: &mut Db, file_id: i64) -> toasty::Result<Option
 
 // ─── Orphan cleanup ───────────────────────────────────────────────────────
 
-/// For each file id, delete the file row if no item still references it,
-/// and return the relative paths so the caller can unlink the media on disk.
 pub(crate) async fn purge_orphan_files(
     tx: &mut toasty::Transaction<'_>,
-    file_ids: impl IntoIterator<Item = u64>,
+    file_ids: impl IntoIterator<Item = Uuid>,
 ) -> toasty::Result<Vec<String>> {
     let mut paths = Vec::new();
     for fid in file_ids {

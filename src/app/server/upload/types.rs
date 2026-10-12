@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 use tempfile::TempDir;
+use uuid::Uuid;
 
 pub struct UploadPayload {
     pub section_slug: String,
-    pub collection_id: i64,
+    pub collection_id: Uuid,
     pub title: String,
     pub description: String,
     pub season_number: Option<i64>,

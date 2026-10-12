@@ -12,6 +12,8 @@ pub const STYLESHEET_URL: &str = "/pkg/homex.css";
 // ─── Routes ───────────────────────────────────────────────────────────────
 
 pub mod routes {
+    use uuid::Uuid;
+
     pub const HOME: &str = "/";
     pub const LOGIN: &str = "/login";
     pub const LOGIN_API: &str = "/api/login";
@@ -30,15 +32,15 @@ pub mod routes {
         format!("{SECTION_PREFIX}{slug}")
     }
 
-    pub fn collection(slug: &str, id: u64) -> String {
+    pub fn collection(slug: &str, id: Uuid) -> String {
         format!("{SECTION_PREFIX}{slug}/{id}")
     }
 
-    pub fn item(slug: &str, collection_id: u64, item_id: u64) -> String {
+    pub fn item(slug: &str, collection_id: Uuid, item_id: Uuid) -> String {
         format!("{SECTION_PREFIX}{slug}/{collection_id}/item/{item_id}")
     }
 
-    pub fn media(file_id: u64) -> String {
+    pub fn media(file_id: Uuid) -> String {
         format!("{MEDIA_URL_PREFIX}{file_id}")
     }
 

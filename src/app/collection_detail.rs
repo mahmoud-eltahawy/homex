@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use leptos::{either::Either, prelude::*};
 use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
+use uuid::Uuid;
 use web_sys::wasm_bindgen::JsCast;
 
 use leptos_media_player::{MediaItem, WatchPage};
@@ -18,12 +20,11 @@ use crate::app::{
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
     model::{Collection, CollectionSummary, Item, MediaKind, Section},
     resource_view::ResourceView,
-    route_params::{use_optional_u64_param, use_string_param, use_u64_param},
+    route_params::{use_optional_uuid_param, use_string_param, use_uuid_param},
     sections::fetch_section_by_slug,
     tags::TagEditor,
     upload_job::{UploadJob, UploadProgress},
 };
-use std::sync::Arc;
 
 // ─── Multipart form field names (client-side) ─────────────────────────────
 
@@ -31,11 +32,11 @@ mod fields;
 
 // ─── Action type aliases ──────────────────────────────────────────────────
 
-type PatchAction = Action<(u64, String, Option<String>), Result<(), ServerFnError>>;
+type PatchAction = Action<(Uuid, String, Option<String>), Result<(), ServerFnError>>;
 type PosterUploadAction = Action<web_sys::FormData, Result<String, ServerFnError>>;
-type RenameItemAction = Action<(u64, String), Result<(), ServerFnError>>;
-type DeleteItemAction = Action<u64, Result<(), ServerFnError>>;
-type TagsAction = Action<(u64, Vec<String>), Result<(), ServerFnError>>;
+type RenameItemAction = Action<(Uuid, String), Result<(), ServerFnError>>;
+type DeleteItemAction = Action<Uuid, Result<(), ServerFnError>>;
+type TagsAction = Action<(Uuid, Vec<String>), Result<(), ServerFnError>>;
 
 // ─── Collection actions bundle ────────────────────────────────────────────
 
@@ -45,27 +46,28 @@ struct CollectionActions {
     poster_upload: PosterUploadAction,
     rename_item: RenameItemAction,
     delete_item: DeleteItemAction,
-    move_item: Action<(u64, bool), Result<(), ServerFnError>>,
+    move_item: Action<(Uuid, bool), Result<(), ServerFnError>>,
     tags: TagsAction,
 }
 
 impl CollectionActions {
     fn new(items: Resource<Result<Vec<Item>, ServerFnError>>) -> Self {
-        let patch = Action::new_local(|(id, field, value): &(u64, String, Option<String>)| {
+        let patch = Action::new_local(|(id, field, value): &(Uuid, String, Option<String>)| {
             patch_collection_field(*id, field.clone(), value.clone())
         });
         let poster_upload =
             Action::new_local(|fd: &web_sys::FormData| upload_collection_poster(fd.clone().into()));
         let rename_item =
-            Action::new_local(|(id, t): &(u64, String)| patch_item_title(*id, t.clone()));
-        let delete_item = Action::new_local(|id: &u64| delete_item(*id));
-        let tags =
-            Action::new_local(|(id, t): &(u64, Vec<String>)| patch_collection_tags(*id, t.clone()));
+            Action::new_local(|(id, t): &(Uuid, String)| patch_item_title(*id, t.clone()));
+        let delete_item = Action::new_local(|id: &Uuid| delete_item(*id));
+        let tags = Action::new_local(|(id, t): &(Uuid, Vec<String>)| {
+            patch_collection_tags(*id, t.clone())
+        });
 
         refetch_on_success(rename_item, items);
         refetch_on_success(delete_item, items);
 
-        let move_item = Action::new_local(|(id, up): &(u64, bool)| move_item(*id, *up));
+        let move_item = Action::new_local(|(id, up): &(Uuid, bool)| move_item(*id, *up));
         refetch_on_success(move_item, items);
 
         Self {
@@ -78,20 +80,20 @@ impl CollectionActions {
         }
     }
 
-    fn rename_callback(self) -> Callback<(u64, String)> {
-        Callback::new(move |(id, t): (u64, String)| {
+    fn rename_callback(self) -> Callback<(Uuid, String)> {
+        Callback::new(move |(id, t): (Uuid, String)| {
             let _ = self.rename_item.dispatch((id, t));
         })
     }
 
-    fn delete_callback(self) -> Callback<u64> {
-        Callback::new(move |id: u64| {
+    fn delete_callback(self) -> Callback<Uuid> {
+        Callback::new(move |id: Uuid| {
             let _ = self.delete_item.dispatch(id);
         })
     }
 
-    fn move_callback(self) -> Callback<(u64, bool)> {
-        Callback::new(move |(id, up): (u64, bool)| {
+    fn move_callback(self) -> Callback<(Uuid, bool)> {
+        Callback::new(move |(id, up): (Uuid, bool)| {
             let _ = self.move_item.dispatch((id, up));
         })
     }
@@ -140,7 +142,7 @@ impl CollectionEditState {
 
 fn use_poster_upload(
     section_slug: String,
-    collection_id: u64,
+    collection_id: Uuid,
     poster: RwSignal<Option<String>>,
     poster_upload: PosterUploadAction,
 ) -> Callback<web_sys::File> {
@@ -180,10 +182,10 @@ fn make_playlist_adapter(
     is_audio: bool,
     is_series: bool,
     selected_season: RwSignal<Option<i64>>,
-    initial_item_id: Option<u64>,
-    on_rename: Callback<(u64, String)>,
-    on_delete: Callback<u64>,
-    on_move: Callback<(u64, bool)>,
+    initial_item_id: Option<Uuid>,
+    on_rename: Callback<(Uuid, String)>,
+    on_delete: Callback<Uuid>,
+    on_move: Callback<(Uuid, bool)>,
 ) -> impl Fn(Vec<Item>) -> PlaylistProps {
     move |list: Vec<Item>| PlaylistProps {
         items: list,
@@ -205,15 +207,15 @@ pub struct CollectionDetailPage {
     section: Resource<Result<Section, ServerFnError>>,
     collection: Resource<Result<Collection, ServerFnError>>,
     items: Resource<Result<Vec<Item>, ServerFnError>>,
-    initial_item_id: Option<u64>,
+    initial_item_id: Option<Uuid>,
 }
 
 #[lazy_route]
 impl LazyRoute for CollectionDetailPage {
     fn data() -> Self {
         let slug = use_string_param("slug");
-        let id = use_u64_param("id");
-        let item_id_fn = use_optional_u64_param("item_id");
+        let id = use_uuid_param("id");
+        let item_id_fn = use_optional_uuid_param("item_id");
 
         let slug_a = slug;
         let slug_b = slug;
@@ -251,7 +253,7 @@ fn CollectionDetailBody(
     section: Section,
     collection: Resource<Result<Collection, ServerFnError>>,
     items: Resource<Result<Vec<Item>, ServerFnError>>,
-    initial_item_id: Option<u64>,
+    initial_item_id: Option<Uuid>,
 ) -> impl IntoView {
     let adapter = move |c: Collection| CollectionContentProps {
         section: section.clone(),
@@ -269,7 +271,7 @@ fn CollectionContent(
     section: Section,
     collection: Collection,
     items: Resource<Result<Vec<Item>, ServerFnError>>,
-    initial_item_id: Option<u64>,
+    initial_item_id: Option<Uuid>,
 ) -> impl IntoView {
     let collection_id = collection.id;
     let section_slug = section.slug.clone();
@@ -450,7 +452,7 @@ fn accept_for_kind(is_audio: bool) -> &'static str {
 fn build_append_formdata(
     files: &web_sys::FileList,
     section_slug: &str,
-    collection_id: u64,
+    collection_id: Uuid,
     season: Option<i64>,
 ) -> web_sys::FormData {
     let fd = web_sys::FormData::new().unwrap();
@@ -476,7 +478,7 @@ fn build_append_formdata(
 fn make_file_input_handler(
     upload: UploadJob,
     section_slug: String,
-    collection_id: u64,
+    collection_id: Uuid,
     is_series: bool,
     selected_season: RwSignal<Option<i64>>,
 ) -> Callback<web_sys::Event> {
@@ -531,7 +533,7 @@ fn UploadErrorBanner(error: Signal<Option<String>>) -> impl IntoView {
 fn AppendItems(
     upload: UploadJob,
     #[prop(into)] section_slug: String,
-    collection_id: u64,
+    collection_id: Uuid,
     is_audio: bool,
     is_series: bool,
     selected_season: RwSignal<Option<i64>>,
@@ -596,10 +598,10 @@ fn Playlist(
     selected_season: RwSignal<Option<i64>>,
     artwork: Option<String>,
     playlist_title: String,
-    initial_item_id: Option<u64>,
-    on_rename: Callback<(u64, String)>,
-    on_delete: Callback<u64>,
-    on_move: Callback<(u64, bool)>,
+    initial_item_id: Option<Uuid>,
+    on_rename: Callback<(Uuid, String)>,
+    on_delete: Callback<Uuid>,
+    on_move: Callback<(Uuid, bool)>,
 ) -> impl IntoView {
     let all_seasons: Vec<i64> = items
         .iter()
@@ -763,9 +765,11 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
     }
 }
 
+// ─── Move collection to another section ───────────────────────────────────
+
 #[component]
 fn MoveCollectionPicker(
-    collection_id: u64,
+    collection_id: Uuid,
     current_slug: String,
     media_kind: MediaKind,
 ) -> impl IntoView {
@@ -773,7 +777,7 @@ fn MoveCollectionPicker(
     let navigate = use_navigate();
 
     let action =
-        Action::new_local(|(id, to): &(u64, String)| move_collection_to_section(*id, to.clone()));
+        Action::new_local(|(id, to): &(Uuid, String)| move_collection_to_section(*id, to.clone()));
 
     let destination = RwSignal::new(String::new());
 
@@ -840,10 +844,12 @@ fn MoveCollectionPicker(
     }
 }
 
+// ─── Organize items panel ─────────────────────────────────────────────────
+
 #[component]
 fn OrganizeItemsPanel(
     items: Resource<Result<Vec<Item>, ServerFnError>>,
-    current_collection_id: u64,
+    current_collection_id: Uuid,
     media_kind: MediaKind,
     on_close: Callback<()>,
 ) -> impl IntoView {
@@ -851,11 +857,12 @@ fn OrganizeItemsPanel(
     let destinations: Resource<Result<Vec<CollectionSummary>, ServerFnError>> =
         Resource::new(move || kind_str.clone(), fetch_collection_summaries);
 
-    let selected: RwSignal<Vec<u64>> = RwSignal::new(Vec::new());
-    let destination_id: RwSignal<Option<u64>> = RwSignal::new(None);
+    let selected: RwSignal<Vec<Uuid>> = RwSignal::new(Vec::new());
+    let destination_id: RwSignal<Option<Uuid>> = RwSignal::new(None);
 
-    let move_action =
-        Action::new_local(|(ids, to): &(Vec<u64>, u64)| move_items_to_collection(ids.clone(), *to));
+    let move_action = Action::new_local(|(ids, to): &(Vec<Uuid>, Uuid)| {
+        move_items_to_collection(ids.clone(), *to)
+    });
 
     Effect::new(move |_| {
         if matches!(move_action.value().get(), Some(Ok(()))) {
@@ -970,7 +977,7 @@ fn OrganizeItemsPanel(
                 <select
                     on:change=move |ev| {
                         let v = event_target_value(&ev);
-                        destination_id.set(v.parse::<u64>().ok());
+                        destination_id.set(Uuid::parse_str(&v).ok());
                     }
                     class="bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
                            focus:outline-none focus:ring-1 focus:ring-cyan-400 min-w-64"

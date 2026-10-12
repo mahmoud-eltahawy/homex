@@ -2,6 +2,7 @@ use crate::app::constants::messages;
 use leptos::prelude::ServerFnError;
 use std::path::Path;
 use toasty::{Db, Transaction};
+use uuid::Uuid;
 
 use super::types::{StagedFile, UploadPayload};
 use crate::app::model::{CollectionRow, Item};
@@ -16,7 +17,7 @@ fn toasty_err(e: toasty::Error) -> ServerFnError {
 pub async fn insert_files(
     db: &mut Db,
     staged: &[StagedFile],
-) -> Result<Vec<(u64, String)>, ServerFnError> {
+) -> Result<Vec<(Uuid, String)>, ServerFnError> {
     let mut out = Vec::with_capacity(staged.len());
     for f in staged {
         let id = db::insert_file(db, &f.rel, f.size as i64, f.duration)
@@ -29,7 +30,7 @@ pub async fn insert_files(
 
 async fn next_item_number_tx(
     tx: &mut Transaction<'_>,
-    collection_id: u64,
+    collection_id: Uuid,
     season_number: Option<i64>,
 ) -> toasty::Result<i64> {
     let mut q = Item::filter(Item::fields().collection_id().eq(collection_id));
@@ -48,12 +49,12 @@ async fn next_item_number_tx(
 pub async fn insert_items_and_poster(
     db: &mut Db,
     payload: &UploadPayload,
-    file_rows: &[(u64, String)],
+    file_rows: &[(Uuid, String)],
     data_dir: &Path,
 ) -> Result<(), ServerFnError> {
     let mut tx = db.transaction().await.map_err(toasty_err)?;
 
-    let collection_id = payload.collection_id as u64;
+    let collection_id = payload.collection_id;
     let start = next_item_number_tx(&mut tx, collection_id, payload.season_number)
         .await
         .map_err(toasty_err)?;
@@ -85,14 +86,7 @@ pub async fn insert_items_and_poster(
         .map_err(toasty_err)?;
 
     if let Some((ext, bytes)) = payload.poster.as_ref() {
-        let url = write_poster(
-            data_dir,
-            &payload.section_slug,
-            collection_id as i64,
-            ext,
-            bytes,
-        )
-        .await?;
+        let url = write_poster(data_dir, &payload.section_slug, collection_id, ext, bytes).await?;
         collection
             .update()
             .poster(Some(url))

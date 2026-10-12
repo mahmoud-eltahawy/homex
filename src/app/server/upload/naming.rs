@@ -6,19 +6,6 @@
 
 pub use slug::slugify;
 
-// ─── Storage token ────────────────────────────────────────────────────────
-//
-// Random v4 UUID, hex-encoded by `Display`. Collisions are astronomically
-// unlikely and callers don't depend on ordering.
-
-pub fn new_storage_token() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
-pub fn new_job_id() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
 // ─── Filename helpers ─────────────────────────────────────────────────────
 
 pub fn sanitize_filename(name: &str) -> String {
@@ -32,7 +19,7 @@ pub fn sanitize_filename(name: &str) -> String {
 ///
 /// This is only the *candidate* extension — the poster write path replaces
 /// it with the magic-byte-detected extension when `infer` recognizes the
-/// bytes. See `server::poster::resolve_poster_ext`.
+/// bytes. See `server::poster::write_poster`.
 pub fn extension_of(filename: &str) -> String {
     match filename.rsplit_once('.') {
         Some((_, ext))

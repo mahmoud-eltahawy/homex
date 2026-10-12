@@ -1,4 +1,5 @@
 use toasty::Db;
+use uuid::Uuid;
 
 use super::tags::fetch_section_tags;
 use crate::app::model::{CollectionRow, Section, SectionRow, SectionTag};
@@ -42,7 +43,7 @@ pub async fn insert_section(
     title: &str,
     media_kind: &str,
     nested: bool,
-) -> toasty::Result<u64> {
+) -> toasty::Result<Uuid> {
     let next = next_position(db).await?;
     let row = toasty::create!(SectionRow {
         slug: slug.to_string(),
@@ -67,12 +68,12 @@ async fn next_position(db: &mut Db) -> toasty::Result<i64> {
 
 pub async fn update_section(
     db: &mut Db,
-    id: i64,
+    id: Uuid,
     title: &str,
     media_kind: &str,
     nested: bool,
 ) -> toasty::Result<()> {
-    let mut row = SectionRow::get_by_id(db, &(id as u64)).await?;
+    let mut row = SectionRow::get_by_id(db, &id).await?;
     row.update()
         .title(title.to_string())
         .media_kind(media_kind.to_string())
@@ -81,26 +82,21 @@ pub async fn update_section(
         .await
 }
 
-pub async fn update_section_title(db: &mut Db, id: i64, title: &str) -> toasty::Result<()> {
-    let mut row = SectionRow::get_by_id(db, &(id as u64)).await?;
+pub async fn update_section_title(db: &mut Db, id: Uuid, title: &str) -> toasty::Result<()> {
+    let mut row = SectionRow::get_by_id(db, &id).await?;
     row.update().title(title.to_string()).exec(db).await
 }
 
 // ─── Section deletion ─────────────────────────────────────────────────────
 
-/// Outcome of a delete attempt. The section is only removed if it has no
-/// dependent collections — otherwise the caller decides how to surface
-/// the refusal.
 pub enum DeleteSectionOutcome {
     Deleted,
     NotEmpty { collection_count: i64 },
 }
 
-pub async fn delete_section(db: &mut Db, id: i64) -> toasty::Result<DeleteSectionOutcome> {
-    let section = SectionRow::get_by_id(db, &(id as u64)).await?;
+pub async fn delete_section(db: &mut Db, id: Uuid) -> toasty::Result<DeleteSectionOutcome> {
+    let section = SectionRow::get_by_id(db, &id).await?;
 
-    // Refuse to orphan collections. The check runs inside the same call so
-    // no caller can accidentally skip it.
     let collection_count = CollectionRow::filter(
         CollectionRow::fields()
             .section_slug()
@@ -114,8 +110,7 @@ pub async fn delete_section(db: &mut Db, id: i64) -> toasty::Result<DeleteSectio
         return Ok(DeleteSectionOutcome::NotEmpty { collection_count });
     }
 
-    // Drop the section↔tag joins. Tag rows themselves are shared and stay.
-    for row in SectionTag::filter(SectionTag::fields().section_id().eq(id as u64))
+    for row in SectionTag::filter(SectionTag::fields().section_id().eq(id))
         .exec(db)
         .await?
     {

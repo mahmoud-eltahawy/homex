@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
 use toasty::Db;
+use uuid::Uuid;
 
 use super::files::purge_orphan_files;
 use crate::app::model::{CollectionRow, Item};
 
 // ─── Item queries ─────────────────────────────────────────────────────────
 
-pub async fn fetch_items(db: &mut Db, collection_id: i64) -> toasty::Result<Vec<Item>> {
-    Item::filter(Item::fields().collection_id().eq(collection_id as u64))
+pub async fn fetch_items(db: &mut Db, collection_id: Uuid) -> toasty::Result<Vec<Item>> {
+    Item::filter(Item::fields().collection_id().eq(collection_id))
         .order_by((
             Item::fields().season_number().asc(),
             Item::fields().number().asc(),
@@ -18,17 +19,17 @@ pub async fn fetch_items(db: &mut Db, collection_id: i64) -> toasty::Result<Vec<
         .await
 }
 
-pub async fn update_item_title(db: &mut Db, id: i64, title: Option<&str>) -> toasty::Result<()> {
-    let mut item = Item::get_by_id(db, &(id as u64)).await?;
+pub async fn update_item_title(db: &mut Db, id: Uuid, title: Option<&str>) -> toasty::Result<()> {
+    let mut item = Item::get_by_id(db, &id).await?;
     item.update().title(title.map(String::from)).exec(db).await
 }
 
 // ─── Reordering ───────────────────────────────────────────────────────────
 
-pub async fn swap_item_order(db: &mut Db, id: i64, is_up: bool) -> toasty::Result<()> {
+pub async fn swap_item_order(db: &mut Db, id: Uuid, is_up: bool) -> toasty::Result<()> {
     let mut tx = db.transaction().await?;
 
-    let item = Item::get_by_id(&mut tx, &(id as u64)).await?;
+    let item = Item::get_by_id(&mut tx, &id).await?;
 
     let mut q = Item::filter(Item::fields().collection_id().eq(item.collection_id));
     q = match item.season_number {
@@ -63,8 +64,8 @@ pub async fn swap_item_order(db: &mut Db, id: i64, is_up: bool) -> toasty::Resul
 
 pub async fn move_items_to_collection(
     db: &mut Db,
-    item_ids: &[u64],
-    to_collection_id: u64,
+    item_ids: &[Uuid],
+    to_collection_id: Uuid,
 ) -> toasty::Result<()> {
     if item_ids.is_empty() {
         return Ok(());
@@ -72,10 +73,8 @@ pub async fn move_items_to_collection(
 
     let mut tx = db.transaction().await?;
 
-    // Ensure destination exists.
     let _ = CollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
 
-    // Fetch items that actually exist and aren't already at the destination.
     let mut moved: Vec<Item> = Vec::with_capacity(item_ids.len());
     for &id in item_ids {
         if let Ok(item) = Item::get_by_id(&mut tx, &id).await
@@ -88,13 +87,11 @@ pub async fn move_items_to_collection(
         return Ok(());
     }
 
-    // How many items left each source collection.
-    let mut from_counts: HashMap<u64, i64> = HashMap::new();
+    let mut from_counts: HashMap<Uuid, i64> = HashMap::new();
     for item in &moved {
         *from_counts.entry(item.collection_id).or_insert(0) += 1;
     }
 
-    // Append each moved item to the destination, numbering within its season.
     for item in &moved {
         let mut q = Item::filter(Item::fields().collection_id().eq(to_collection_id));
         q = match item.season_number {
@@ -118,7 +115,6 @@ pub async fn move_items_to_collection(
             .await?;
     }
 
-    // Compact each source collection, per season.
     for &from_id in from_counts.keys() {
         let remaining = Item::filter(Item::fields().collection_id().eq(from_id))
             .order_by((
@@ -140,7 +136,6 @@ pub async fn move_items_to_collection(
         }
     }
 
-    // Update the denormalized counters.
     for (&from_id, &count) in &from_counts {
         let mut c = CollectionRow::get_by_id(&mut tx, &from_id).await?;
         let items_count = c.items_count;
@@ -166,14 +161,13 @@ pub struct ItemDeletion {
     pub media_paths: Vec<String>,
 }
 
-pub async fn delete_item_cascade(db: &mut Db, id: i64) -> toasty::Result<ItemDeletion> {
+pub async fn delete_item_cascade(db: &mut Db, id: Uuid) -> toasty::Result<ItemDeletion> {
     let mut tx = db.transaction().await?;
 
-    let item = Item::get_by_id(&mut tx, &(id as u64)).await?;
+    let item = Item::get_by_id(&mut tx, &id).await?;
     let (file_id, collection_id) = (item.file_id, item.collection_id);
     item.delete().exec(&mut tx).await?;
 
-    // Decrement the denormalized counter on the parent collection.
     let mut collection = CollectionRow::get_by_id(&mut tx, &collection_id).await?;
     let items_count = collection.items_count;
     collection

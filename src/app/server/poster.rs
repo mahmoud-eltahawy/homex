@@ -1,6 +1,7 @@
 use crate::app::constants::{routes, storage};
 use leptos::prelude::ServerFnError;
 use std::path::Path;
+use uuid::Uuid;
 
 const ALLOWED_POSTER_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
 
@@ -28,7 +29,7 @@ fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, Se
 pub async fn write_poster(
     data_dir: &Path,
     subdir: &str,
-    entity_id: i64,
+    entity_id: Uuid,
     client_ext: &str,
     bytes: &[u8],
 ) -> Result<String, ServerFnError> {
@@ -54,10 +55,6 @@ pub async fn write_poster(
     Ok(routes::poster(subdir, &filename))
 }
 
-/// Best-effort move of a poster between two section subdirectories. Returns
-/// the new URL on success, `None` if the file couldn't be moved (the caller
-/// then leaves the DB URL as-is, which keeps the poster working from the old
-/// path).
 pub async fn move_poster_to_subdir(
     data_dir: &Path,
     from_subdir: &str,

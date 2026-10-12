@@ -1,4 +1,5 @@
 use toasty::Db;
+use uuid::Uuid;
 
 use super::err_not_found;
 use super::files::purge_orphan_files;
@@ -18,7 +19,7 @@ pub async fn fetch_collections(
 ) -> toasty::Result<Vec<Collection>> {
     let parsed = search.map(parse_search).unwrap_or_default();
 
-    let tag_ids: Option<Vec<u64>> = if parsed.tags.is_empty() {
+    let tag_ids: Option<Vec<Uuid>> = if parsed.tags.is_empty() {
         None
     } else {
         Some(collection_ids_with_all_tags(db, &parsed.tags).await?)
@@ -28,7 +29,6 @@ pub async fn fetch_collections(
     }
 
     let rows = if let Some(ids) = &tag_ids {
-        // Tag filter crosses the join table → fetch, filter, paginate in Rust.
         let mut q = CollectionRow::filter(
             CollectionRow::fields()
                 .section_slug()
@@ -85,7 +85,7 @@ pub async fn fetch_collections_count(
 ) -> toasty::Result<i64> {
     let parsed = search.map(parse_search).unwrap_or_default();
 
-    let tag_ids: Option<Vec<u64>> = if parsed.tags.is_empty() {
+    let tag_ids: Option<Vec<Uuid>> = if parsed.tags.is_empty() {
         None
     } else {
         Some(collection_ids_with_all_tags(db, &parsed.tags).await?)
@@ -120,13 +120,13 @@ pub async fn fetch_collections_count(
 pub async fn fetch_collection_detail(
     db: &mut Db,
     section_slug: &str,
-    collection_id: i64,
+    collection_id: Uuid,
 ) -> toasty::Result<Option<Collection>> {
     let Some(row) = CollectionRow::filter(
         CollectionRow::fields()
             .section_slug()
             .eq(section_slug.to_string())
-            .and(CollectionRow::fields().id().eq(collection_id as u64)),
+            .and(CollectionRow::fields().id().eq(collection_id)),
     )
     .first()
     .exec(db)
@@ -139,7 +139,7 @@ pub async fn fetch_collection_detail(
     Ok(Some(c))
 }
 
-pub async fn insert_empty_collection(db: &mut Db, section_slug: &str) -> toasty::Result<u64> {
+pub async fn insert_empty_collection(db: &mut Db, section_slug: &str) -> toasty::Result<Uuid> {
     let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.to_string()))
         .first()
         .exec(db)
@@ -161,7 +161,7 @@ pub async fn insert_empty_collection(db: &mut Db, section_slug: &str) -> toasty:
     Ok(row.id)
 }
 
-async fn next_position(db: &mut Db, section_id: u64) -> toasty::Result<i64> {
+async fn next_position(db: &mut Db, section_id: Uuid) -> toasty::Result<i64> {
     let last = CollectionRow::filter(CollectionRow::fields().section_id().eq(section_id))
         .order_by(CollectionRow::fields().position().desc())
         .limit(1)
@@ -180,22 +180,18 @@ pub enum CollectionField {
 
 pub async fn update_collection_field(
     db: &mut Db,
-    id: i64,
+    id: Uuid,
     field: CollectionField,
     value: Option<&str>,
 ) -> toasty::Result<()> {
-    let mut row = CollectionRow::get_by_id(db, &(id as u64)).await?;
+    let mut row = CollectionRow::get_by_id(db, &id).await?;
     match field {
-        // `title` is NOT NULL, so the update setter wants `String`, not
-        // `Option<String>`. The server fn validates before calling.
         CollectionField::Title => {
             row.update()
                 .title(value.unwrap_or_default().to_string())
                 .exec(db)
                 .await
         }
-        // `description` and `poster` are nullable; `Option<String>` is
-        // accepted directly, and `None` assigns SQL NULL.
         CollectionField::Description => {
             row.update()
                 .description(value.map(String::from))
@@ -228,7 +224,7 @@ pub struct CollectionMove {
 
 pub async fn move_collection_to_section(
     db: &mut Db,
-    collection_id: i64,
+    collection_id: Uuid,
     to_section_slug: &str,
 ) -> Result<CollectionMove, MoveCollectionError> {
     let to_section =
@@ -238,11 +234,8 @@ pub async fn move_collection_to_section(
             .await?
             .ok_or(MoveCollectionError::SectionNotFound)?;
 
-    let mut c = CollectionRow::get_by_id(db, &(collection_id as u64)).await?;
+    let mut c = CollectionRow::get_by_id(db, &collection_id).await?;
 
-    // Look up the current section. If it's missing (collection was orphaned
-    // by a previous section delete), allow the move — it reattaches the
-    // collection to a valid tree.
     let from_section = SectionRow::filter(SectionRow::fields().slug().eq(c.section_slug.clone()))
         .first()
         .exec(db)
@@ -280,8 +273,6 @@ pub async fn fetch_collection_summaries(
         .exec(db)
         .await?;
 
-    // One indexed query per section, using `CollectionRow::section_slug`'s
-    // `#[index]`. Trades a single full-table scan for N bounded lookups.
     let mut out: Vec<CollectionSummary> = Vec::new();
     for section in &sections {
         let rows = CollectionRow::filter(
@@ -311,19 +302,21 @@ pub struct CollectionDeletion {
     pub poster_url: Option<String>,
 }
 
-pub async fn delete_collection_cascade(db: &mut Db, id: i64) -> toasty::Result<CollectionDeletion> {
+pub async fn delete_collection_cascade(
+    db: &mut Db,
+    id: Uuid,
+) -> toasty::Result<CollectionDeletion> {
     let mut tx = db.transaction().await?;
 
-    let collection = CollectionRow::get_by_id(&mut tx, &(id as u64)).await?;
+    let collection = CollectionRow::get_by_id(&mut tx, &id).await?;
     let poster_url = collection.poster.clone();
 
-    let items = Item::filter(Item::fields().collection_id().eq(id as u64))
+    let items = Item::filter(Item::fields().collection_id().eq(id))
         .exec(&mut tx)
         .await?;
-    let file_ids: Vec<u64> = items.iter().map(|i| i.file_id).collect();
+    let file_ids: Vec<Uuid> = items.iter().map(|i| i.file_id).collect();
 
-    // Drop the collection↔tag joins. Tag rows themselves are shared and stay.
-    for row in CollectionTag::filter(CollectionTag::fields().collection_id().eq(id as u64))
+    for row in CollectionTag::filter(CollectionTag::fields().collection_id().eq(id))
         .exec(&mut tx)
         .await?
     {

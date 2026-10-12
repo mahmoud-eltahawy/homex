@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::app::constants::routes;
 
@@ -24,9 +25,6 @@ where
 }
 
 // ─── Search parsing (SSR only) ────────────────────────────────────────────
-//
-// The raw query string is parsed on the server inside `fetch_collections`
-// and `fetch_collections_count`. The client sends it verbatim.
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -95,7 +93,7 @@ impl TryFrom<&str> for MediaKind {
     }
 }
 
-// ─── Tag (wire + toasty model) ────────────────────────────────────────────
+// ─── Tag ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ssr", derive(toasty::Model))]
@@ -103,15 +101,15 @@ impl TryFrom<&str> for MediaKind {
 pub struct Tag {
     #[cfg_attr(feature = "ssr", key)]
     #[cfg_attr(feature = "ssr", auto)]
-    pub id: u64,
+    pub id: Uuid,
     #[cfg_attr(feature = "ssr", unique)]
     pub name: String,
 }
 
 // ─── File (SSR only) ──────────────────────────────────────────────────────
 //
-// `File` never crosses the wire: items carry `file_id: u64` and the stream
-// route resolves it server-side. So the whole struct is SSR-only.
+// `File` never crosses the wire: items carry `file_id` and the stream route
+// resolves it server-side. So the whole struct is SSR-only.
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
@@ -119,7 +117,7 @@ pub struct Tag {
 pub struct File {
     #[key]
     #[auto]
-    pub id: u64,
+    pub id: Uuid,
     #[unique]
     pub relative_path: String,
     pub size_bytes: i64,
@@ -134,22 +132,19 @@ pub struct File {
 pub struct Item {
     #[cfg_attr(feature = "ssr", key)]
     #[cfg_attr(feature = "ssr", auto)]
-    pub id: u64,
+    pub id: Uuid,
     #[cfg_attr(feature = "ssr", index)]
-    pub collection_id: u64,
+    pub collection_id: Uuid,
     pub number: i64,
     pub season_number: Option<i64>,
     pub title: Option<String>,
     pub poster: Option<String>,
     pub description: Option<String>,
     #[cfg_attr(feature = "ssr", index)]
-    pub file_id: u64,
+    pub file_id: Uuid,
 }
 
 // ─── Row types (SSR-only Toasty models) ───────────────────────────────────
-//
-// `Section` and `Collection` carry `Vec<Tag>` on the wire, which cannot be a
-// SQL column — so the DB uses row structs and the app converts.
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
@@ -157,7 +152,7 @@ pub struct Item {
 pub struct SectionRow {
     #[key]
     #[auto]
-    pub id: u64,
+    pub id: Uuid,
     #[unique]
     pub slug: String,
     pub title: String,
@@ -172,9 +167,9 @@ pub struct SectionRow {
 pub struct CollectionRow {
     #[key]
     #[auto]
-    pub id: u64,
+    pub id: Uuid,
     #[index]
-    pub section_id: u64,
+    pub section_id: Uuid,
     #[index]
     pub section_slug: String,
     pub title: String,
@@ -192,11 +187,11 @@ pub struct CollectionRow {
 pub struct SectionTag {
     #[key]
     #[auto]
-    pub id: u64,
+    pub id: Uuid,
     #[index]
-    pub section_id: u64,
+    pub section_id: Uuid,
     #[index]
-    pub tag_id: u64,
+    pub tag_id: Uuid,
 }
 
 #[cfg(feature = "ssr")]
@@ -205,18 +200,18 @@ pub struct SectionTag {
 pub struct CollectionTag {
     #[key]
     #[auto]
-    pub id: u64,
+    pub id: Uuid,
     #[index]
-    pub collection_id: u64,
+    pub collection_id: Uuid,
     #[index]
-    pub tag_id: u64,
+    pub tag_id: Uuid,
 }
 
 // ─── Domain models (wire types) ───────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
-    pub id: u64,
+    pub id: Uuid,
     pub slug: String,
     pub title: String,
     pub media_kind: String,
@@ -228,8 +223,8 @@ pub struct Section {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
-    pub id: u64,
-    pub section_id: u64,
+    pub id: Uuid,
+    pub section_id: Uuid,
     pub section_slug: String,
     pub title: String,
     pub poster: Option<String>,
@@ -238,6 +233,15 @@ pub struct Collection {
     pub items_count: i64,
     #[serde(default)]
     pub tags: Vec<Tag>,
+}
+
+/// Lightweight shape used by the "move items" destination picker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollectionSummary {
+    pub id: Uuid,
+    pub title: String,
+    pub section_slug: String,
+    pub section_title: String,
 }
 
 // ─── Row → domain conversions ─────────────────────────────────────────────
@@ -319,14 +323,4 @@ impl Item {
     pub fn href(&self, section_slug: &str) -> String {
         routes::item(section_slug, self.collection_id, self.id)
     }
-}
-
-/// Lightweight shape used by the "move items" destination picker.
-/// No tags, no timestamps — just enough to identify a target in a dropdown.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CollectionSummary {
-    pub id: u64,
-    pub title: String,
-    pub section_slug: String,
-    pub section_title: String,
 }

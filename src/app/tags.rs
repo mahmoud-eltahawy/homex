@@ -2,6 +2,7 @@ use leptos::prelude::*;
 
 use crate::app::inline_edit::use_edit_mode;
 use crate::app::model::Tag;
+use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
 use crate::app::server::{ToastyErr, db};
@@ -132,7 +133,7 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         let new_tags: Vec<Tag> = names
             .iter()
             .map(|n| Tag {
-                id: 0,
+                id: Uuid::nil(),
                 name: n.clone(),
             })
             .collect();

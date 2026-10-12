@@ -1,6 +1,7 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::{LazyRoute, lazy_route};
+use uuid::Uuid;
 
 use crate::app::{
     common::{
@@ -175,8 +176,8 @@ fn SectionTeaser(
 struct SectionHeaderState {
     title: RwSignal<String>,
     commit_title: Callback<String>,
-    delete_action: Action<u64, Result<(), ServerFnError>>,
-    tags_action: Action<(u64, Vec<String>), Result<(), ServerFnError>>,
+    delete_action: Action<Uuid, Result<(), ServerFnError>>,
+    tags_action: Action<(Uuid, Vec<String>), Result<(), ServerFnError>>,
 }
 
 fn use_section_header_state(
@@ -186,14 +187,13 @@ fn use_section_header_state(
     let id = section.id;
     let title = RwSignal::new(section.title.clone());
 
-    let rename = Action::new_local(|(id, t): &(u64, String)| patch_section_title(*id, t.clone()));
-    let delete_action = Action::new_local(|id: &u64| delete_section(*id));
+    let rename = Action::new_local(|(id, t): &(Uuid, String)| patch_section_title(*id, t.clone()));
+    let delete_action = Action::new_local(|id: &Uuid| delete_section(*id));
     let tags_action =
-        Action::new_local(|(id, tags): &(u64, Vec<String>)| patch_section_tags(*id, tags.clone()));
+        Action::new_local(|(id, tags): &(Uuid, Vec<String>)| patch_section_tags(*id, tags.clone()));
 
     refetch_on_success(rename, sections_resource);
     refetch_on_success(delete_action, sections_resource);
-    // Tags are updated optimistically in the editor; no refetch needed.
 
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
@@ -406,7 +406,7 @@ struct NewSectionFormState {
     kind: RwSignal<String>,
     nested: RwSignal<bool>,
     error: RwSignal<Option<String>>,
-    create: Action<(String, String, bool), Result<u64, ServerFnError>>,
+    create: Action<(String, String, bool), Result<Uuid, ServerFnError>>,
 }
 
 fn use_new_section_form(

@@ -778,7 +778,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1647,11 +1647,12 @@ dependencies = [
 [[package]]
 name = "leptos_media_player"
 version = "0.1.0"
-source = "git+https://github.com/mahmoud-eltahawy/leptos_media_player.git#0a30f4a0a955934b32e86a6bc778af685cecd4b7"
+source = "git+https://github.com/mahmoud-eltahawy/leptos_media_player.git#f8a93d9b7512395e53686fd994acea0372ee1e8e"
 dependencies = [
  "leptos",
  "leptos-use",
  "serde",
+ "uuid",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -2408,7 +2409,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2959,7 +2960,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3471,6 +3472,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "rand 0.10.2",
+ "serde_core",
  "wasm-bindgen",
 ]
 
@@ -3626,7 +3628,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

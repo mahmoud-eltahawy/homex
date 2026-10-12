@@ -1,5 +1,6 @@
-use crate::app::model::{Collection, Item};
+use crate::app::model::{Collection, CollectionSummary, Item};
 use leptos::prelude::*;
+use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
@@ -52,27 +53,25 @@ pub async fn fetch_collections_count(
 #[server]
 pub async fn fetch_collection_detail(
     section_slug: String,
-    collection_id: u64,
+    collection_id: Uuid,
 ) -> Result<Collection, ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    db::fetch_collection_detail(&mut state.db, &section_slug, collection_id as i64)
+    db::fetch_collection_detail(&mut state.db, &section_slug, collection_id)
         .await
         .srv()?
         .ok_or_else(|| ServerFnError::new(messages::COLLECTION_NOT_FOUND))
 }
 
 #[server]
-pub async fn fetch_items(collection_id: u64) -> Result<Vec<Item>, ServerFnError> {
+pub async fn fetch_items(collection_id: Uuid) -> Result<Vec<Item>, ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    db::fetch_items(&mut state.db, collection_id as i64)
-        .await
-        .srv()
+    db::fetch_items(&mut state.db, collection_id).await.srv()
 }
 
 #[server]
-pub async fn create_empty_collection(section_slug: String) -> Result<u64, ServerFnError> {
+pub async fn create_empty_collection(section_slug: String) -> Result<Uuid, ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     db::insert_empty_collection(&mut state.db, &section_slug)
@@ -82,7 +81,7 @@ pub async fn create_empty_collection(section_slug: String) -> Result<u64, Server
 
 #[server]
 pub async fn patch_collection_field(
-    id: u64,
+    id: Uuid,
     field: String,
     value: Option<String>,
 ) -> Result<(), ServerFnError> {
@@ -102,14 +101,14 @@ pub async fn patch_collection_field(
         _ => return Err(ServerFnError::new(messages::UNKNOWN_FIELD)),
     };
 
-    db::update_collection_field(&mut state.db, id as i64, f, value.as_deref())
+    db::update_collection_field(&mut state.db, id, f, value.as_deref())
         .await
         .srv()?;
     Ok(())
 }
 
 #[server]
-pub async fn patch_collection_tags(id: u64, tags: Vec<String>) -> Result<(), ServerFnError> {
+pub async fn patch_collection_tags(id: Uuid, tags: Vec<String>) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     db::set_collection_tags(&mut state.db, id, &tags)
@@ -119,7 +118,7 @@ pub async fn patch_collection_tags(id: u64, tags: Vec<String>) -> Result<(), Ser
 }
 
 #[server]
-pub async fn patch_item_title(id: u64, title: String) -> Result<(), ServerFnError> {
+pub async fn patch_item_title(id: Uuid, title: String) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     let t = if title.trim().is_empty() {
@@ -127,17 +126,17 @@ pub async fn patch_item_title(id: u64, title: String) -> Result<(), ServerFnErro
     } else {
         Some(title)
     };
-    db::update_item_title(&mut state.db, id as i64, t.as_deref())
+    db::update_item_title(&mut state.db, id, t.as_deref())
         .await
         .srv()?;
     Ok(())
 }
 
 #[server]
-pub async fn delete_collection(id: u64) -> Result<(), ServerFnError> {
+pub async fn delete_collection(id: Uuid) -> Result<(), ServerFnError> {
     use crate::app::server::{AppState, remove_media_files, remove_poster};
     let mut state: AppState = expect_context();
-    let del = db::delete_collection_cascade(&mut state.db, id as i64)
+    let del = db::delete_collection_cascade(&mut state.db, id)
         .await
         .srv()?;
     remove_poster(&state, del.poster_url.as_deref()).await;
@@ -146,12 +145,10 @@ pub async fn delete_collection(id: u64) -> Result<(), ServerFnError> {
 }
 
 #[server]
-pub async fn delete_item(id: u64) -> Result<(), ServerFnError> {
+pub async fn delete_item(id: Uuid) -> Result<(), ServerFnError> {
     use crate::app::server::{AppState, remove_media_files};
     let mut state: AppState = expect_context();
-    let del = db::delete_item_cascade(&mut state.db, id as i64)
-        .await
-        .srv()?;
+    let del = db::delete_item_cascade(&mut state.db, id).await.srv()?;
     remove_media_files(&state, &del.media_paths).await;
     Ok(())
 }
@@ -167,13 +164,16 @@ pub async fn upload_collection_poster(
 
     let mut mp = data.into_inner().unwrap();
     let mut section_slug = String::new();
-    let mut id: i64 = 0;
+    let mut id: Uuid = Uuid::nil();
     let mut bytes: Option<(String, Vec<u8>)> = None;
 
     while let Some(f) = mp.next_field().await? {
         match f.name().unwrap_or("") {
             fields::SECTION => section_slug = f.text().await?,
-            fields::ID => id = f.text().await?.parse().unwrap_or(0),
+            fields::ID => {
+                id = Uuid::parse_str(&f.text().await?)
+                    .map_err(|e| ServerFnError::new(format!("id: {e}")))?;
+            }
             fields::POSTER_FILE => {
                 let fname = f.file_name().unwrap_or("").to_string();
                 let b = f.bytes().await?.to_vec();
@@ -210,18 +210,16 @@ pub async fn upload_collection_poster(
 }
 
 #[server]
-pub async fn move_item(id: u64, is_up: bool) -> Result<(), ServerFnError> {
+pub async fn move_item(id: Uuid, is_up: bool) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    db::swap_item_order(&mut state.db, id as i64, is_up)
-        .await
-        .srv()?;
+    db::swap_item_order(&mut state.db, id, is_up).await.srv()?;
     Ok(())
 }
 
 #[server]
 pub async fn move_collection_to_section(
-    collection_id: u64,
+    collection_id: Uuid,
     to_section_slug: String,
 ) -> Result<(), ServerFnError> {
     use crate::app::server::db::{self, CollectionField, MoveCollectionError};
@@ -229,7 +227,7 @@ pub async fn move_collection_to_section(
 
     let mut state: AppState = expect_context();
 
-    let mv = db::move_collection_to_section(&mut state.db, collection_id as i64, &to_section_slug)
+    let mv = db::move_collection_to_section(&mut state.db, collection_id, &to_section_slug)
         .await
         .map_err(|e| match e {
             MoveCollectionError::SectionNotFound => ServerFnError::new(messages::SECTION_NOT_FOUND),
@@ -253,7 +251,7 @@ pub async fn move_collection_to_section(
     {
         db::update_collection_field(
             &mut state.db,
-            collection_id as i64,
+            collection_id,
             CollectionField::Poster,
             Some(&new_url),
         )
@@ -267,7 +265,7 @@ pub async fn move_collection_to_section(
 #[server]
 pub async fn fetch_collection_summaries(
     media_kind: String,
-) -> Result<Vec<crate::app::model::CollectionSummary>, ServerFnError> {
+) -> Result<Vec<CollectionSummary>, ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     db::fetch_collection_summaries(&mut state.db, &media_kind)
@@ -277,8 +275,8 @@ pub async fn fetch_collection_summaries(
 
 #[server]
 pub async fn move_items_to_collection(
-    item_ids: Vec<u64>,
-    to_collection_id: u64,
+    item_ids: Vec<Uuid>,
+    to_collection_id: Uuid,
 ) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();

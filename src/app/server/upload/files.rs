@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use leptos::prelude::ServerFnError;
+use uuid::Uuid;
 
 use crate::app::model::MediaKind;
 use crate::app::server::AppState;
@@ -8,7 +9,6 @@ use crate::app::server::convert::{
     TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
     is_video_container_supported,
 };
-use crate::app::server::upload::new_storage_token;
 
 use super::naming::{sanitize_filename, slugify};
 use super::types::{StagedFile, UploadFile, UploadPayload};
@@ -61,7 +61,7 @@ impl StagingPlan {
         media_root.join(&self.subdir).join(&self.slug)
     }
 
-    fn rel_for(&self, stem: &str, token: &str, ext: &str) -> String {
+    fn rel_for(&self, stem: &str, token: Uuid, ext: &str) -> String {
         format!("{}/{}/{}-{}.{}", self.subdir, self.slug, stem, token, ext)
     }
 }
@@ -69,7 +69,7 @@ impl StagingPlan {
 fn storage_slug(payload: &UploadPayload) -> String {
     let raw = slugify(&payload.title);
     if raw.is_empty() {
-        new_storage_token()
+        Uuid::new_v4().to_string()
     } else {
         raw
     }
@@ -105,7 +105,7 @@ async fn move_temp_to_final(temp_path: &Path, dest: &Path) -> Result<(), ServerF
 // ─── Placing a raw file ───────────────────────────────────────────────────
 
 struct PlacedRaw {
-    token: String,
+    token: Uuid,
     safe_stem: String,
     rel: String,
     abs: PathBuf,
@@ -118,8 +118,8 @@ async fn place_raw_file(
 ) -> Result<PlacedRaw, ServerFnError> {
     let ext = extension_of(&file.filename);
     let stem = safe_stem(&file.filename);
-    let token = new_storage_token();
-    let rel = plan.rel_for(&stem, &token, &ext);
+    let token = Uuid::new_v4();
+    let rel = plan.rel_for(&stem, token, &ext);
     let abs = media_root.join(&rel);
     move_temp_to_final(&file.temp_path, &abs).await?;
     Ok(PlacedRaw {
@@ -136,7 +136,7 @@ fn final_path_for(
     placed: &PlacedRaw,
     target: TargetFormat,
 ) -> (String, PathBuf) {
-    let rel = plan.rel_for(&placed.safe_stem, &placed.token, target.extension());
+    let rel = plan.rel_for(&placed.safe_stem, placed.token, target.extension());
     let abs = media_root.join(&rel);
     (rel, abs)
 }
