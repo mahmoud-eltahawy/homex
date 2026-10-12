@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use tempfile::TempDir;
+
 pub struct UploadPayload {
     pub section_slug: String,
     pub collection_id: i64,
@@ -8,7 +10,9 @@ pub struct UploadPayload {
     pub season_number: Option<i64>,
     pub files: Vec<UploadFile>,
     pub poster: Option<(String, Vec<u8>)>,
-    pub temp_dir: PathBuf,
+    /// Auto-cleaning temp directory. Dropping the payload wipes its
+    /// contents; there is no manual cleanup path.
+    pub temp_dir: TempDir,
 }
 
 pub struct UploadFile {

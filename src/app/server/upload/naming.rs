@@ -1,33 +1,25 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+// ─── Slug ─────────────────────────────────────────────────────────────────
+//
+// Re-exported so callers can keep using `super::naming::slugify`. The `slug`
+// crate handles Unicode (via `deunicode`) — hand-rolled ASCII-only versions
+// collapse non-Latin titles to an empty string.
 
-static STORAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub use slug::slugify;
+
+// ─── Storage token ────────────────────────────────────────────────────────
+//
+// Random v4 UUID, hex-encoded by `Display`. Collisions are astronomically
+// unlikely and callers don't depend on ordering.
 
 pub fn new_storage_token() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let ns = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let c = STORAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
-
-    format!("{ns:016x}{c:016x}")
+    uuid::Uuid::new_v4().to_string()
 }
 
-pub fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut last_dash = false;
-    for c in s.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-            last_dash = false;
-        } else if !last_dash && !out.is_empty() {
-            out.push('-');
-            last_dash = true;
-        }
-    }
-    out.trim_matches('-').to_string()
+pub fn new_job_id() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
+
+// ─── Filename helpers ─────────────────────────────────────────────────────
 
 pub fn sanitize_filename(name: &str) -> String {
     name.chars()
@@ -37,6 +29,10 @@ pub fn sanitize_filename(name: &str) -> String {
 
 /// Extension for a poster upload. Falls back to `"jpg"` when the incoming
 /// filename has no plausible extension.
+///
+/// This is only the *candidate* extension — the poster write path replaces
+/// it with the magic-byte-detected extension when `infer` recognizes the
+/// bytes. See `server::poster::resolve_poster_ext`.
 pub fn extension_of(filename: &str) -> String {
     match filename.rsplit_once('.') {
         Some((_, ext))
@@ -48,13 +44,4 @@ pub fn extension_of(filename: &str) -> String {
         }
         _ => "jpg".to_string(),
     }
-}
-
-pub fn new_job_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ns = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{ns:x}")
 }

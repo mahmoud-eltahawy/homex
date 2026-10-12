@@ -6,30 +6,41 @@ const ALLOWED_POSTER_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
 
 const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 
-fn validate_poster(ext: &str, bytes: &[u8]) -> Result<(), ServerFnError> {
-    let lower = ext.to_ascii_lowercase();
-    if !ALLOWED_POSTER_EXTS.contains(&lower.as_str()) {
-        return Err(ServerFnError::new(format!(
-            "Unsupported image format: .{ext}"
-        )));
-    }
-    if bytes.len() > MAX_POSTER_BYTES {
-        return Err(ServerFnError::new(format!(
-            "Image size exceeds {} MB",
-            MAX_POSTER_BYTES / 1024 / 1024
-        )));
-    }
-    Ok(())
+/// Resolve the canonical extension for a poster upload.
+///
+/// `infer` checks the magic bytes first — this defends against a client
+/// that names a non-image as `.jpg`, and against a client that names a
+/// PNG as `.jpeg`. Falls back to the client-supplied extension only if
+/// `infer` can't classify the bytes at all.
+fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, ServerFnError> {
+    let candidate = match infer::get(bytes) {
+        Some(kind) => kind.extension().to_string(),
+        None => client_ext.to_ascii_lowercase(),
+    };
+
+    ALLOWED_POSTER_EXTS
+        .iter()
+        .find(|allowed| allowed.eq_ignore_ascii_case(&candidate))
+        .copied()
+        .ok_or_else(|| ServerFnError::new(format!("Unsupported image format: .{candidate}")))
 }
 
 pub async fn write_poster(
     data_dir: &Path,
     subdir: &str,
     entity_id: i64,
-    ext: &str,
+    client_ext: &str,
     bytes: &[u8],
 ) -> Result<String, ServerFnError> {
-    validate_poster(ext, bytes)?;
+    if bytes.len() > MAX_POSTER_BYTES {
+        return Err(ServerFnError::new(format!(
+            "Image size exceeds {} MB",
+            MAX_POSTER_BYTES / 1024 / 1024
+        )));
+    }
+
+    let ext = resolve_poster_ext(client_ext, bytes)?;
+
     let dir = data_dir.join(storage::POSTERS_DIR).join(subdir);
     tokio::fs::create_dir_all(&dir)
         .await

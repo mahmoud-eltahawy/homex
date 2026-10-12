@@ -5,7 +5,6 @@ mod persist;
 mod types;
 mod validate;
 
-use std::path::Path;
 use std::time::Duration;
 
 pub use multipart::parse_upload_multipart;
@@ -27,10 +26,6 @@ pub fn schedule_job_eviction(jobs: Jobs, job_id: String) {
         sleep(JOB_RETENTION).await;
         jobs.write().await.remove(&job_id);
     });
-}
-
-async fn wipe_temp_dir(dir: &Path) {
-    let _ = tokio::fs::remove_dir_all(dir).await;
 }
 
 async fn stage_phase(
@@ -81,8 +76,7 @@ pub async fn process_upload(
     kind: MediaKind,
     job_id: Option<&str>,
 ) -> Result<String, ServerFnError> {
-    let temp_dir = payload.temp_dir.clone();
-    let result = execute_upload(&payload, state, kind, job_id).await;
-    wipe_temp_dir(&temp_dir).await;
-    result
+    // `payload.temp_dir` is a `TempDir`; it wipes itself when `payload`
+    // is dropped at the end of this function.
+    execute_upload(&payload, state, kind, job_id).await
 }

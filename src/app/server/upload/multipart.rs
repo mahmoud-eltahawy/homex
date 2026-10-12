@@ -1,4 +1,4 @@
-use crate::app::constants::{messages, storage};
+use crate::app::constants::messages;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -6,7 +6,7 @@ use leptos::prelude::ServerFnError;
 use server_fn::codec::MultipartData;
 use tokio::io::AsyncWriteExt;
 
-use super::naming::{extension_of, new_job_id};
+use super::naming::extension_of;
 use super::types::{UploadFile, UploadPayload};
 
 // ─── Multipart form field names (server-side) ─────────────────────────────
@@ -17,21 +17,16 @@ use super::types::{UploadFile, UploadPayload};
 mod fields;
 
 // ─── Temp dir management ──────────────────────────────────────────────────
+//
+// `TempDir` wipes its contents on drop, so there is no manual cleanup path.
+// The directory is created here and moved into the `UploadPayload`, which
+// owns it until `process_upload` returns.
 
-fn fresh_temp_dir() -> PathBuf {
-    std::env::temp_dir()
-        .join(storage::UPLOAD_TEMP_DIR)
-        .join(new_job_id())
-}
-
-async fn create_temp_dir(dir: &Path) -> Result<(), ServerFnError> {
-    tokio::fs::create_dir_all(dir)
-        .await
+fn fresh_temp_dir() -> Result<tempfile::TempDir, ServerFnError> {
+    tempfile::Builder::new()
+        .prefix("homex-upload-")
+        .tempdir()
         .map_err(|e| ServerFnError::new(format!("mkdir temp: {e}")))
-}
-
-async fn wipe_temp_dir(dir: &Path) {
-    let _ = tokio::fs::remove_dir_all(dir).await;
 }
 
 // ─── Accumulator ──────────────────────────────────────────────────────────
@@ -235,7 +230,7 @@ fn build_upload_files(
         .collect()
 }
 
-fn finalize(acc: Accumulator, temp_dir: PathBuf) -> Result<UploadPayload, ServerFnError> {
+fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPayload, ServerFnError> {
     if acc.files.is_empty() {
         return Err(ServerFnError::new(messages::NO_FILES_RECEIVED));
     }
@@ -259,22 +254,10 @@ fn finalize(acc: Accumulator, temp_dir: PathBuf) -> Result<UploadPayload, Server
 
 pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload, ServerFnError> {
     let mut multipart = data.into_inner().unwrap();
-    let temp_dir = fresh_temp_dir();
-    create_temp_dir(&temp_dir).await?;
+    let temp_dir = fresh_temp_dir()?;
 
-    let acc = match run_parse_loop(&mut multipart, &temp_dir).await {
-        Ok(a) => a,
-        Err(e) => {
-            wipe_temp_dir(&temp_dir).await;
-            return Err(e);
-        }
-    };
-
-    match finalize(acc, temp_dir.clone()) {
-        Ok(p) => Ok(p),
-        Err(e) => {
-            wipe_temp_dir(&temp_dir).await;
-            Err(e)
-        }
-    }
+    // If either of the following steps fails, `temp_dir` is dropped and its
+    // contents are wiped automatically — no manual cleanup path.
+    let acc = run_parse_loop(&mut multipart, temp_dir.path()).await?;
+    finalize(acc, temp_dir)
 }
