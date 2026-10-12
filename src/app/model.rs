@@ -2,8 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::constants::routes;
 
-// ─── Tag canonicalization ─────────────────────────────────────────────────
+// ─── Tag canonicalization (SSR only) ──────────────────────────────────────
+//
+// Used by the tag write path in `server::db`. The client never canonicalizes
+// — it just forwards the names the user typed.
 
+#[cfg(feature = "ssr")]
 pub fn canonicalize_tags<I, S>(tags: I) -> Vec<String>
 where
     I: IntoIterator<Item = S>,
@@ -19,26 +23,19 @@ where
     v
 }
 
-// ─── Search parsing ───────────────────────────────────────────────────────
+// ─── Search parsing (SSR only) ────────────────────────────────────────────
 //
-// A raw query string is split into two parts:
-//   - words prefixed with `#` become tag filters
-//   - everything else is kept as a single text string
-//
-// Examples:
-//   "sci-fi #action #2024"  → text "sci-fi",   tags ["action", "2024"]
-//   "#action #2024"         → text None,       tags ["action", "2024"]
-//   "hello world"           → text "hello world", tags []
-//   "extra#not-a-tag"       → text "extra#not-a-tag", tags []
-//
-// A `#` only counts as a tag sigil when it starts a word.
+// The raw query string is parsed on the server inside `fetch_collections`
+// and `fetch_collections_count`. The client sends it verbatim.
 
+#[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SearchQuery {
     pub tags: Vec<String>,
     pub text: Option<String>,
 }
 
+#[cfg(feature = "ssr")]
 pub fn parse_search(raw: &str) -> SearchQuery {
     let mut tags: Vec<String> = Vec::new();
     let mut words: Vec<&str> = Vec::new();
@@ -53,8 +50,6 @@ pub fn parse_search(raw: &str) -> SearchQuery {
     }
 
     tags.sort();
-    tags.dedup();
-    // Case-insensitive dedupe (keeps the first, after sorting).
     tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
     let text = if words.is_empty() {
@@ -100,7 +95,7 @@ impl TryFrom<&str> for MediaKind {
     }
 }
 
-// ─── Tag ──────────────────────────────────────────────────────────────────
+// ─── Tag (wire + toasty model) ────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ssr", derive(toasty::Model))]
@@ -113,20 +108,25 @@ pub struct Tag {
     pub name: String,
 }
 
-// ─── Shared models (no `Vec` fields → single struct) ──────────────────────
+// ─── File (SSR only) ──────────────────────────────────────────────────────
+//
+// `File` never crosses the wire: items carry `file_id: u64` and the stream
+// route resolves it server-side. So the whole struct is SSR-only.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(toasty::Model))]
-#[cfg_attr(feature = "ssr", table = "files")]
+#[cfg(feature = "ssr")]
+#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
+#[table = "files"]
 pub struct File {
-    #[cfg_attr(feature = "ssr", key)]
-    #[cfg_attr(feature = "ssr", auto)]
+    #[key]
+    #[auto]
     pub id: u64,
-    #[cfg_attr(feature = "ssr", unique)]
+    #[unique]
     pub relative_path: String,
     pub size_bytes: i64,
     pub duration_secs: i64,
 }
+
+// ─── Item (wire + toasty model) ───────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ssr", derive(toasty::Model))]
@@ -146,7 +146,10 @@ pub struct Item {
     pub file_id: u64,
 }
 
-// ─── Row types (Toasty models for tables whose wire type carries tags) ────
+// ─── Row types (SSR-only Toasty models) ───────────────────────────────────
+//
+// `Section` and `Collection` carry `Vec<Tag>` on the wire, which cannot be a
+// SQL column — so the DB uses row structs and the app converts.
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
@@ -181,7 +184,7 @@ pub struct CollectionRow {
     pub items_count: i64,
 }
 
-// ─── Join tables ──────────────────────────────────────────────────────────
+// ─── Join tables (SSR-only) ───────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
