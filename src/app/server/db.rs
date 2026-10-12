@@ -3,7 +3,7 @@ use toasty::Db;
 use super::Config;
 use crate::app::model::{
     Collection, CollectionRow, CollectionTag, File, Item, Section, SectionRow, SectionTag, Tag,
-    canonicalize_tags,
+    canonicalize_tags, parse_search,
 };
 
 // ─── Pool init ────────────────────────────────────────────────────────────
@@ -50,6 +50,17 @@ pub async fn fetch_all_tags(db: &mut Db) -> toasty::Result<Vec<Tag>> {
         .order_by(Tag::fields().name().asc())
         .exec(db)
         .await
+}
+
+/// Case-insensitive lookup of a tag by name. Returns `None` if no such tag.
+async fn find_tag_id_by_name(db: &mut Db, name: &str) -> toasty::Result<Option<u64>> {
+    let candidates = Tag::filter(Tag::fields().name().like(name.to_string()))
+        .exec(db)
+        .await?;
+    Ok(candidates
+        .into_iter()
+        .find(|t| t.name.eq_ignore_ascii_case(name))
+        .map(|t| t.id))
 }
 
 /// Find a tag by name, or create it. Called inside a tag-set transaction.
@@ -153,6 +164,42 @@ pub async fn set_collection_tags(
     Ok(())
 }
 
+// ─── Tag-driven collection filtering ──────────────────────────────────────
+
+/// Returns the ids of collections that have **every** tag in `tag_names`
+/// (case-insensitive). Returns an empty vec if any of the tags doesn't
+/// exist at all.
+async fn collection_ids_with_all_tags(
+    db: &mut Db,
+    tag_names: &[String],
+) -> toasty::Result<Vec<u64>> {
+    if tag_names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut per_tag_ids: Vec<Vec<u64>> = Vec::with_capacity(tag_names.len());
+    for name in tag_names {
+        let Some(tag_id) = find_tag_id_by_name(db, name).await? else {
+            return Ok(Vec::new());
+        };
+        let joins = CollectionTag::filter(CollectionTag::fields().tag_id().eq(tag_id))
+            .exec(db)
+            .await?;
+        per_tag_ids.push(joins.into_iter().map(|j| j.collection_id).collect());
+    }
+
+    let mut result = per_tag_ids.swap_remove(0);
+    for other in &per_tag_ids {
+        result.retain(|id| other.contains(id));
+        if result.is_empty() {
+            return Ok(Vec::new());
+        }
+    }
+    result.sort_unstable();
+    result.dedup();
+    Ok(result)
+}
+
 // ─── Section queries ──────────────────────────────────────────────────────
 
 pub async fn fetch_sections(db: &mut Db) -> toasty::Result<Vec<Section>> {
@@ -239,7 +286,6 @@ pub async fn update_section_title(db: &mut Db, id: i64, title: &str) -> toasty::
 }
 
 pub async fn delete_section(db: &mut Db, id: i64) -> toasty::Result<()> {
-    // Drop join rows first so no dangling `section_tags` survive.
     let joins = SectionTag::filter(SectionTag::fields().section_id().eq(id as u64))
         .exec(db)
         .await?;
@@ -260,16 +306,31 @@ pub async fn fetch_collections(
     size: usize,
     search: Option<&str>,
 ) -> toasty::Result<Vec<Collection>> {
-    let mut q = CollectionRow::filter(
-        CollectionRow::fields()
-            .section_slug()
-            .eq(section_slug.to_string()),
-    );
-    if let Some(s) = search {
-        q = q.filter(CollectionRow::fields().title().like(format!("%{s}%")));
+    let parsed = search.map(parse_search).unwrap_or_default();
+
+    let tag_filtered_ids: Option<Vec<u64>> = if parsed.tags.is_empty() {
+        None
+    } else {
+        Some(collection_ids_with_all_tags(db, &parsed.tags).await?)
+    };
+
+    if let Some(ids) = &tag_filtered_ids
+        && ids.is_empty()
+    {
+        return Ok(Vec::new());
     }
-    let rows = q
-        .order_by((
+
+    let rows: Vec<CollectionRow> = if tag_filtered_ids.is_none() {
+        // No tag filter — paginate in the DB.
+        let mut q = CollectionRow::filter(
+            CollectionRow::fields()
+                .section_slug()
+                .eq(section_slug.to_string()),
+        );
+        if let Some(t) = &parsed.text {
+            q = q.filter(CollectionRow::fields().title().like(format!("%{t}%")));
+        }
+        q.order_by((
             CollectionRow::fields().position().asc(),
             CollectionRow::fields().title().asc(),
             CollectionRow::fields().id().asc(),
@@ -277,13 +338,38 @@ pub async fn fetch_collections(
         .limit(size)
         .offset(offset)
         .exec(db)
-        .await?;
+        .await?
+    } else {
+        // Tag filter is applied post-fetch, so pagination happens in Rust.
+        let mut q = CollectionRow::filter(
+            CollectionRow::fields()
+                .section_slug()
+                .eq(section_slug.to_string()),
+        );
+        if let Some(t) = &parsed.text {
+            q = q.filter(CollectionRow::fields().title().like(format!("%{t}%")));
+        }
+        let all = q
+            .order_by((
+                CollectionRow::fields().position().asc(),
+                CollectionRow::fields().title().asc(),
+                CollectionRow::fields().id().asc(),
+            ))
+            .exec(db)
+            .await?;
+        let ids = tag_filtered_ids.as_ref().unwrap();
+        all.into_iter()
+            .filter(|r| ids.contains(&r.id))
+            .skip(offset)
+            .take(size)
+            .collect()
+    };
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let mut collection: Collection = row.into();
-        collection.tags = fetch_collection_tags(db, collection.id).await?;
-        out.push(collection);
+        let mut c: Collection = row.into();
+        c.tags = fetch_collection_tags(db, c.id).await?;
+        out.push(c);
     }
     Ok(out)
 }
@@ -293,15 +379,37 @@ pub async fn fetch_collections_count(
     section_slug: &str,
     search: Option<&str>,
 ) -> toasty::Result<i64> {
+    let parsed = search.map(parse_search).unwrap_or_default();
+
+    let tag_filtered_ids: Option<Vec<u64>> = if parsed.tags.is_empty() {
+        None
+    } else {
+        Some(collection_ids_with_all_tags(db, &parsed.tags).await?)
+    };
+
+    if let Some(ids) = &tag_filtered_ids
+        && ids.is_empty()
+    {
+        return Ok(0);
+    }
+
     let mut q = CollectionRow::filter(
         CollectionRow::fields()
             .section_slug()
             .eq(section_slug.to_string()),
     );
-    if let Some(s) = search {
-        q = q.filter(CollectionRow::fields().title().like(format!("%{s}%")));
+    if let Some(t) = &parsed.text {
+        q = q.filter(CollectionRow::fields().title().like(format!("%{t}%")));
     }
-    Ok(q.count().exec(db).await? as i64)
+
+    match tag_filtered_ids {
+        None => Ok(q.count().exec(db).await? as i64),
+        Some(ids) => {
+            let rows = q.exec(db).await?;
+            let count = rows.into_iter().filter(|r| ids.contains(&r.id)).count();
+            Ok(count as i64)
+        }
+    }
 }
 
 pub async fn fetch_collection_detail(
@@ -372,7 +480,6 @@ pub async fn update_collection_field(
     field: CollectionField,
     value: Option<&str>,
 ) -> toasty::Result<()> {
-    // Tags live in `collection_tags`, not on the row.
     if matches!(field, CollectionField::Tags) {
         let names: Vec<String> = value
             .unwrap_or_default()
@@ -528,8 +635,6 @@ pub async fn delete_collection_cascade(db: &mut Db, id: i64) -> toasty::Result<C
         .await?;
     let file_ids: Vec<u64> = items.iter().map(|i| i.file_id).collect();
 
-    // Drop collection↔tag join rows. The `tags` rows themselves stay — they
-    // may be referenced by other sections/collections.
     let joins = CollectionTag::filter(CollectionTag::fields().collection_id().eq(id as u64))
         .exec(&mut tx)
         .await?;
@@ -573,7 +678,6 @@ pub async fn delete_item_cascade(db: &mut Db, id: i64) -> toasty::Result<ItemDel
     let collection_id = item.collection_id;
     item.delete().exec(&mut tx).await?;
 
-    // Decrement the denormalized counter on the parent collection.
     let mut collection = CollectionRow::get_by_id(&mut tx, &collection_id).await?;
     let next_count = (collection.items_count - 1).max(0);
     collection

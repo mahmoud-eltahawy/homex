@@ -67,6 +67,46 @@ where
     }
 }
 
+// ─── Tag hint chip ────────────────────────────────────────────────────────
+//
+// Renders one chip per `#tag`-looking word currently in the input, so the
+// user can see at a glance which words the server will interpret as tag
+// filters.
+
+fn extract_tag_hints(raw: &str) -> Vec<String> {
+    let mut tags: Vec<String> = raw
+        .split_whitespace()
+        .filter_map(|w| w.strip_prefix('#'))
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .collect();
+    tags.sort();
+    tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    tags
+}
+
+#[component]
+fn TagHints(raw: Signal<String>) -> impl IntoView {
+    let hints = move || extract_tag_hints(&raw.get());
+
+    view! {
+        <Show when=move || !hints().is_empty()>
+            <div class="mt-2 flex flex-wrap items-center gap-1.5 justify-center">
+                <span class="text-[10px] text-gray-500 uppercase tracking-wider">
+                    "filtering by tag"
+                </span>
+                <For each=hints key=|t| t.clone() let:tag>
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full \
+                                 bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 \
+                                 text-[10px] font-medium">
+                        {"#"}{tag}
+                    </span>
+                </For>
+            </div>
+        </Show>
+    }
+}
+
 // ─── View ─────────────────────────────────────────────────────────────────
 
 #[component]
@@ -76,31 +116,37 @@ where
 {
     let handlers = use_search_debounce(offset_reset, search_query);
 
+    let raw = Signal::derive(move || handlers.input_value.get());
+
     view! {
-        <div class="mb-2 md:mb-4 relative w-full max-w-md mx-auto">
-            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                <SearchIcon/>
-            </span>
+        <div class="mb-2 md:mb-4 w-full max-w-md mx-auto">
+            <div class="relative w-full">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                    <SearchIcon/>
+                </span>
 
-            <input
-                autofocus=true
-                type="text"
-                class="w-full bg-gray-800 text-white rounded-xl pl-10 pr-10 py-3 outline-none \
-                       focus:ring-2 focus:ring-cyan-400 transition-all"
-                prop:value=move || handlers.input_value.get()
-                on:input=move |ev| handlers.on_input.run(ev)
-            />
+                <input
+                    autofocus=true
+                    type="text"
+                    placeholder="Search... use #tag to filter"
+                    class="w-full bg-gray-800 text-white rounded-xl pl-10 pr-10 py-3 outline-none \
+                           focus:ring-2 focus:ring-cyan-400 transition-all"
+                    prop:value=move || handlers.input_value.get()
+                    on:input=move |ev| handlers.on_input.run(ev)
+                />
 
-            <Show when=move || !handlers.input_value.get().is_empty()>
-                <button
-                    on:click=move |_| handlers.clear.run(())
-                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 \
-                           hover:text-white transition-colors"
-                    aria-label="Clear search"
-                >
-                    <XIcon/>
-                </button>
-            </Show>
+                <Show when=move || !handlers.input_value.get().is_empty()>
+                    <button
+                        on:click=move |_| handlers.clear.run(())
+                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 \
+                               hover:text-white transition-colors"
+                        aria-label="Clear search"
+                    >
+                        <XIcon/>
+                    </button>
+                </Show>
+            </div>
+            <TagHints raw=raw/>
         </div>
     }
 }

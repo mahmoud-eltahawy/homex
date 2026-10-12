@@ -19,6 +19,53 @@ where
     v
 }
 
+// ─── Search parsing ───────────────────────────────────────────────────────
+//
+// A raw query string is split into two parts:
+//   - words prefixed with `#` become tag filters
+//   - everything else is kept as a single text string
+//
+// Examples:
+//   "sci-fi #action #2024"  → text "sci-fi",   tags ["action", "2024"]
+//   "#action #2024"         → text None,       tags ["action", "2024"]
+//   "hello world"           → text "hello world", tags []
+//   "extra#not-a-tag"       → text "extra#not-a-tag", tags []
+//
+// A `#` only counts as a tag sigil when it starts a word.
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchQuery {
+    pub tags: Vec<String>,
+    pub text: Option<String>,
+}
+
+pub fn parse_search(raw: &str) -> SearchQuery {
+    let mut tags: Vec<String> = Vec::new();
+    let mut words: Vec<&str> = Vec::new();
+
+    for word in raw.split_whitespace() {
+        match word.strip_prefix('#') {
+            Some(tag) if !tag.is_empty() => {
+                tags.push(tag.to_string());
+            }
+            _ => words.push(word),
+        }
+    }
+
+    tags.sort();
+    tags.dedup();
+    // Case-insensitive dedupe (keeps the first, after sorting).
+    tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+
+    let text = if words.is_empty() {
+        None
+    } else {
+        Some(words.join(" "))
+    };
+
+    SearchQuery { tags, text }
+}
+
 // ─── MediaKind ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,9 +101,6 @@ impl TryFrom<&str> for MediaKind {
 }
 
 // ─── Tag ──────────────────────────────────────────────────────────────────
-//
-// `Tag` has no `Vec` field, so it is both the wire type and the toasty model
-// — no row/wire split needed.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ssr", derive(toasty::Model))]
