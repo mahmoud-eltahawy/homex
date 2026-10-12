@@ -8,9 +8,6 @@ use crate::app::constants::messages;
 use crate::app::server::{ToastyErr, db};
 
 // ─── Multipart form field names (poster upload) ───────────────────────────
-//
-// Only reachable from inside `upload_collection_poster`, which is a
-// `#[server]` fn whose body is compiled only on the SSR build.
 
 #[cfg(feature = "ssr")]
 mod fields {
@@ -102,10 +99,21 @@ pub async fn patch_collection_field(
         "title" => CollectionField::Title,
         "description" => CollectionField::Description,
         "poster" => CollectionField::Poster,
+        "tags" => CollectionField::Tags,
         _ => return Err(ServerFnError::new(messages::UNKNOWN_FIELD)),
     };
 
     db::update_collection_field(&mut state.db, id as i64, f, value.as_deref())
+        .await
+        .srv()?;
+    Ok(())
+}
+
+#[server]
+pub async fn patch_collection_tags(id: u64, tags: Vec<String>) -> Result<(), ServerFnError> {
+    use crate::app::server::AppState;
+    let mut state: AppState = expect_context();
+    db::set_collection_tags(&mut state.db, id, &tags)
         .await
         .srv()?;
     Ok(())

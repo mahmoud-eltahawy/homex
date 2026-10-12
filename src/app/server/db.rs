@@ -1,7 +1,10 @@
 use toasty::Db;
 
 use super::Config;
-use crate::app::model::{Collection, File, Item, Section};
+use crate::app::model::{
+    Collection, CollectionRow, CollectionTag, File, Item, Section, SectionRow, SectionTag, Tag,
+    canonicalize_tags,
+};
 
 // ─── Pool init ────────────────────────────────────────────────────────────
 
@@ -16,9 +19,12 @@ pub async fn init(config: &Config) -> Result<Db, Box<dyn std::error::Error>> {
     let db = toasty::Db::builder()
         .models(toasty::models!(
             crate::app::model::File,
-            crate::app::model::Section,
-            crate::app::model::Collection,
+            crate::app::model::SectionRow,
+            crate::app::model::CollectionRow,
             crate::app::model::Item,
+            crate::app::model::Tag,
+            crate::app::model::SectionTag,
+            crate::app::model::CollectionTag,
         ))
         .connect(&url)
         .await?;
@@ -37,23 +43,142 @@ fn err_not_found(what: &str) -> toasty::Error {
     toasty::Error::record_not_found(what)
 }
 
+// ─── Tags ─────────────────────────────────────────────────────────────────
+
+/// Find a tag by name, or create it. Called inside a tag-set transaction.
+async fn upsert_tag_tx(tx: &mut toasty::Transaction<'_>, name: &str) -> toasty::Result<Tag> {
+    if let Some(t) = Tag::filter(Tag::fields().name().eq(name.to_string()))
+        .first()
+        .exec(tx)
+        .await?
+    {
+        return Ok(t);
+    }
+    toasty::create!(Tag {
+        name: name.to_string(),
+    })
+    .exec(tx)
+    .await
+}
+
+async fn tags_for_joins(db: &mut Db, tag_ids: &[u64]) -> toasty::Result<Vec<Tag>> {
+    let mut out = Vec::with_capacity(tag_ids.len());
+    for id in tag_ids {
+        if let Ok(t) = Tag::get_by_id(db, id).await {
+            out.push(t);
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+pub async fn fetch_section_tags(db: &mut Db, section_id: u64) -> toasty::Result<Vec<Tag>> {
+    let joins = SectionTag::filter(SectionTag::fields().section_id().eq(section_id))
+        .exec(db)
+        .await?;
+    let ids: Vec<u64> = joins.iter().map(|j| j.tag_id).collect();
+    tags_for_joins(db, &ids).await
+}
+
+pub async fn fetch_collection_tags(db: &mut Db, collection_id: u64) -> toasty::Result<Vec<Tag>> {
+    let joins = CollectionTag::filter(CollectionTag::fields().collection_id().eq(collection_id))
+        .exec(db)
+        .await?;
+    let ids: Vec<u64> = joins.iter().map(|j| j.tag_id).collect();
+    tags_for_joins(db, &ids).await
+}
+
+pub async fn set_section_tags(
+    db: &mut Db,
+    section_id: u64,
+    names: &[String],
+) -> toasty::Result<()> {
+    let normalized = canonicalize_tags(names);
+    let mut tx = db.transaction().await?;
+
+    let existing = SectionTag::filter(SectionTag::fields().section_id().eq(section_id))
+        .exec(&mut tx)
+        .await?;
+    for row in existing {
+        row.delete().exec(&mut tx).await?;
+    }
+
+    for name in &normalized {
+        let tag = upsert_tag_tx(&mut tx, name).await?;
+        toasty::create!(SectionTag {
+            section_id,
+            tag_id: tag.id,
+        })
+        .exec(&mut tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn set_collection_tags(
+    db: &mut Db,
+    collection_id: u64,
+    names: &[String],
+) -> toasty::Result<()> {
+    let normalized = canonicalize_tags(names);
+    let mut tx = db.transaction().await?;
+
+    let existing = CollectionTag::filter(CollectionTag::fields().collection_id().eq(collection_id))
+        .exec(&mut tx)
+        .await?;
+    for row in existing {
+        row.delete().exec(&mut tx).await?;
+    }
+
+    for name in &normalized {
+        let tag = upsert_tag_tx(&mut tx, name).await?;
+        toasty::create!(CollectionTag {
+            collection_id,
+            tag_id: tag.id,
+        })
+        .exec(&mut tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
 // ─── Section queries ──────────────────────────────────────────────────────
 
 pub async fn fetch_sections(db: &mut Db) -> toasty::Result<Vec<Section>> {
-    Section::all()
+    let rows = SectionRow::all()
         .order_by((
-            Section::fields().position().asc(),
-            Section::fields().id().asc(),
+            SectionRow::fields().position().asc(),
+            SectionRow::fields().id().asc(),
         ))
         .exec(db)
-        .await
+        .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut section: Section = row.into();
+        section.tags = fetch_section_tags(db, section.id).await?;
+        out.push(section);
+    }
+    Ok(out)
 }
 
 pub async fn fetch_section_by_slug(db: &mut Db, slug: &str) -> toasty::Result<Option<Section>> {
-    Section::filter(Section::fields().slug().eq(slug.to_string()))
+    let row = SectionRow::filter(SectionRow::fields().slug().eq(slug.to_string()))
         .first()
         .exec(db)
-        .await
+        .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let mut section: Section = row.into();
+    section.tags = fetch_section_tags(db, section.id).await?;
+    Ok(Some(section))
 }
 
 pub async fn insert_section(
@@ -64,7 +189,7 @@ pub async fn insert_section(
     nested: bool,
 ) -> toasty::Result<u64> {
     let next = next_section_position(db).await?;
-    let s = toasty::create!(Section {
+    let row = toasty::create!(SectionRow {
         slug: slug.to_string(),
         title: title.to_string(),
         media_kind: media_kind.to_string(),
@@ -73,12 +198,12 @@ pub async fn insert_section(
     })
     .exec(db)
     .await?;
-    Ok(s.id)
+    Ok(row.id)
 }
 
 async fn next_section_position(db: &mut Db) -> toasty::Result<i64> {
-    let last = Section::all()
-        .order_by(Section::fields().position().desc())
+    let last = SectionRow::all()
+        .order_by(SectionRow::fields().position().desc())
         .limit(1)
         .exec(db)
         .await?;
@@ -92,8 +217,8 @@ pub async fn update_section(
     media_kind: &str,
     nested: bool,
 ) -> toasty::Result<()> {
-    let mut s = Section::get_by_id(db, &(id as u64)).await?;
-    s.update()
+    let mut row = SectionRow::get_by_id(db, &(id as u64)).await?;
+    row.update()
         .title(title.to_string())
         .media_kind(media_kind.to_string())
         .nested(nested)
@@ -102,13 +227,21 @@ pub async fn update_section(
 }
 
 pub async fn update_section_title(db: &mut Db, id: i64, title: &str) -> toasty::Result<()> {
-    let mut s = Section::get_by_id(db, &(id as u64)).await?;
-    s.update().title(title.to_string()).exec(db).await
+    let mut row = SectionRow::get_by_id(db, &(id as u64)).await?;
+    row.update().title(title.to_string()).exec(db).await
 }
 
 pub async fn delete_section(db: &mut Db, id: i64) -> toasty::Result<()> {
-    let s = Section::get_by_id(db, &(id as u64)).await?;
-    s.delete().exec(db).await
+    // Drop join rows first so no dangling `section_tags` survive.
+    let joins = SectionTag::filter(SectionTag::fields().section_id().eq(id as u64))
+        .exec(db)
+        .await?;
+    for row in joins {
+        row.delete().exec(db).await?;
+    }
+
+    let row = SectionRow::get_by_id(db, &(id as u64)).await?;
+    row.delete().exec(db).await
 }
 
 // ─── Collection queries ───────────────────────────────────────────────────
@@ -120,23 +253,32 @@ pub async fn fetch_collections(
     size: usize,
     search: Option<&str>,
 ) -> toasty::Result<Vec<Collection>> {
-    let mut q = Collection::filter(
-        Collection::fields()
+    let mut q = CollectionRow::filter(
+        CollectionRow::fields()
             .section_slug()
             .eq(section_slug.to_string()),
     );
     if let Some(s) = search {
-        q = q.filter(Collection::fields().title().like(format!("%{s}%")));
+        q = q.filter(CollectionRow::fields().title().like(format!("%{s}%")));
     }
-    q.order_by((
-        Collection::fields().position().asc(),
-        Collection::fields().title().asc(),
-        Collection::fields().id().asc(),
-    ))
-    .limit(size)
-    .offset(offset)
-    .exec(db)
-    .await
+    let rows = q
+        .order_by((
+            CollectionRow::fields().position().asc(),
+            CollectionRow::fields().title().asc(),
+            CollectionRow::fields().id().asc(),
+        ))
+        .limit(size)
+        .offset(offset)
+        .exec(db)
+        .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut collection: Collection = row.into();
+        collection.tags = fetch_collection_tags(db, collection.id).await?;
+        out.push(collection);
+    }
+    Ok(out)
 }
 
 pub async fn fetch_collections_count(
@@ -144,13 +286,13 @@ pub async fn fetch_collections_count(
     section_slug: &str,
     search: Option<&str>,
 ) -> toasty::Result<i64> {
-    let mut q = Collection::filter(
-        Collection::fields()
+    let mut q = CollectionRow::filter(
+        CollectionRow::fields()
             .section_slug()
             .eq(section_slug.to_string()),
     );
     if let Some(s) = search {
-        q = q.filter(Collection::fields().title().like(format!("%{s}%")));
+        q = q.filter(CollectionRow::fields().title().like(format!("%{s}%")));
     }
     Ok(q.count().exec(db).await? as i64)
 }
@@ -160,26 +302,34 @@ pub async fn fetch_collection_detail(
     section_slug: &str,
     collection_id: i64,
 ) -> toasty::Result<Option<Collection>> {
-    Collection::filter(
-        Collection::fields()
+    let row = CollectionRow::filter(
+        CollectionRow::fields()
             .section_slug()
             .eq(section_slug.to_string())
-            .and(Collection::fields().id().eq(collection_id as u64)),
+            .and(CollectionRow::fields().id().eq(collection_id as u64)),
     )
     .first()
     .exec(db)
-    .await
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let mut collection: Collection = row.into();
+    collection.tags = fetch_collection_tags(db, collection.id).await?;
+    Ok(Some(collection))
 }
 
 pub async fn insert_empty_collection(db: &mut Db, section_slug: &str) -> toasty::Result<u64> {
-    let section = Section::filter(Section::fields().slug().eq(section_slug.to_string()))
+    let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.to_string()))
         .first()
         .exec(db)
         .await?
         .ok_or_else(|| err_not_found("section"))?;
 
     let next = next_collection_position(db, section.id).await?;
-    let c = toasty::create!(Collection {
+    let row = toasty::create!(CollectionRow {
         section_id: section.id,
         section_slug: section.slug.clone(),
         title: "بدون عنوان".to_string(),
@@ -190,12 +340,12 @@ pub async fn insert_empty_collection(db: &mut Db, section_slug: &str) -> toasty:
     })
     .exec(db)
     .await?;
-    Ok(c.id)
+    Ok(row.id)
 }
 
 async fn next_collection_position(db: &mut Db, section_id: u64) -> toasty::Result<i64> {
-    let last = Collection::filter(Collection::fields().section_id().eq(section_id))
-        .order_by(Collection::fields().position().desc())
+    let last = CollectionRow::filter(CollectionRow::fields().section_id().eq(section_id))
+        .order_by(CollectionRow::fields().position().desc())
         .limit(1)
         .exec(db)
         .await?;
@@ -206,6 +356,7 @@ pub enum CollectionField {
     Title,
     Description,
     Poster,
+    Tags,
 }
 
 pub async fn update_collection_field(
@@ -214,31 +365,38 @@ pub async fn update_collection_field(
     field: CollectionField,
     value: Option<&str>,
 ) -> toasty::Result<()> {
-    let mut c = Collection::get_by_id(db, &(id as u64)).await?;
+    // Tags live in `collection_tags`, not on the row.
+    if matches!(field, CollectionField::Tags) {
+        let names: Vec<String> = value
+            .unwrap_or_default()
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        return set_collection_tags(db, id as u64, &names).await;
+    }
+
+    let mut row = CollectionRow::get_by_id(db, &(id as u64)).await?;
     match field {
-        // `title` is NOT NULL, so the update setter wants `String`, not
-        // `Option<String>`. The server fn validates before calling.
         CollectionField::Title => {
-            c.update()
+            row.update()
                 .title(value.unwrap_or_default().to_string())
                 .exec(db)
                 .await
         }
-        // `description` and `poster` are nullable; `Option<String>` is
-        // accepted directly, and `None` assigns SQL NULL.
         CollectionField::Description => {
-            c.update()
+            row.update()
                 .description(value.map(String::from))
                 .exec(db)
                 .await
         }
-        CollectionField::Poster => c.update().poster(value.map(String::from)).exec(db).await,
+        CollectionField::Poster => row.update().poster(value.map(String::from)).exec(db).await,
+        CollectionField::Tags => unreachable!("handled above"),
     }
 }
 
 pub async fn delete_collection(db: &mut Db, id: i64) -> toasty::Result<()> {
-    let c = Collection::get_by_id(db, &(id as u64)).await?;
-    c.delete().exec(db).await
+    let row = CollectionRow::get_by_id(db, &(id as u64)).await?;
+    row.delete().exec(db).await
 }
 
 // ─── Item queries ─────────────────────────────────────────────────────────
@@ -333,7 +491,7 @@ pub async fn fetch_file_path(db: &mut Db, file_id: i64) -> toasty::Result<Option
 
 pub async fn fetch_section_kind(db: &mut Db, slug: &str) -> toasty::Result<Option<String>> {
     Ok(
-        Section::filter(Section::fields().slug().eq(slug.to_string()))
+        SectionRow::filter(SectionRow::fields().slug().eq(slug.to_string()))
             .first()
             .exec(db)
             .await?
@@ -355,13 +513,22 @@ pub struct ItemDeletion {
 pub async fn delete_collection_cascade(db: &mut Db, id: i64) -> toasty::Result<CollectionDeletion> {
     let mut tx = db.transaction().await?;
 
-    let collection = Collection::get_by_id(&mut tx, &(id as u64)).await?;
+    let collection = CollectionRow::get_by_id(&mut tx, &(id as u64)).await?;
     let poster_url = collection.poster.clone();
 
     let items = Item::filter(Item::fields().collection_id().eq(id as u64))
         .exec(&mut tx)
         .await?;
     let file_ids: Vec<u64> = items.iter().map(|i| i.file_id).collect();
+
+    // Drop collection↔tag join rows. The `tags` rows themselves stay — they
+    // may be referenced by other sections/collections.
+    let joins = CollectionTag::filter(CollectionTag::fields().collection_id().eq(id as u64))
+        .exec(&mut tx)
+        .await?;
+    for row in joins {
+        row.delete().exec(&mut tx).await?;
+    }
 
     collection.clone().delete().exec(&mut tx).await?;
     for item in items {
@@ -400,7 +567,7 @@ pub async fn delete_item_cascade(db: &mut Db, id: i64) -> toasty::Result<ItemDel
     item.delete().exec(&mut tx).await?;
 
     // Decrement the denormalized counter on the parent collection.
-    let mut collection = Collection::get_by_id(&mut tx, &collection_id).await?;
+    let mut collection = CollectionRow::get_by_id(&mut tx, &collection_id).await?;
     let next_count = (collection.items_count - 1).max(0);
     collection
         .update()

@@ -4,7 +4,7 @@ use std::path::Path;
 use toasty::{Db, Transaction};
 
 use super::types::{StagedFile, UploadPayload};
-use crate::app::model::{Collection, Item};
+use crate::app::model::{CollectionRow, Item};
 use crate::app::server::db;
 use crate::app::server::poster::write_poster;
 
@@ -73,7 +73,7 @@ pub async fn insert_items_and_poster(
         .map_err(toasty_err)?;
     }
 
-    let mut collection = Collection::get_by_id(&mut tx, &collection_id)
+    let mut collection = CollectionRow::get_by_id(&mut tx, &collection_id)
         .await
         .map_err(toasty_err)?;
     let new_count = collection.items_count + file_rows.len() as i64;

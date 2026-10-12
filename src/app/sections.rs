@@ -22,6 +22,14 @@ pub async fn patch_section_title(id: u64, title: String) -> Result<(), ServerFnE
 }
 
 #[server]
+pub async fn patch_section_tags(id: u64, tags: Vec<String>) -> Result<(), ServerFnError> {
+    use crate::app::server::AppState;
+    let mut state: AppState = expect_context();
+    db::set_section_tags(&mut state.db, id, &tags).await.srv()?;
+    Ok(())
+}
+
+#[server]
 pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
