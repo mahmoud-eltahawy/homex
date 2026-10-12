@@ -9,12 +9,14 @@ use crate::app::{
     },
     icons::{DeleteIcon, ViewAllIcon, icon_for},
     inline_edit::{EditableText, use_edit_mode},
-    model::{Collection, MediaKind, Section, Tag},
+    model::{Collection, MediaKind, Section},
     pagination::{PaginationControls, PaginationControlsProps},
     resource_view::ResourceView,
     search::SearchBar,
-    sections::{create_section, delete_section, fetch_sections, patch_section_title},
-    tags::TagList,
+    sections::{
+        create_section, delete_section, fetch_sections, patch_section_tags, patch_section_title,
+    },
+    tags::TagEditor,
 };
 
 const MEDIA_LIST_SIZE: usize = 6;
@@ -174,6 +176,7 @@ struct SectionHeaderState {
     title: RwSignal<String>,
     commit_title: Callback<String>,
     delete_action: Action<u64, Result<(), ServerFnError>>,
+    tags_action: Action<(u64, Vec<String>), Result<(), ServerFnError>>,
 }
 
 fn use_section_header_state(
@@ -185,9 +188,12 @@ fn use_section_header_state(
 
     let rename = Action::new_local(|(id, t): &(u64, String)| patch_section_title(*id, t.clone()));
     let delete_action = Action::new_local(|id: &u64| delete_section(*id));
+    let tags_action =
+        Action::new_local(|(id, tags): &(u64, Vec<String>)| patch_section_tags(*id, tags.clone()));
 
     refetch_on_success(rename, sections_resource);
     refetch_on_success(delete_action, sections_resource);
+    // Tags are updated optimistically in the editor; no refetch needed.
 
     let commit_title = Callback::new(move |v: String| {
         title.set(v.clone());
@@ -198,6 +204,7 @@ fn use_section_header_state(
         title,
         commit_title,
         delete_action,
+        tags_action,
     }
 }
 
@@ -215,36 +222,43 @@ fn SectionHeader(
     let kind = section.media_kind();
     let href_display = section.href();
     let href_actions = section.href();
+    let nested = section.nested;
+
+    let tags_signal = RwSignal::new(section.tags.clone());
 
     let on_delete = Callback::new(move |_| {
         let _ = state.delete_action.dispatch(id);
     });
-    let nested = section.nested;
-    let tags: Vec<Tag> = section.tags.clone();
+
+    let on_tags_commit = Callback::new(move |names: Vec<String>| {
+        let _ = state.tags_action.dispatch((id, names));
+    });
 
     view! {
         <div class="flex items-center justify-between mb-6 gap-3">
-            <Show
-                when=move || edit_on.get()
-                fallback=move || view! {
-                    <SectionHeaderViewMode
-                        href=href_display.clone()
+            <div class="flex items-center gap-3 min-w-0 flex-1 flex-wrap">
+                <Show
+                    when=move || edit_on.get()
+                    fallback=move || view! {
+                        <SectionHeaderViewMode
+                            href=href_display.clone()
+                            title=state.title
+                            count
+                            kind
+                            nested
+                        />
+                    }
+                >
+                    <SectionHeaderEditMode
                         title=state.title
+                        on_commit=state.commit_title
                         count
                         kind
                         nested
-                        tags=tags.clone()
                     />
-                }
-            >
-                <SectionHeaderEditMode
-                    title=state.title
-                    on_commit=state.commit_title
-                    count
-                    kind
-                    nested
-                />
-            </Show>
+                </Show>
+                <TagEditor tags=tags_signal on_commit=on_tags_commit/>
+            </div>
             <SectionHeaderActions
                 view_all_href=href_actions
                 edit_on=edit_on
@@ -262,12 +276,11 @@ fn SectionHeaderViewMode(
     count: usize,
     kind: MediaKind,
     nested: bool,
-    tags: Vec<Tag>,
 ) -> impl IntoView {
     view! {
         <a
             href=href
-            class="flex items-center gap-3 group min-w-0 flex-1"
+            class="group flex items-center gap-3 min-w-0"
         >
             <span class="flex items-center shrink-0">{icon_for(kind,nested)}</span>
             <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
@@ -276,7 +289,6 @@ fn SectionHeaderViewMode(
             <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
                 {count}
             </span>
-            <TagList tags=tags max=3/>
         </a>
     }
 }
@@ -290,7 +302,7 @@ fn SectionHeaderEditMode(
     nested: bool,
 ) -> impl IntoView {
     view! {
-        <div class="flex items-center gap-3 min-w-0 flex-1">
+        <div class="flex items-center gap-3 min-w-0">
             <span class="flex items-center shrink-0">{icon_for(kind,nested)}</span>
             <EditableText
                 value=Signal::derive(move || title.get())

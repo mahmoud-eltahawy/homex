@@ -9,7 +9,7 @@ use leptos_media_player::{MediaItem, WatchPage};
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_items, move_item, patch_collection_field,
-        patch_item_title, upload_collection_poster,
+        patch_collection_tags, patch_item_title, upload_collection_poster,
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
@@ -19,14 +19,11 @@ use crate::app::{
     resource_view::ResourceView,
     route_params::{use_optional_u64_param, use_string_param, use_u64_param},
     sections::fetch_section_by_slug,
-    tags::TagList,
+    tags::TagEditor,
     upload_job::{UploadJob, UploadProgress},
 };
 
 // ─── Multipart form field names (client-side) ─────────────────────────────
-//
-// These are the keys the browser sends on the append-media / append-poster
-// requests. They MUST match the classifier in `server/upload/multipart.rs`.
 
 mod fields;
 
@@ -36,6 +33,7 @@ type PatchAction = Action<(u64, String, Option<String>), Result<(), ServerFnErro
 type PosterUploadAction = Action<web_sys::FormData, Result<String, ServerFnError>>;
 type RenameItemAction = Action<(u64, String), Result<(), ServerFnError>>;
 type DeleteItemAction = Action<u64, Result<(), ServerFnError>>;
+type TagsAction = Action<(u64, Vec<String>), Result<(), ServerFnError>>;
 
 // ─── Collection actions bundle ────────────────────────────────────────────
 
@@ -46,6 +44,7 @@ struct CollectionActions {
     rename_item: RenameItemAction,
     delete_item: DeleteItemAction,
     move_item: Action<(u64, bool), Result<(), ServerFnError>>,
+    tags: TagsAction,
 }
 
 impl CollectionActions {
@@ -58,6 +57,8 @@ impl CollectionActions {
         let rename_item =
             Action::new_local(|(id, t): &(u64, String)| patch_item_title(*id, t.clone()));
         let delete_item = Action::new_local(|id: &u64| delete_item(*id));
+        let tags =
+            Action::new_local(|(id, t): &(u64, Vec<String>)| patch_collection_tags(*id, t.clone()));
 
         refetch_on_success(rename_item, items);
         refetch_on_success(delete_item, items);
@@ -71,6 +72,7 @@ impl CollectionActions {
             rename_item,
             delete_item,
             move_item,
+            tags,
         }
     }
 
@@ -268,7 +270,6 @@ fn CollectionContent(
     initial_item_id: Option<u64>,
 ) -> impl IntoView {
     let collection_id = collection.id;
-    let collection_tags = collection.tags.clone();
     let section_slug = section.slug.clone();
     let is_audio = matches!(section.media_kind(), MediaKind::Audio);
     let is_series = section.nested && !is_audio;
@@ -277,6 +278,11 @@ fn CollectionContent(
 
     let actions = CollectionActions::new(items);
     let edit = CollectionEditState::new(&collection, actions.patch);
+
+    let tags_signal = RwSignal::new(collection.tags.clone());
+    let on_tags_commit = Callback::new(move |names: Vec<String>| {
+        let _ = actions.tags.dispatch((collection_id, names));
+    });
 
     let upload = UploadJob::new();
     Effect::new(move |_| {
@@ -349,7 +355,7 @@ fn CollectionContent(
                     />
                 </div>
                 <div class="mt-4 max-w-2xl">
-                    <TagList tags=collection_tags/>
+                    <TagEditor tags=tags_signal on_commit=on_tags_commit/>
                 </div>
                 <AppendItems
                     upload=upload
@@ -382,7 +388,6 @@ fn accept_for_kind(is_audio: bool) -> &'static str {
     }
 }
 
-/// Pure: turns the selected files + metadata into the multipart body.
 fn build_append_formdata(
     files: &web_sys::FileList,
     section_slug: &str,
@@ -409,8 +414,6 @@ fn build_append_formdata(
     fd
 }
 
-/// Wraps the `on:change` handler: reads the picked files, builds the
-/// multipart body, dispatches the upload, clears the input.
 fn make_file_input_handler(
     upload: UploadJob,
     section_slug: String,
