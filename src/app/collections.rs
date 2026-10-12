@@ -99,7 +99,6 @@ pub async fn patch_collection_field(
         "title" => CollectionField::Title,
         "description" => CollectionField::Description,
         "poster" => CollectionField::Poster,
-        "tags" => CollectionField::Tags,
         _ => return Err(ServerFnError::new(messages::UNKNOWN_FIELD)),
     };
 

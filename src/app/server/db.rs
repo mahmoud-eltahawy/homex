@@ -507,7 +507,6 @@ pub enum CollectionField {
     Title,
     Description,
     Poster,
-    Tags,
 }
 
 pub async fn update_collection_field(
@@ -516,16 +515,6 @@ pub async fn update_collection_field(
     field: CollectionField,
     value: Option<&str>,
 ) -> toasty::Result<()> {
-    // Tags live in `collection_tags`, not on the row.
-    if matches!(field, CollectionField::Tags) {
-        let names: Vec<String> = value
-            .unwrap_or_default()
-            .split(',')
-            .map(str::to_string)
-            .collect();
-        return set_collection_tags(db, id as u64, &names).await;
-    }
-
     let mut row = CollectionRow::get_by_id(db, &(id as u64)).await?;
     match field {
         // `title` is NOT NULL, so the update setter wants `String`, not
@@ -545,7 +534,6 @@ pub async fn update_collection_field(
                 .await
         }
         CollectionField::Poster => row.update().poster(value.map(String::from)).exec(db).await,
-        CollectionField::Tags => unreachable!("handled above"),
     }
 }
 
@@ -785,32 +773,31 @@ pub async fn fetch_collection_summaries(
     media_kind: &str,
 ) -> toasty::Result<Vec<CollectionSummary>> {
     let sections = SectionRow::filter(SectionRow::fields().media_kind().eq(media_kind.to_string()))
+        .order_by(SectionRow::fields().title().asc())
         .exec(db)
         .await?;
 
-    let titles: HashMap<String, String> = sections
-        .iter()
-        .map(|s| (s.slug.clone(), s.title.clone()))
-        .collect();
-
-    let mut out: Vec<CollectionSummary> = CollectionRow::all()
+    // One indexed query per section, using `CollectionRow::section_slug`'s
+    // `#[index]`. Trades a single full-table scan for N bounded lookups.
+    let mut out: Vec<CollectionSummary> = Vec::new();
+    for section in &sections {
+        let rows = CollectionRow::filter(
+            CollectionRow::fields()
+                .section_slug()
+                .eq(section.slug.clone()),
+        )
+        .order_by(CollectionRow::fields().title().asc())
         .exec(db)
-        .await?
-        .into_iter()
-        .filter(|c| titles.contains_key(&c.section_slug))
-        .map(|c| CollectionSummary {
-            section_title: titles.get(&c.section_slug).cloned().unwrap_or_default(),
+        .await?;
+
+        out.extend(rows.into_iter().map(|c| CollectionSummary {
+            section_title: section.title.clone(),
             id: c.id,
             title: c.title,
             section_slug: c.section_slug,
-        })
-        .collect();
+        }));
+    }
 
-    out.sort_by(|a, b| {
-        a.section_title
-            .cmp(&b.section_title)
-            .then(a.title.cmp(&b.title))
-    });
     Ok(out)
 }
 
