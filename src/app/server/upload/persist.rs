@@ -40,12 +40,17 @@ async fn next_item_number_tx(
     Ok(last.first().map(|i| i.number + 1).unwrap_or(0))
 }
 
+// At the top of the file, near the existing imports:
+static INSERT_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 pub async fn insert_items_and_poster(
     db: &mut Db,
     payload: &UploadPayload,
     file_rows: &[(Uuid, String)],
     data_dir: &Path,
 ) -> Result<(), AppError> {
+    let _guard = INSERT_LOCK.lock().await;
     let mut tx = db
         .transaction()
         .await
