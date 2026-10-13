@@ -1,12 +1,13 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 
-use crate::app::{
-    error_view::{ErrorStyle, ErrorView, action_error},
-    upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media},
-};
+use crate::app::upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media};
 
 const POLL_INTERVAL_MS: u32 = 700;
+/// How many consecutive `poll_conversion` failures to tolerate before giving
+/// up. With 700ms intervals this is ~7s of continuous failure — long enough
+/// to survive a server reload, short enough that no tab polls forever.
+const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
 #[derive(Clone, Copy)]
 pub struct UploadJob {
@@ -54,16 +55,26 @@ fn is_terminal(s: &ConversionStatus) -> bool {
 }
 
 async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
+    let mut consecutive_errors = 0u32;
     loop {
         match poll_conversion(job_id.clone()).await {
             Ok(s) => {
+                consecutive_errors = 0;
                 let terminal = is_terminal(&s);
                 signals.status.set(Some(s));
                 if terminal {
                     break;
                 }
             }
-            Err(_) => { /* transient */ }
+            Err(_) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    signals.status.set(Some(ConversionStatus::Failed(
+                        "Lost contact with the server".into(),
+                    )));
+                    break;
+                }
+            }
         }
         TimeoutFuture::new(POLL_INTERVAL_MS).await;
     }
@@ -126,7 +137,7 @@ impl UploadJob {
     }
 
     pub fn error(&self) -> Signal<Option<ServerFnError>> {
-        action_error(self.action)
+        crate::app::error_view::action_error(self.action)
     }
 }
 
@@ -186,9 +197,9 @@ fn DoneStage() -> impl IntoView {
 fn FailedStage(#[prop(into)] error: String) -> impl IntoView {
     let signal = Signal::derive(move || Some(ServerFnError::new(error.clone())));
     view! {
-        <ErrorView
+        <crate::app::error_view::ErrorView
             error=signal
-            style=ErrorStyle::Banner
+            style=crate::app::error_view::ErrorStyle::Banner
             heading="Conversion failed"
         />
     }

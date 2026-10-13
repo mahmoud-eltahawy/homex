@@ -40,11 +40,23 @@ async fn upsert_tag_tx(tx: &mut toasty::Transaction<'_>, name: &str) -> toasty::
 }
 
 /// Resolve a set of tag ids to sorted `Tag` rows.
+///
+/// Uses `.filter().first()` rather than `get_by_id` so that a missing tag
+/// (dangling join row) is distinguishable from a DB failure. The former is
+/// logged and skipped — the join table is inconsistent but the rest of the
+/// fetch is still useful. The latter aborts.
 async fn tags_for_joins(db: &mut Db, tag_ids: &[Uuid]) -> toasty::Result<Vec<Tag>> {
     let mut out = Vec::with_capacity(tag_ids.len());
     for id in tag_ids {
-        if let Ok(t) = Tag::get_by_id(db, id).await {
-            out.push(t);
+        let tag = Tag::filter(Tag::fields().id().eq(*id))
+            .first()
+            .exec(db)
+            .await?;
+        match tag {
+            Some(t) => out.push(t),
+            None => {
+                leptos::logging::warn!("[tags] dangling tag_id {id}");
+            }
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));

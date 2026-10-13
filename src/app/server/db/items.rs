@@ -62,6 +62,12 @@ pub async fn swap_item_order(db: &mut Db, id: Uuid, is_up: bool) -> toasty::Resu
 
 // ─── Move items between collections ───────────────────────────────────────
 
+/// Move a batch of items into `to_collection_id`, appending them after the
+/// existing items in the destination (per season, when applicable).
+///
+/// Skips ids that are already in the destination — that's an idempotent
+/// no-op, not a failure. Ids that don't exist at all are logged and skipped;
+/// DB errors abort the whole move.
 pub async fn move_items_to_collection(
     db: &mut Db,
     item_ids: &[Uuid],
@@ -77,10 +83,16 @@ pub async fn move_items_to_collection(
 
     let mut moved: Vec<Item> = Vec::with_capacity(item_ids.len());
     for &id in item_ids {
-        if let Ok(item) = Item::get_by_id(&mut tx, &id).await
-            && item.collection_id != to_collection_id
-        {
-            moved.push(item);
+        let item = Item::filter(Item::fields().id().eq(id))
+            .first()
+            .exec(&mut tx)
+            .await?;
+        match item {
+            Some(i) if i.collection_id != to_collection_id => moved.push(i),
+            Some(_) => {} // already in destination — idempotent no-op
+            None => {
+                leptos::logging::warn!("[move_items] unknown item {id}");
+            }
         }
     }
     if moved.is_empty() {

@@ -129,9 +129,16 @@ where
     let sections: Sections = expect_context();
     view! {
         <Transition fallback=|| ()>
-            {move || sections.get().map(|r| {
-                r.unwrap_or_default().into_iter().map(render).collect_view()
-            })}
+            {move || match sections.get() {
+                None => ().into_any(),
+                Some(Ok(list)) => list.into_iter().map(render).collect_view().into_any(),
+                Some(Err(_)) => view! {
+                    <span class="text-gray-500 text-xs italic">
+                        "sections unavailable"
+                    </span>
+                }
+                .into_any(),
+            }}
         </Transition>
     }
 }

@@ -21,11 +21,17 @@ pub async fn insert_file(
     Ok(f.id)
 }
 
+/// Look up a file's stored relative path. Returns `Ok(None)` when the row
+/// doesn't exist, and `Err(_)` for any actual DB failure. The distinction
+/// matters: `stream_media` turns `None` into a 404, and a DB error into a
+/// 500. The previous implementation used `.ok()`, which collapsed the two
+/// and turned every DB hiccup into a spurious "file not found".
 pub async fn fetch_file_path(db: &mut Db, file_id: Uuid) -> toasty::Result<Option<String>> {
-    Ok(File::get_by_id(db, &file_id)
-        .await
-        .ok()
-        .map(|f| f.relative_path))
+    let row = File::filter(File::fields().id().eq(file_id))
+        .first()
+        .exec(db)
+        .await?;
+    Ok(row.map(|f| f.relative_path))
 }
 
 // ─── Orphan cleanup ───────────────────────────────────────────────────────

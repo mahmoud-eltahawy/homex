@@ -9,6 +9,12 @@ const ALLOWED_POSTER_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
 
 const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 
+/// Resolve the canonical extension for a poster upload.
+///
+/// `infer` checks the magic bytes first — this defends against a client
+/// that names a non-image as `.jpg`, and against a client that names a
+/// PNG as `.jpeg`. Falls back to the client-supplied extension only if
+/// `infer` can't classify the bytes at all.
 fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, ServerFnError> {
     let candidate = match infer::get(bytes) {
         Some(kind) => kind.extension().to_string(),
@@ -52,6 +58,13 @@ pub async fn write_poster(
     Ok(routes::poster(subdir, &filename))
 }
 
+/// Move a poster file from one subdirectory to another, returning the new
+/// URL on success.
+///
+/// Returns `None` when the URL isn't a posters URL (nothing to do) **or**
+/// when the underlying file operation fails — callers should treat a
+/// `None` for a URL that *was* a posters URL as a soft failure. Failures
+/// are logged here so the caller doesn't need its own diagnostic.
 pub async fn move_poster_to_subdir(
     data_dir: &Path,
     from_subdir: &str,
@@ -62,7 +75,8 @@ pub async fn move_poster_to_subdir(
     let (_old, filename) = rest.split_once('/')?;
 
     let to_dir = data_dir.join(storage::POSTERS_DIR).join(to_subdir);
-    if tokio::fs::create_dir_all(&to_dir).await.is_err() {
+    if let Err(e) = tokio::fs::create_dir_all(&to_dir).await {
+        leptos::logging::warn!("[poster] mkdir failed for {}: {e}", to_dir.display(),);
         return None;
     }
 
@@ -74,8 +88,18 @@ pub async fn move_poster_to_subdir(
 
     let moved = match tokio::fs::rename(&from_path, &to_path).await {
         Ok(()) => true,
-        Err(_) => {
-            let copied = tokio::fs::copy(&from_path, &to_path).await.is_ok();
+        Err(rename_err) => {
+            let copied = match tokio::fs::copy(&from_path, &to_path).await {
+                Ok(_) => true,
+                Err(copy_err) => {
+                    leptos::logging::warn!(
+                        "[poster] move failed: {} -> {} (rename: {rename_err}, copy: {copy_err})",
+                        from_path.display(),
+                        to_path.display(),
+                    );
+                    false
+                }
+            };
             if copied {
                 let _ = tokio::fs::remove_file(&from_path).await;
             }

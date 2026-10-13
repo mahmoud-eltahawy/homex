@@ -1,11 +1,11 @@
 use crate::app::constants::routes;
-use crate::app::error_view::{ErrorView, action_error};
 use crate::app::{
     collections::create_empty_collection,
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionGridProps, CollectionPage,
         collections_paginated,
     },
+    error_view::{ErrorView, action_error},
     inline_edit::use_edit_mode,
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
@@ -142,30 +142,32 @@ fn CreateNewButton(
 
     view! {
         <Show when=move || edit_on.get()>
-            <button
-                type="button"
-                on:click={
-                    let slug = slug_for_action.clone();
-                    move |_| { let _ = action.dispatch(slug.clone()); }
-                }
-                disabled=move || action.pending().get()
-                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl \
-                       bg-gradient-to-r from-cyan-500 to-blue-500 \
-                       hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
-                       shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 \
-                       disabled:opacity-50"
-            >
-                <span class="text-lg leading-none">"+"</span>
-                {
-                    let label_for_view = label_for_view.clone();
-                    move || if action.pending().get() {
-                        "Creating...".to_string()
-                    } else {
-                        label_for_view.clone()
+            <div class="flex flex-col items-end gap-2">
+                <button
+                    type="button"
+                    on:click={
+                        let slug = slug_for_action.clone();
+                        move |_| { let _ = action.dispatch(slug.clone()); }
                     }
-                }
-            </button>
-            <ErrorView error=action_error(action)/>
+                    disabled=move || action.pending().get()
+                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl \
+                           bg-gradient-to-r from-cyan-500 to-blue-500 \
+                           hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
+                           shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 \
+                           disabled:opacity-50"
+                >
+                    <span class="text-lg leading-none">"+"</span>
+                    {
+                        let label_for_view = label_for_view.clone();
+                        move || if action.pending().get() {
+                            "Creating...".to_string()
+                        } else {
+                            label_for_view.clone()
+                        }
+                    }
+                </button>
+                <ErrorView error=action_error(action)/>
+            </div>
         </Show>
     }
 }

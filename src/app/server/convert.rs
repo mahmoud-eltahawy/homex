@@ -91,6 +91,13 @@ pub fn is_convertible_audio(ext: &str) -> bool {
 
 // ─── ffprobe ──────────────────────────────────────────────────────────────
 
+/// Probe a file's duration in seconds.
+///
+/// Returns `0.0` on any failure — a missing `ffprobe`, a malformed file, or
+/// an unparseable output. The failure is logged with the path so that a
+/// **pattern** of zero durations (rather than a one-off) is visible in the
+/// server log. `0.0` remains the fallback because there's no better answer
+/// without a second probe, and downstream code already guards against it.
 pub async fn ffprobe_duration(path: &Path) -> f64 {
     let out = match Command::new("ffprobe")
         .args([
@@ -106,12 +113,24 @@ pub async fn ffprobe_duration(path: &Path) -> f64 {
         .await
     {
         Ok(o) => o,
-        Err(_) => return 0.0,
+        Err(e) => {
+            leptos::logging::warn!("[ffprobe] spawn failed for {}: {e}", path.display(),);
+            return 0.0;
+        }
     };
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse::<f64>()
-        .unwrap_or(0.0)
+
+    let raw = String::from_utf8_lossy(&out.stdout);
+    match raw.trim().parse::<f64>() {
+        Ok(secs) => secs,
+        Err(e) => {
+            leptos::logging::warn!(
+                "[ffprobe] duration parse failed for {}: {e} (raw={:?})",
+                path.display(),
+                raw.trim(),
+            );
+            0.0
+        }
+    }
 }
 
 // ─── Command builders (pure) ──────────────────────────────────────────────

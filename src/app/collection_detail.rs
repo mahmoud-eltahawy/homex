@@ -98,6 +98,27 @@ impl CollectionActions {
             let _ = self.move_item.dispatch((id, up));
         })
     }
+
+    // ─── Error accessors ──────────────────────────────────────────────
+
+    fn patch_error(self) -> Signal<Option<ServerFnError>> {
+        action_error(self.patch)
+    }
+    fn poster_error(self) -> Signal<Option<ServerFnError>> {
+        action_error(self.poster_upload)
+    }
+    fn rename_error(self) -> Signal<Option<ServerFnError>> {
+        action_error(self.rename_item)
+    }
+    fn delete_error(self) -> Signal<Option<ServerFnError>> {
+        action_error(self.delete_item)
+    }
+    fn move_error(self) -> Signal<Option<ServerFnError>> {
+        action_error(self.move_item)
+    }
+    fn tags_error(self) -> Signal<Option<ServerFnError>> {
+        action_error(self.tags)
+    }
 }
 
 // ─── Collection edit state ────────────────────────────────────────────────
@@ -319,6 +340,14 @@ fn CollectionContent(
     let on_move = actions.move_callback();
     let kind = section.media_kind();
 
+    // Error signals — extracted once so the closures below capture a Copy.
+    let patch_error = actions.patch_error();
+    let poster_error = actions.poster_error();
+    let tags_error = actions.tags_error();
+    let rename_error = actions.rename_error();
+    let delete_error = actions.delete_error();
+    let move_error = actions.move_error();
+
     let playlist_adapter = Arc::new(make_playlist_adapter(
         edit.title.get_untracked(),
         edit.poster.get_untracked(),
@@ -393,6 +422,11 @@ fn CollectionContent(
                 <div class="mt-4 max-w-2xl">
                     <TagEditor tags=tags_signal on_commit=on_tags_commit/>
                 </div>
+                <div class="mt-2 max-w-2xl space-y-1">
+                    <ErrorView error=patch_error/>
+                    <ErrorView error=tags_error/>
+                    <ErrorView error=poster_error/>
+                </div>
                 <AppendItems
                     upload=upload
                     section_slug=slug_for_append
@@ -435,6 +469,12 @@ fn CollectionContent(
                         }
                     }
                 }}
+            </div>
+
+            <div class="mt-4 space-y-1">
+                <ErrorView error=rename_error/>
+                <ErrorView error=delete_error/>
+                <ErrorView error=move_error/>
             </div>
         </DetailShell>
     }
@@ -572,7 +612,9 @@ fn AppendItems(
             <div class="mt-3">
                 <UploadProgress status=Signal::derive(move || upload_status.get())/>
             </div>
-            <ErrorView error=upload_error style=ErrorStyle::Banner/>
+            <div class="mt-3">
+                <ErrorView error=upload_error style=ErrorStyle::Banner/>
+            </div>
         </Show>
     }
 }
@@ -903,7 +945,9 @@ fn OrganizeItemsPanel(
                         <div class="py-8 text-center text-gray-500 text-sm">"Loading…"</div>
                     }.into_any(),
                     Some(Err(e)) => view! {
-                        <div class="py-8 text-center text-red-300 text-sm">{e.to_string()}</div>
+                        <div class="py-8 text-center text-red-300 text-sm">
+                            {crate::app::error::user_message(&e)}
+                        </div>
                     }.into_any(),
                     Some(Ok(list)) if list.is_empty() => view! {
                         <div class="py-8 text-center text-gray-500 text-sm">
@@ -999,6 +1043,7 @@ fn OrganizeItemsPanel(
                         }
                     }}
                 </button>
+
                 <ErrorView error=action_error(move_action)/>
             </div>
         </div>
