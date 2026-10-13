@@ -13,26 +13,26 @@ use leptos_router::{
 
 mod collection_detail;
 mod collections;
-pub mod error;
-mod home;
-mod layout;
-mod login;
-mod section_listing;
-mod sections;
-mod tags;
-
 mod common;
 pub mod constants;
 pub mod detail;
+pub mod error;
+pub mod error_view;
+mod home;
 mod icons;
 mod inline_edit;
+mod layout;
+mod login;
 mod model;
 mod pagination;
 mod resource_view;
 mod route_params;
 mod search;
+mod section_listing;
+mod sections;
 #[cfg(feature = "ssr")]
 pub mod server;
+mod tags;
 mod upload_api;
 mod upload_job;
 

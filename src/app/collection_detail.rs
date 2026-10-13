@@ -16,6 +16,7 @@ use crate::app::{
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
+    error_view::{ErrorStyle, ErrorView, action_error},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
     model::{Collection, CollectionSummary, Item, MediaKind, Section},
@@ -518,18 +519,6 @@ fn upload_button_label_text(is_series: bool, season: Option<i64>) -> String {
 }
 
 #[component]
-fn UploadErrorBanner(error: Signal<Option<String>>) -> impl IntoView {
-    view! {
-        {move || error.get().map(|e| view! {
-            <div class="mt-3 bg-red-500/15 text-red-300 border border-red-500/30 \
-                        rounded-xl p-3 text-sm">
-                {e}
-            </div>
-        })}
-    }
-}
-
-#[component]
 fn AppendItems(
     upload: UploadJob,
     #[prop(into)] section_slug: String,
@@ -583,7 +572,7 @@ fn AppendItems(
             <div class="mt-3">
                 <UploadProgress status=Signal::derive(move || upload_status.get())/>
             </div>
-            <UploadErrorBanner error=upload_error/>
+            <ErrorView error=upload_error style=ErrorStyle::Banner/>
         </Show>
     }
 }
@@ -811,14 +800,6 @@ fn MoveCollectionPicker(
         }
     });
 
-    let error = Signal::derive(move || {
-        action
-            .value()
-            .get()
-            .and_then(|r| r.err())
-            .map(|e| crate::app::error::user_message(&e))
-    });
-
     view! {
         <Show when=move || !options.get().is_empty()>
             <div class="flex items-center gap-2 flex-wrap">
@@ -834,11 +815,7 @@ fn MoveCollectionPicker(
                         <option value=s.slug.clone()>{s.title.clone()}</option>
                     </For>
                 </select>
-                <Show when=move || error.get().is_some()>
-                    <span class="text-red-300 text-xs">
-                        {move || error.get().unwrap_or_default()}
-                    </span>
-                </Show>
+                <ErrorView error=action_error(action)/>
             </div>
         </Show>
     }
@@ -1022,10 +999,7 @@ fn OrganizeItemsPanel(
                         }
                     }}
                 </button>
-
-                {move || move_action.value().get().and_then(|r| r.err()).map(|e| view! {
-                    <span class="text-red-300 text-sm">{crate::app::error::user_message(&e)}</span>
-                })}
+                <ErrorView error=action_error(move_action)/>
             </div>
         </div>
     }

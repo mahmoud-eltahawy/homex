@@ -8,7 +8,7 @@ use crate::app::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
         collections_paginated, refetch_on_success,
     },
-    error,
+    error_view::{ErrorView, action_error},
     icons::{DeleteIcon, ViewAllIcon, icon_for},
     inline_edit::{EditableText, use_edit_mode},
     model::{Collection, MediaKind, Section},
@@ -177,6 +177,7 @@ fn SectionTeaser(
 struct SectionHeaderState {
     title: RwSignal<String>,
     commit_title: Callback<String>,
+    rename: Action<(Uuid, String), Result<(), ServerFnError>>,
     delete_action: Action<Uuid, Result<(), ServerFnError>>,
     tags_action: Action<(Uuid, Vec<String>), Result<(), ServerFnError>>,
 }
@@ -204,6 +205,7 @@ fn use_section_header_state(
     SectionHeaderState {
         title,
         commit_title,
+        rename,
         delete_action,
         tags_action,
     }
@@ -227,6 +229,10 @@ fn SectionHeader(
 
     let tags_signal = RwSignal::new(section.tags.clone());
 
+    let rename_error = action_error(state.rename);
+    let delete_error = action_error(state.delete_action);
+    let tags_error = action_error(state.tags_action);
+
     let on_delete = Callback::new(move |_| {
         let _ = state.delete_action.dispatch(id);
     });
@@ -234,17 +240,6 @@ fn SectionHeader(
     let on_tags_commit = Callback::new(move |names: Vec<String>| {
         let _ = state.tags_action.dispatch((id, names));
     });
-
-    let delete_error = {
-        let action = state.delete_action;
-        Signal::derive(move || {
-            action
-                .value()
-                .get()
-                .and_then(|r| r.err())
-                .map(|e| error::user_message(&e))
-        })
-    };
 
     view! {
         <div class="mb-6">
@@ -279,9 +274,15 @@ fn SectionHeader(
                     folded=folded
                 />
             </div>
-            <Show when=move || delete_error.get().is_some()>
-                <div class="text-red-300 text-xs mt-2 text-right">
-                    {move || delete_error.get().unwrap_or_default()}
+            <Show when=move || {
+                rename_error.get().is_some()
+                    || delete_error.get().is_some()
+                    || tags_error.get().is_some()
+            }>
+                <div class="mt-2 flex flex-col items-end gap-1">
+                    <ErrorView error=rename_error/>
+                    <ErrorView error=delete_error/>
+                    <ErrorView error=tags_error/>
                 </div>
             </Show>
         </div>
@@ -406,7 +407,7 @@ struct NewSectionFormState {
     title: RwSignal<String>,
     kind: RwSignal<String>,
     nested: RwSignal<bool>,
-    error: RwSignal<Option<String>>,
+    client_error: RwSignal<Option<String>>,
     create: Action<(String, String, bool), Result<Uuid, ServerFnError>>,
 }
 
@@ -416,7 +417,7 @@ fn use_new_section_form(
     let title = RwSignal::new(String::new());
     let kind = RwSignal::new("video".to_string());
     let nested = RwSignal::new(false);
-    let error = RwSignal::new(None::<String>);
+    let client_error = RwSignal::new(None::<String>);
 
     let create = Action::new_local(|(t, k, n): &(String, String, bool)| {
         create_section(t.clone(), k.clone(), *n)
@@ -424,20 +425,18 @@ fn use_new_section_form(
 
     refetch_on_success(create, sections_resource);
 
-    Effect::new(move |_| match create.value().get() {
-        Some(Ok(_)) => {
+    Effect::new(move |_| {
+        if matches!(create.value().get(), Some(Ok(_))) {
             title.set(String::new());
-            error.set(None);
+            client_error.set(None);
         }
-        Some(Err(e)) => error.set(Some(error::user_message(&e))),
-        None => {}
     });
 
     NewSectionFormState {
         title,
         kind,
         nested,
-        error,
+        client_error,
         create,
     }
 }
@@ -447,15 +446,16 @@ fn NewSectionForm(
     sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
 ) -> impl IntoView {
     let state = use_new_section_form(sections_resource);
+    let server_error = action_error(state.create);
 
     let submit = move |ev: web_sys::SubmitEvent| {
         ev.prevent_default();
         let t = state.title.get_untracked().trim().to_string();
         if t.is_empty() {
-            state.error.set(Some("Name is required".into()));
+            state.client_error.set(Some("Name is required".into()));
             return;
         }
-        state.error.set(None);
+        state.client_error.set(None);
         state
             .create
             .dispatch((t, state.kind.get_untracked(), state.nested.get_untracked()));
@@ -508,9 +508,16 @@ fn NewSectionForm(
                     }}
                 </button>
             </form>
-            {move || state.error.get().map(|e| view! {
-                <div class="mt-3 text-red-300 text-sm">{e}</div>
-            })}
+            <Show when=move || {
+                state.client_error.get().is_some() || server_error.get().is_some()
+            }>
+                <div class="mt-3 space-y-2">
+                    {move || state.client_error.get().map(|e| view! {
+                        <div class="text-red-300 text-sm">{e}</div>
+                    })}
+                    <ErrorView error=server_error/>
+                </div>
+            </Show>
         </div>
     }
 }

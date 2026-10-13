@@ -4,8 +4,8 @@ use leptos::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::app::error::{self, Disposition};
-use crate::app::icons::{ErrorIcon, LoadingIcon, RetryIcon};
+use crate::app::error_view::{ErrorStyle, ErrorView};
+use crate::app::icons::LoadingIcon;
 
 #[component]
 pub fn ResourceView<ResourceViewFn, ResourceValue, ViewValue, Props, Adapter>(
@@ -30,21 +30,15 @@ where
         Some(match res {
             Ok(val) => view_fn(adapter(val)).into_any(),
             Err(e) => {
-                let retryable = matches!(error::disposition(&e), Disposition::Transient);
-                let msg = error::user_message(&e);
+                let err_signal = Signal::derive(move || Some(e.clone()));
+                let retry = Callback::new(move |_| resource.refetch());
                 view! {
                     <div class="py-8 text-center">
-                        <div class="text-red-400 text-sm font-bold mb-2"><ErrorIcon/></div>
-                        <p class="text-gray-500 text-xs mb-3">{msg}</p>
-                        <Show when=move || retryable>
-                            <button
-                                on:click=move |_| resource.refetch()
-                                class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 \
-                                       text-white text-xs transition"
-                            >
-                                <RetryIcon/>
-                            </button>
-                        </Show>
+                        <ErrorView
+                            error=err_signal
+                            on_retry=retry
+                            style=ErrorStyle::Banner
+                        />
                     </div>
                 }
                 .into_any()

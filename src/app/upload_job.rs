@@ -1,7 +1,10 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 
-use crate::app::upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media};
+use crate::app::{
+    error_view::{ErrorStyle, ErrorView, action_error},
+    upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media},
+};
 
 const POLL_INTERVAL_MS: u32 = 700;
 
@@ -122,12 +125,8 @@ impl UploadJob {
         self.action.dispatch(fd);
     }
 
-    pub fn error(&self) -> Signal<Option<String>> {
-        let action = self.action;
-        Signal::derive(move || match action.value().get() {
-            Some(Err(e)) => Some(e.to_string()),
-            _ => None,
-        })
+    pub fn error(&self) -> Signal<Option<ServerFnError>> {
+        action_error(self.action)
     }
 }
 
@@ -185,12 +184,13 @@ fn DoneStage() -> impl IntoView {
 
 #[component]
 fn FailedStage(#[prop(into)] error: String) -> impl IntoView {
+    let signal = Signal::derive(move || Some(ServerFnError::new(error.clone())));
     view! {
-        <div class="bg-red-500/15 border border-red-500/30 rounded-xl p-3 \
-                    text-red-300 text-sm">
-            <div class="font-bold mb-1">"Conversion failed"</div>
-            <div class="text-xs break-all">{error}</div>
-        </div>
+        <ErrorView
+            error=signal
+            style=ErrorStyle::Banner
+            heading="Conversion failed"
+        />
     }
 }
 

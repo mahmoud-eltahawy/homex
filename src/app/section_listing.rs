@@ -1,4 +1,5 @@
 use crate::app::constants::routes;
+use crate::app::error_view::{ErrorView, action_error};
 use crate::app::{
     collections::create_empty_collection,
     common::{
@@ -164,6 +165,7 @@ fn CreateNewButton(
                     }
                 }
             </button>
+            <ErrorView error=action_error(action)/>
         </Show>
     }
 }

@@ -6,6 +6,8 @@ use crate::app::constants::{auth as auth_consts, messages};
 
 #[cfg(feature = "ssr")]
 use crate::app::error::AppError;
+use crate::app::error_view::ErrorView;
+use crate::app::error_view::action_error;
 
 #[server(endpoint = "login")]
 pub async fn login(token: String) -> Result<(), ServerFnError> {
@@ -54,11 +56,6 @@ impl LazyRoute for LoginPage {
             }
         });
 
-        let error = move || match submit.value().get() {
-            Some(Err(e)) => Some(crate::app::error::user_message(&e)),
-            _ => None,
-        };
-
         let on_submit = move |ev: web_sys::SubmitEvent| {
             ev.prevent_default();
             let t = token.get_untracked();
@@ -98,9 +95,9 @@ impl LazyRoute for LoginPage {
                         {move || if submit.pending().get() { "Logging in..." } else { "Login" }}
                     </button>
 
-                    {move || error().map(|e| view! {
-                        <div class="text-red-300 text-sm text-center">{e}</div>
-                    })}
+                    <div class="text-center">
+                        <ErrorView error=action_error(submit)/>
+                    </div>
                 </form>
             </div>
         }.into_any()
