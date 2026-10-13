@@ -1,4 +1,5 @@
 use crate::app::constants::HTML_DIR;
+use crate::app::error::AppError;
 use crate::app::icons::icon_for;
 use crate::app::{
     icons::{MediaCubeLogo, MenuIcon, XIcon},
@@ -11,7 +12,7 @@ use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 
-type Sections = Resource<Result<Vec<Section>, ServerFnError>>;
+type Sections = Resource<Result<Vec<Section>, AppError>>;
 
 #[component(transparent)]
 pub fn Layout() -> impl IntoView {
@@ -21,7 +22,6 @@ pub fn Layout() -> impl IntoView {
     let sections: Sections = Resource::new(|| (), |_| fetch_sections());
     provide_context(sections);
 
-    // Shared tag-name cache for autocompletion in every `TagEditor`.
     TagsCache::new().provide();
 
     view! {

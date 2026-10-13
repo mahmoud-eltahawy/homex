@@ -8,6 +8,7 @@ use crate::app::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
         collections_paginated, refetch_on_success,
     },
+    error::AppError,
     error_view::{ErrorView, action_error},
     icons::{DeleteIcon, ViewAllIcon, icon_for},
     inline_edit::{EditableText, use_edit_mode},
@@ -25,7 +26,7 @@ const MEDIA_LIST_SIZE: usize = 6;
 
 pub struct HomePage {
     search_query: RwSignal<Option<String>>,
-    sections: Resource<Result<Vec<Section>, ServerFnError>>,
+    sections: Resource<Result<Vec<Section>, AppError>>,
 }
 
 #[lazy_route]
@@ -63,7 +64,7 @@ impl LazyRoute for HomePage {
 fn AllSections(
     sections: Vec<Section>,
     search_query: RwSignal<Option<String>>,
-    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+    sections_resource: Resource<Result<Vec<Section>, AppError>>,
 ) -> impl IntoView {
     let list = sections
         .into_iter()
@@ -129,7 +130,7 @@ fn use_section_teaser_state(
 fn SectionTeaser(
     section: Section,
     search_query: RwSignal<Option<String>>,
-    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+    sections_resource: Resource<Result<Vec<Section>, AppError>>,
 ) -> impl IntoView {
     let state = use_section_teaser_state(section.slug.clone(), search_query);
 
@@ -177,14 +178,14 @@ fn SectionTeaser(
 struct SectionHeaderState {
     title: RwSignal<String>,
     commit_title: Callback<String>,
-    rename: Action<(Uuid, String), Result<(), ServerFnError>>,
-    delete_action: Action<Uuid, Result<(), ServerFnError>>,
-    tags_action: Action<(Uuid, Vec<String>), Result<(), ServerFnError>>,
+    rename: Action<(Uuid, String), Result<(), AppError>>,
+    delete_action: Action<Uuid, Result<(), AppError>>,
+    tags_action: Action<(Uuid, Vec<String>), Result<(), AppError>>,
 }
 
 fn use_section_header_state(
     section: &Section,
-    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+    sections_resource: Resource<Result<Vec<Section>, AppError>>,
 ) -> SectionHeaderState {
     let id = section.id;
     let title = RwSignal::new(section.title.clone());
@@ -216,7 +217,7 @@ fn SectionHeader(
     section: Section,
     count: usize,
     folded: RwSignal<bool>,
-    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+    sections_resource: Resource<Result<Vec<Section>, AppError>>,
 ) -> impl IntoView {
     let state = use_section_header_state(&section, sections_resource);
     let edit_on = use_edit_mode();
@@ -408,11 +409,11 @@ struct NewSectionFormState {
     kind: RwSignal<String>,
     nested: RwSignal<bool>,
     client_error: RwSignal<Option<String>>,
-    create: Action<(String, String, bool), Result<Uuid, ServerFnError>>,
+    create: Action<(String, String, bool), Result<Uuid, AppError>>,
 }
 
 fn use_new_section_form(
-    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
+    sections_resource: Resource<Result<Vec<Section>, AppError>>,
 ) -> NewSectionFormState {
     let title = RwSignal::new(String::new());
     let kind = RwSignal::new("video".to_string());
@@ -442,9 +443,7 @@ fn use_new_section_form(
 }
 
 #[component]
-fn NewSectionForm(
-    sections_resource: Resource<Result<Vec<Section>, ServerFnError>>,
-) -> impl IntoView {
+fn NewSectionForm(sections_resource: Resource<Result<Vec<Section>, AppError>>) -> impl IntoView {
     let state = use_new_section_form(sections_resource);
     let server_error = action_error(state.create);
 

@@ -1,9 +1,7 @@
 use crate::app::constants::{routes, storage};
-use leptos::prelude::ServerFnError;
+use crate::app::error::AppError;
 use std::path::Path;
 use uuid::Uuid;
-
-use crate::app::error::AppError;
 
 const ALLOWED_POSTER_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
 
@@ -15,7 +13,7 @@ const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 /// that names a non-image as `.jpg`, and against a client that names a
 /// PNG as `.jpeg`. Falls back to the client-supplied extension only if
 /// `infer` can't classify the bytes at all.
-fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, ServerFnError> {
+fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, AppError> {
     let candidate = match infer::get(bytes) {
         Some(kind) => kind.extension().to_string(),
         None => client_ext.to_ascii_lowercase(),
@@ -25,7 +23,7 @@ fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, Se
         .iter()
         .find(|allowed| allowed.eq_ignore_ascii_case(&candidate))
         .copied()
-        .ok_or_else(|| AppError::public(format!("Unsupported image format: .{candidate}")).into())
+        .ok_or_else(|| AppError::public(format!("Unsupported image format: .{candidate}")))
 }
 
 pub async fn write_poster(
@@ -34,13 +32,12 @@ pub async fn write_poster(
     entity_id: Uuid,
     client_ext: &str,
     bytes: &[u8],
-) -> Result<String, ServerFnError> {
+) -> Result<String, AppError> {
     if bytes.len() > MAX_POSTER_BYTES {
         return Err(AppError::public(format!(
             "Image size exceeds {} MB",
             MAX_POSTER_BYTES / 1024 / 1024
-        ))
-        .into());
+        )));
     }
 
     let ext = resolve_poster_ext(client_ext, bytes)?;
@@ -62,9 +59,8 @@ pub async fn write_poster(
 /// URL on success.
 ///
 /// Returns `None` when the URL isn't a posters URL (nothing to do) **or**
-/// when the underlying file operation fails — callers should treat a
-/// `None` for a URL that *was* a posters URL as a soft failure. Failures
-/// are logged here so the caller doesn't need its own diagnostic.
+/// when the underlying file operation fails. Failures are logged here so
+/// the caller doesn't need its own diagnostic.
 pub async fn move_poster_to_subdir(
     data_dir: &Path,
     from_subdir: &str,
@@ -76,7 +72,7 @@ pub async fn move_poster_to_subdir(
 
     let to_dir = data_dir.join(storage::POSTERS_DIR).join(to_subdir);
     if let Err(e) = tokio::fs::create_dir_all(&to_dir).await {
-        leptos::logging::warn!("[poster] mkdir failed for {}: {e}", to_dir.display(),);
+        leptos::logging::warn!("[poster] mkdir failed for {}: {e}", to_dir.display());
         return None;
     }
 

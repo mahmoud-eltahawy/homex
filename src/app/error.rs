@@ -1,42 +1,30 @@
 //! Centralized error reporting.
 //!
-//! Every fallible operation on the server funnels through this module. An
-//! `AppError` carries two faces:
+//! `AppError` is the error type returned by every `#[server]` function. It
+//! carries two faces:
 //!
 //!   * the **user message** — the only thing that crosses the wire,
 //!   * the **diagnostic**   — full detail, logged server-side, never sent.
 //!
-//! Public errors (validation, not-found, "title required") have no hidden
-//! diagnostic — the user message *is* the truth. Internal errors (DB failure,
-//! IO error, unexpected state) hide behind a generic message; the real cause
-//! is logged with whatever context the caller supplied.
+//! Public errors (validation, not-found, "title required") log at `WARN` on
+//! the server so they show up without looking like crashes. Internal errors
+//! log at `ERROR` with the context and source; the client sees a generic
+//! message.
 //!
-//! ## Wire format
-//!
-//! `ServerFnError` (Leptos) offers no structured variant, so we encode a
-//! one-char **disposition tag** into the message string itself, delimited by
-//! `\u{1}` (SOH). That control character cannot appear in user-authored text,
-//! so a client cannot forge a disposition. [`parse_wire_error`] reverses the
-//! encoding; [`user_message`] is the safe accessor for display sites.
-//!
-//! Errors that did not come from `AppError` (raw Leptos/router errors) have
-//! no sentinel, and default to [`Disposition::Transient`] — retry is the
-//! safer default when we don't know.
+//! `AppError` implements [`server_fn::error::FromServerFnError`], so it can
+//! be used directly as the error type of a `#[server]` function. The
+//! `message` and `disposition` fields are serialized; the `diagnostic` is
+//! not — it never leaves the server.
 
 use std::fmt::{self, Display};
 
-use leptos::prelude::ServerFnError;
+use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "ssr")]
 use crate::app::constants::messages;
 
-// ─── Wire format ─────────────────────────────────────────────────────────────
+// ─── Disposition ─────────────────────────────────────────────────────────────
 
-/// `\u{1}` (SOH). Not producible by any HTML form control or keyboard; safe
-/// to use as a delimiter that a client cannot inject.
-const SENTINEL: char = '\u{1}';
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Disposition {
     /// Retrying the same operation may succeed.
     Transient,
@@ -44,57 +32,8 @@ pub enum Disposition {
     Fatal,
 }
 
-#[cfg(feature = "ssr")]
-fn encode(disposition: Disposition, msg: &str) -> String {
-    let tag = match disposition {
-        Disposition::Transient => 'T',
-        Disposition::Fatal => 'F',
-    };
-    format!("{SENTINEL}{tag}{SENTINEL}{msg}")
-}
-
-/// Parse a wire error string. Returns the disposition and the user-visible
-/// message. Strings not produced by `AppError::report` default to
-/// [`Disposition::Transient`].
-pub fn parse_wire_error(s: &str) -> (Disposition, &str) {
-    let Some(rest) = s.strip_prefix(SENTINEL) else {
-        return (Disposition::Transient, s);
-    };
-    let Some((tag, msg)) = rest.split_once(SENTINEL) else {
-        return (Disposition::Transient, s);
-    };
-    let d = match tag {
-        "F" => Disposition::Fatal,
-        _ => Disposition::Transient,
-    };
-    (d, msg)
-}
-
-/// Extract the user-visible message from a `ServerFnError`. Safe to display.
-/// Strips the disposition tag if present.
-pub fn user_message(e: &ServerFnError) -> String {
-    parse_wire_error(&e.to_string()).1.to_string()
-}
-
-/// Extract the disposition of a `ServerFnError`.
-pub fn disposition(e: &ServerFnError) -> Disposition {
-    parse_wire_error(&e.to_string()).0
-}
-
-/// A `Display`-able view of a `ServerFnError` that yields only the
-/// user-visible message. Useful inside `view!` bodies where a `Display`
-/// is expected.
-pub struct UserFacing<'a>(pub &'a ServerFnError);
-
-impl Display for UserFacing<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&user_message(self.0))
-    }
-}
-
 // ─── Log level ───────────────────────────────────────────────────────────────
 
-#[cfg(feature = "ssr")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogLevel {
     Debug,
@@ -103,8 +42,8 @@ pub enum LogLevel {
     Error,
 }
 
-#[cfg(feature = "ssr")]
 impl LogLevel {
+    #[cfg(feature = "ssr")]
     fn emit(self, msg: &str) {
         match self {
             Self::Debug => leptos::logging::log!("[error:debug] {msg}"),
@@ -113,78 +52,68 @@ impl LogLevel {
             Self::Error => leptos::logging::error!("[error] {msg}"),
         }
     }
+
+    /// No-op on the client — error logging is a server concern.
+    #[cfg(not(feature = "ssr"))]
+    fn emit(self, _msg: &str) {}
 }
 
 // ─── AppError ────────────────────────────────────────────────────────────────
 
-/// A server-side error with a sanitized user-facing message.
-///
-/// Note: `AppError` deliberately does **not** implement `std::error::Error`.
-/// `server_fn` provides a blanket `impl<E: std::error::Error> From<E> for
-/// ServerFnError`, and implementing `Error` here would (a) collide with our
-/// own `From<AppError> for ServerFnError`, and (b) if we dropped ours, route
-/// through that blanket impl — which uses `Display` and **skips** both the
-/// diagnostic logging and the wire-format encoding. The only correct path to
-/// the wire is `report()`.
-#[cfg(feature = "ssr")]
-#[derive(Debug)]
+/// The error type returned by every `#[server]` function.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppError {
     /// What the client will see. Always safe to display.
-    user_message: String,
-    /// Full diagnostic. `None` for purely public errors — nothing to hide.
-    diagnostic: Option<String>,
-    /// Log level when a diagnostic is present. Ignored for public errors.
-    level: LogLevel,
+    pub message: String,
     /// Whether retrying the same operation could succeed.
-    disposition: Disposition,
+    pub disposition: Disposition,
+    /// Full diagnostic. `None` for purely public errors. Never serialized.
+    #[serde(skip)]
+    pub diagnostic: Option<String>,
 }
 
-#[cfg(feature = "ssr")]
 impl AppError {
     // ─── Constructors ─────────────────────────────────────────────────────
 
     /// Public error. Message is safe to display, no hidden diagnostic.
-    /// Logged at `WARN` so it appears in server logs without looking like a
-    /// crash — user-triggered rejections are still observable.
+    /// Logged at `WARN` on the server.
     ///
     /// Disposition defaults to `Fatal` (a validation failure won't fix
     /// itself on retry). Chain [`.transient()`] if it should be retryable.
     pub fn public(msg: impl Into<String>) -> Self {
+        let message = msg.into();
+        LogLevel::Warn.emit(&format!("[public] {message}"));
         Self {
-            user_message: msg.into(),
-            diagnostic: None,
-            level: LogLevel::Warn,
+            message,
             disposition: Disposition::Fatal,
+            diagnostic: None,
         }
     }
 
     /// Internal error. Client sees `messages::INTERNAL_ERROR`; the real cause
-    /// is logged at `ERROR` with `context` prefixed. Disposition defaults to
-    /// `Transient` (a DB blip might clear on retry).
+    /// is logged at `ERROR` with `context` prefixed.
     pub fn internal(context: impl Into<String>, source: impl Display) -> Self {
+        let diagnostic = format!("{}: {}", context.into(), source);
+        LogLevel::Error.emit(&diagnostic);
         Self {
-            user_message: messages::INTERNAL_ERROR.into(),
-            diagnostic: Some(format!("{}: {}", context.into(), source)),
-            level: LogLevel::Error,
+            message: messages::INTERNAL_ERROR.into(),
             disposition: Disposition::Transient,
+            diagnostic: Some(diagnostic),
         }
     }
 
-    /// Internal error with a custom user-facing message. Same logging as
-    /// `internal`, but the client sees `user_msg` instead of the generic
-    /// `INTERNAL_ERROR`. Use for cases where the user can fix the problem but
-    /// we still want to log the technical cause — e.g. a malformed request.
-    /// Disposition defaults to `Fatal` (a malformed request stays malformed).
+    /// Internal error with a custom user-facing message.
     pub fn hidden(
         user_msg: impl Into<String>,
         context: impl Into<String>,
         source: impl Display,
     ) -> Self {
+        let diagnostic = format!("{}: {}", context.into(), source);
+        LogLevel::Error.emit(&diagnostic);
         Self {
-            user_message: user_msg.into(),
-            diagnostic: Some(format!("{}: {}", context.into(), source)),
-            level: LogLevel::Error,
+            message: user_msg.into(),
             disposition: Disposition::Fatal,
+            diagnostic: Some(diagnostic),
         }
     }
 
@@ -200,67 +129,64 @@ impl AppError {
 
     // ─── Builder ──────────────────────────────────────────────────────────
 
-    /// Override the log level of the diagnostic. Ignored for public errors
-    /// (they always log at `WARN`).
-    pub fn at_level(mut self, level: LogLevel) -> Self {
-        self.level = level;
-        self
-    }
-
     /// Mark this error retryable.
     pub fn transient(mut self) -> Self {
         self.disposition = Disposition::Transient;
         self
     }
 
-    /// Mark this error as not worth retrying (the default for public errors).
+    /// Mark this error as not worth retrying.
     pub fn fatal(mut self) -> Self {
         self.disposition = Disposition::Fatal;
         self
     }
-
-    // ─── Terminal ─────────────────────────────────────────────────────────
-
-    /// Log the diagnostic (if any) and produce the `ServerFnError` that
-    /// crosses the wire.
-    pub fn report(self) -> ServerFnError {
-        if let Some(diag) = &self.diagnostic {
-            self.level.emit(diag);
-        }
-        ServerFnError::new(encode(self.disposition, &self.user_message))
-    }
 }
 
-#[cfg(feature = "ssr")]
 impl Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.user_message)
+        f.write_str(&self.message)
     }
 }
 
-// Deliberately no `impl std::error::Error for AppError` — see the struct
-// doc-comment. `From<AppError> for ServerFnError` below is the only bridge.
+impl std::error::Error for AppError {}
 
+// ─── FromServerFnError ───────────────────────────────────────────────────────
+
+impl server_fn::error::FromServerFnError for AppError {
+    type Encoder = server_fn::codec::JsonEncoding;
+
+    fn from_server_fn_error(value: server_fn::error::ServerFnErrorErr) -> Self {
+        let diagnostic = format!("server_fn: {value:?}");
+        LogLevel::Error.emit(&diagnostic);
+        Self {
+            message: messages::INTERNAL_ERROR.into(),
+            disposition: Disposition::Transient,
+            diagnostic: Some(diagnostic),
+        }
+    }
+}
+
+// ─── Conversions for common error types ──────────────────────────────────────
+
+/// Framework-level multipart errors become internal errors with context.
 #[cfg(feature = "ssr")]
-impl From<AppError> for ServerFnError {
-    fn from(e: AppError) -> Self {
-        e.report()
+impl From<multer::Error> for AppError {
+    fn from(e: multer::Error) -> Self {
+        AppError::internal("multipart", e)
     }
 }
 
-// ─── Context extension for any `Display` error ───────────────────────────────
+// ─── Context extension ───────────────────────────────────────────────────────
 
 /// Attach context to any fallible operation, mapping the error into an
 /// `AppError::internal`.
 ///
 ///     let row = toasty::create!(...).exec(db).await
 ///         .context("insert collection")?;
-#[cfg(feature = "ssr")]
 pub trait ErrorContext<T> {
     fn context(self, ctx: impl Into<String>) -> Result<T, AppError>;
 }
 
-#[cfg(feature = "ssr")]
 impl<T, E: Display> ErrorContext<T> for Result<T, E> {
     fn context(self, ctx: impl Into<String>) -> Result<T, AppError> {
         self.map_err(|e| AppError::internal(ctx, e))
@@ -269,51 +195,48 @@ impl<T, E: Display> ErrorContext<T> for Result<T, E> {
 
 // ─── Toasty bridge ───────────────────────────────────────────────────────────
 
-/// Bridge `toasty::Result<T>` to `Result<T, ServerFnError>`.
+/// Bridge `toasty::Result<T>` to `Result<T, AppError>`.
 #[cfg(feature = "ssr")]
 pub trait ToastyErr<T> {
     /// Log at `ERROR`, hide the real error behind the generic message.
-    fn srv(self) -> Result<T, ServerFnError>;
+    fn srv(self) -> Result<T, AppError>;
 
     /// Same as `srv`, but attach a context string to the log line.
-    fn srv_ctx(self, ctx: impl Into<String>) -> Result<T, ServerFnError>;
+    fn srv_ctx(self, ctx: impl Into<String>) -> Result<T, AppError>;
 }
 
 #[cfg(feature = "ssr")]
 impl<T> ToastyErr<T> for toasty::Result<T> {
-    fn srv(self) -> Result<T, ServerFnError> {
-        self.map_err(|e| AppError::internal("db", e).report())
+    fn srv(self) -> Result<T, AppError> {
+        self.map_err(|e| AppError::internal("db", e))
     }
 
-    fn srv_ctx(self, ctx: impl Into<String>) -> Result<T, ServerFnError> {
-        self.map_err(|e| AppError::internal(ctx, e).report())
+    fn srv_ctx(self, ctx: impl Into<String>) -> Result<T, AppError> {
+        self.map_err(|e| AppError::internal(ctx, e))
     }
 }
 
 // ─── Macros ──────────────────────────────────────────────────────────────────
 
-/// Return a public error. Logs at `WARN`, user sees the formatted string.
+/// Return a public error. Logs at `WARN` on the server.
 #[macro_export]
 macro_rules! bail_public {
     ($($arg:tt)*) => {
         return ::std::result::Result::Err(
-            $crate::app::error::AppError::public(format!($($arg)*)).into()
+            $crate::app::error::AppError::public(format!($($arg)*))
         )
     };
 }
 
-/// Return an internal error. User sees the generic message; `context` and
-/// `source` go to the server log at `ERROR`.
+/// Return an internal error. `context` and `source` go to the server log.
 #[macro_export]
 macro_rules! bail_internal {
     ($ctx:expr, $err:expr) => {
-        return ::std::result::Result::Err($crate::app::error::AppError::internal($ctx, $err).into())
+        return ::std::result::Result::Err($crate::app::error::AppError::internal($ctx, $err))
     };
 }
 
-/// Log a server-only error and continue. For failures the user must not see
-/// and that must not abort the operation — background cleanup, best-effort
-/// eviction, etc.
+/// Log a server-only error and continue.
 #[macro_export]
 macro_rules! log_server_error {
     ($ctx:expr, $err:expr) => {

@@ -2,11 +2,10 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 
-#[cfg(feature = "ssr")]
-use crate::app::constants::messages;
+use crate::app::error::AppError;
 
 #[cfg(feature = "ssr")]
-use crate::app::error::AppError;
+use crate::app::constants::messages;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadResult {
@@ -30,7 +29,7 @@ pub enum ConversionStatus {
 }
 
 #[server(input = MultipartFormData)]
-pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnError> {
+pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError> {
     use crate::app::model::MediaKind;
     use crate::app::server::convert::{Job, JobPhase};
     use crate::app::server::upload::{
@@ -80,7 +79,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
             crate::app::server::convert::job_set_phase(
                 &state_bg.jobs,
                 Some(&job_id_bg),
-                JobPhase::Failed(crate::app::error::user_message(&e)),
+                JobPhase::Failed(e.message.clone()),
             )
             .await;
             schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
@@ -95,7 +94,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
 }
 
 #[server]
-pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, ServerFnError> {
+pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, AppError> {
     use crate::app::server::AppState;
     use crate::app::server::convert::JobPhase;
 

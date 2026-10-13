@@ -1,17 +1,16 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 
+use crate::app::error::AppError;
+use crate::app::error_view::{ErrorStyle, ErrorView};
 use crate::app::upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media};
 
 const POLL_INTERVAL_MS: u32 = 700;
-/// How many consecutive `poll_conversion` failures to tolerate before giving
-/// up. With 700ms intervals this is ~7s of continuous failure — long enough
-/// to survive a server reload, short enough that no tab polls forever.
 const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
 #[derive(Clone, Copy)]
 pub struct UploadJob {
-    action: Action<web_sys::FormData, Result<UploadResult, ServerFnError>>,
+    action: Action<web_sys::FormData, Result<UploadResult, AppError>>,
     pub status: RwSignal<Option<ConversionStatus>>,
     pub done_tick: RwSignal<u32>,
     pub pending: Signal<bool>,
@@ -83,7 +82,7 @@ async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
 }
 
 fn install_dispatch_result_effect(
-    action: Action<web_sys::FormData, Result<UploadResult, ServerFnError>>,
+    action: Action<web_sys::FormData, Result<UploadResult, AppError>>,
     signals: UploadSignals,
 ) {
     Effect::new(move |_| {
@@ -108,7 +107,7 @@ fn install_polling_effect(signals: UploadSignals) {
 }
 
 fn derive_pending(
-    action: Action<web_sys::FormData, Result<UploadResult, ServerFnError>>,
+    action: Action<web_sys::FormData, Result<UploadResult, AppError>>,
     signals: UploadSignals,
 ) -> Signal<bool> {
     Signal::derive(move || action.pending().get() || signals.active_job.get().is_some())
@@ -136,7 +135,7 @@ impl UploadJob {
         self.action.dispatch(fd);
     }
 
-    pub fn error(&self) -> Signal<Option<ServerFnError>> {
+    pub fn error(&self) -> Signal<Option<AppError>> {
         crate::app::error_view::action_error(self.action)
     }
 }
@@ -195,11 +194,11 @@ fn DoneStage() -> impl IntoView {
 
 #[component]
 fn FailedStage(#[prop(into)] error: String) -> impl IntoView {
-    let signal = Signal::derive(move || Some(ServerFnError::new(error.clone())));
+    let signal = Signal::derive(move || Some(AppError::public(error.clone()).transient()));
     view! {
-        <crate::app::error_view::ErrorView
+        <ErrorView
             error=signal
-            style=crate::app::error_view::ErrorStyle::Banner
+            style=ErrorStyle::Banner
             heading="Conversion failed"
         />
     }

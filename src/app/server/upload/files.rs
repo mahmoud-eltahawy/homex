@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use leptos::prelude::ServerFnError;
 use uuid::Uuid;
 
 use crate::app::error::AppError;
@@ -13,8 +12,6 @@ use crate::app::server::convert::{
 
 use super::naming::{sanitize_filename, slugify};
 use super::types::{StagedFile, UploadFile, UploadPayload};
-
-// ─── Filename parsing ─────────────────────────────────────────────────────
 
 fn extension_of(name: &str) -> String {
     name.rsplit('.').next().unwrap_or("").to_string()
@@ -29,8 +26,6 @@ fn stem_of(name: &str) -> String {
 fn safe_stem(name: &str) -> String {
     sanitize_filename(&stem_of(name))
 }
-
-// ─── Target selection ─────────────────────────────────────────────────────
 
 fn target_for(kind: MediaKind, filename: &str) -> Option<TargetFormat> {
     let ext = extension_of(filename);
@@ -49,8 +44,6 @@ fn targets_for(payload: &UploadPayload, kind: MediaKind) -> Vec<Option<TargetFor
         .map(|f| target_for(kind, &f.filename))
         .collect()
 }
-
-// ─── Staging plan ─────────────────────────────────────────────────────────
 
 struct StagingPlan {
     subdir: String,
@@ -83,14 +76,14 @@ fn build_staging_plan(payload: &UploadPayload) -> StagingPlan {
     }
 }
 
-async fn ensure_plan_dir(plan: &StagingPlan, media_root: &Path) -> Result<(), ServerFnError> {
+async fn ensure_plan_dir(plan: &StagingPlan, media_root: &Path) -> Result<(), AppError> {
     let dir = plan.base_dir(media_root);
     tokio::fs::create_dir_all(&dir)
         .await
-        .map_err(|e| AppError::internal("mkdir media staging dir", e).into())
+        .map_err(|e| AppError::internal("mkdir media staging dir", e))
 }
 
-async fn move_temp_to_final(temp_path: &Path, dest: &Path) -> Result<(), ServerFnError> {
+async fn move_temp_to_final(temp_path: &Path, dest: &Path) -> Result<(), AppError> {
     if tokio::fs::rename(temp_path, dest).await.is_ok() {
         return Ok(());
     }
@@ -112,7 +105,7 @@ async fn place_raw_file(
     plan: &StagingPlan,
     media_root: &Path,
     file: &UploadFile,
-) -> Result<PlacedRaw, ServerFnError> {
+) -> Result<PlacedRaw, AppError> {
     let ext = extension_of(&file.filename);
     let stem = safe_stem(&file.filename);
     let token = Uuid::new_v4();
@@ -142,10 +135,7 @@ async fn duration_secs_rounded(path: &Path) -> i64 {
     ffprobe_duration(path).await.round() as i64
 }
 
-async fn stage_kept_file(
-    placed: &PlacedRaw,
-    file: &UploadFile,
-) -> Result<StagedFile, ServerFnError> {
+async fn stage_kept_file(placed: &PlacedRaw, file: &UploadFile) -> Result<StagedFile, AppError> {
     Ok(StagedFile {
         rel: placed.rel.clone(),
         duration: duration_secs_rounded(&placed.abs).await,
@@ -159,7 +149,7 @@ async fn stage_converted_file(
     placed: &PlacedRaw,
     file: &UploadFile,
     target: TargetFormat,
-) -> Result<StagedFile, ServerFnError> {
+) -> Result<StagedFile, AppError> {
     let (out_rel, out_abs) = final_path_for(ctx.plan, ctx.media_root, placed, target);
     let total_secs = ffprobe_duration(&placed.abs).await;
 
@@ -239,7 +229,7 @@ async fn stage_one_file(
     file: &UploadFile,
     target: Option<TargetFormat>,
     track: &mut WrittenTracker,
-) -> Result<StagedFile, ServerFnError> {
+) -> Result<StagedFile, AppError> {
     let placed = place_raw_file(ctx.plan, ctx.media_root, file).await?;
     track.add(placed.abs.clone());
 
@@ -257,7 +247,7 @@ async fn stage_one_file(
 async fn stage_all(
     base_ctx: &StagingContext<'_>,
     targets: &[Option<TargetFormat>],
-) -> Result<Vec<StagedFile>, ServerFnError> {
+) -> Result<Vec<StagedFile>, AppError> {
     let files = base_ctx.files();
     let mut track = WrittenTracker::default();
     let mut staged = Vec::with_capacity(targets.len());
@@ -289,7 +279,7 @@ pub async fn stage_files(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
-) -> Result<Vec<StagedFile>, ServerFnError> {
+) -> Result<Vec<StagedFile>, AppError> {
     let plan = build_staging_plan(payload);
     ensure_plan_dir(&plan, &state.config.storage.media_root).await?;
 

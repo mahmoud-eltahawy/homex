@@ -16,6 +16,7 @@ use crate::app::{
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
+    error::AppError,
     error_view::{ErrorStyle, ErrorView, action_error},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
@@ -33,11 +34,11 @@ mod fields;
 
 // ─── Action type aliases ──────────────────────────────────────────────────
 
-type PatchAction = Action<(Uuid, String, Option<String>), Result<(), ServerFnError>>;
-type PosterUploadAction = Action<web_sys::FormData, Result<String, ServerFnError>>;
-type RenameItemAction = Action<(Uuid, String), Result<(), ServerFnError>>;
-type DeleteItemAction = Action<Uuid, Result<(), ServerFnError>>;
-type TagsAction = Action<(Uuid, Vec<String>), Result<(), ServerFnError>>;
+type PatchAction = Action<(Uuid, String, Option<String>), Result<(), AppError>>;
+type PosterUploadAction = Action<web_sys::FormData, Result<String, AppError>>;
+type RenameItemAction = Action<(Uuid, String), Result<(), AppError>>;
+type DeleteItemAction = Action<Uuid, Result<(), AppError>>;
+type TagsAction = Action<(Uuid, Vec<String>), Result<(), AppError>>;
 
 // ─── Collection actions bundle ────────────────────────────────────────────
 
@@ -47,12 +48,12 @@ struct CollectionActions {
     poster_upload: PosterUploadAction,
     rename_item: RenameItemAction,
     delete_item: DeleteItemAction,
-    move_item: Action<(Uuid, bool), Result<(), ServerFnError>>,
+    move_item: Action<(Uuid, bool), Result<(), AppError>>,
     tags: TagsAction,
 }
 
 impl CollectionActions {
-    fn new(items: Resource<Result<Vec<Item>, ServerFnError>>) -> Self {
+    fn new(items: Resource<Result<Vec<Item>, AppError>>) -> Self {
         let patch = Action::new_local(|(id, field, value): &(Uuid, String, Option<String>)| {
             patch_collection_field(*id, field.clone(), value.clone())
         });
@@ -99,24 +100,22 @@ impl CollectionActions {
         })
     }
 
-    // ─── Error accessors ──────────────────────────────────────────────
-
-    fn patch_error(self) -> Signal<Option<ServerFnError>> {
+    fn patch_error(self) -> Signal<Option<AppError>> {
         action_error(self.patch)
     }
-    fn poster_error(self) -> Signal<Option<ServerFnError>> {
+    fn poster_error(self) -> Signal<Option<AppError>> {
         action_error(self.poster_upload)
     }
-    fn rename_error(self) -> Signal<Option<ServerFnError>> {
+    fn rename_error(self) -> Signal<Option<AppError>> {
         action_error(self.rename_item)
     }
-    fn delete_error(self) -> Signal<Option<ServerFnError>> {
+    fn delete_error(self) -> Signal<Option<AppError>> {
         action_error(self.delete_item)
     }
-    fn move_error(self) -> Signal<Option<ServerFnError>> {
+    fn move_error(self) -> Signal<Option<AppError>> {
         action_error(self.move_item)
     }
-    fn tags_error(self) -> Signal<Option<ServerFnError>> {
+    fn tags_error(self) -> Signal<Option<AppError>> {
         action_error(self.tags)
     }
 }
@@ -226,9 +225,9 @@ fn make_playlist_adapter(
 // ─── Page structure ───────────────────────────────────────────────────────
 
 pub struct CollectionDetailPage {
-    section: Resource<Result<Section, ServerFnError>>,
-    collection: Resource<Result<Collection, ServerFnError>>,
-    items: Resource<Result<Vec<Item>, ServerFnError>>,
+    section: Resource<Result<Section, AppError>>,
+    collection: Resource<Result<Collection, AppError>>,
+    items: Resource<Result<Vec<Item>, AppError>>,
     initial_item_id: Option<Uuid>,
 }
 
@@ -273,8 +272,8 @@ impl LazyRoute for CollectionDetailPage {
 #[component]
 fn CollectionDetailBody(
     section: Section,
-    collection: Resource<Result<Collection, ServerFnError>>,
-    items: Resource<Result<Vec<Item>, ServerFnError>>,
+    collection: Resource<Result<Collection, AppError>>,
+    items: Resource<Result<Vec<Item>, AppError>>,
     initial_item_id: Option<Uuid>,
 ) -> impl IntoView {
     let adapter = move |c: Collection| CollectionContentProps {
@@ -292,7 +291,7 @@ fn CollectionDetailBody(
 fn CollectionContent(
     section: Section,
     collection: Collection,
-    items: Resource<Result<Vec<Item>, ServerFnError>>,
+    items: Resource<Result<Vec<Item>, AppError>>,
     initial_item_id: Option<Uuid>,
 ) -> impl IntoView {
     let collection_id = collection.id;
@@ -340,7 +339,6 @@ fn CollectionContent(
     let on_move = actions.move_callback();
     let kind = section.media_kind();
 
-    // Error signals — extracted once so the closures below capture a Copy.
     let patch_error = actions.patch_error();
     let poster_error = actions.poster_error();
     let tags_error = actions.tags_error();
@@ -804,7 +802,7 @@ fn MoveCollectionPicker(
     current_slug: String,
     media_kind: MediaKind,
 ) -> impl IntoView {
-    let sections: Resource<Result<Vec<Section>, ServerFnError>> = expect_context();
+    let sections: Resource<Result<Vec<Section>, AppError>> = expect_context();
     let navigate = use_navigate();
 
     let action =
@@ -867,13 +865,13 @@ fn MoveCollectionPicker(
 
 #[component]
 fn OrganizeItemsPanel(
-    items: Resource<Result<Vec<Item>, ServerFnError>>,
+    items: Resource<Result<Vec<Item>, AppError>>,
     current_collection_id: Uuid,
     media_kind: MediaKind,
     on_close: Callback<()>,
 ) -> impl IntoView {
     let kind_str = media_kind.as_str().to_string();
-    let destinations: Resource<Result<Vec<CollectionSummary>, ServerFnError>> =
+    let destinations: Resource<Result<Vec<CollectionSummary>, AppError>> =
         Resource::new(move || kind_str.clone(), fetch_collection_summaries);
 
     let selected: RwSignal<Vec<Uuid>> = RwSignal::new(Vec::new());
@@ -946,7 +944,7 @@ fn OrganizeItemsPanel(
                     }.into_any(),
                     Some(Err(e)) => view! {
                         <div class="py-8 text-center text-red-300 text-sm">
-                            {crate::app::error::user_message(&e)}
+                            {e.message}
                         </div>
                     }.into_any(),
                     Some(Ok(list)) if list.is_empty() => view! {

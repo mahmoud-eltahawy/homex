@@ -5,6 +5,7 @@ use crate::app::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionGridProps, CollectionPage,
         collections_paginated,
     },
+    error::AppError,
     error_view::{ErrorView, action_error},
     inline_edit::use_edit_mode,
     model::{Collection, Section},
@@ -17,13 +18,12 @@ use crate::app::{
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
-use server_fn::ServerFnError;
 use uuid::Uuid;
 
 const LISTING_PAGE_SIZE: usize = 18;
 
 pub struct SectionListingPage {
-    section: Resource<Result<Section, ServerFnError>>,
+    section: Resource<Result<Section, AppError>>,
     collections: CollectionPage,
     count: CollectionCount,
     offset: RwSignal<usize>,
@@ -80,8 +80,8 @@ impl LazyRoute for SectionListingPage {
 #[component]
 fn SectionListingBody(
     section: Section,
-    collections: Resource<Result<Vec<Collection>, ServerFnError>>,
-    count: Resource<Result<usize, ServerFnError>>,
+    collections: Resource<Result<Vec<Collection>, AppError>>,
+    count: Resource<Result<usize, AppError>>,
     offset: RwSignal<usize>,
     search_query: RwSignal<Option<String>>,
 ) -> impl IntoView {
@@ -115,7 +115,7 @@ fn SectionListingBody(
 
 // ─── Create-new-collection flow ───────────────────────────────────────────
 
-fn use_create_collection_nav(section_slug: String) -> Action<String, Result<Uuid, ServerFnError>> {
+fn use_create_collection_nav(section_slug: String) -> Action<String, Result<Uuid, AppError>> {
     let action = Action::new_local(move |s: &String| create_empty_collection(s.clone()));
     let navigate = use_navigate();
     let slug_for_nav = section_slug;

@@ -1,3 +1,4 @@
+use crate::app::error::AppError;
 use crate::app::model::Section;
 use leptos::prelude::*;
 use uuid::Uuid;
@@ -6,18 +7,15 @@ use uuid::Uuid;
 use crate::app::constants::messages;
 
 #[cfg(feature = "ssr")]
-use crate::app::error::AppError;
-
-#[cfg(feature = "ssr")]
 use crate::app::server::{ToastyErr, db};
 
 #[server]
-pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), ServerFnError> {
+pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     let t = title.trim();
     if t.is_empty() {
-        return Err(AppError::validation(messages::TITLE_REQUIRED).into());
+        return Err(AppError::validation(messages::TITLE_REQUIRED));
     }
     db::update_section_title(&mut state.db, id, t)
         .await
@@ -26,7 +24,7 @@ pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), ServerFn
 }
 
 #[server]
-pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), ServerFnError> {
+pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     db::set_section_tags(&mut state.db, id, &tags)
@@ -36,7 +34,7 @@ pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), Serve
 }
 
 #[server]
-pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
+pub async fn fetch_sections() -> Result<Vec<Section>, AppError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     db::fetch_sections(&mut state.db)
@@ -45,13 +43,13 @@ pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
 }
 
 #[server]
-pub async fn fetch_section_by_slug(slug: String) -> Result<Section, ServerFnError> {
+pub async fn fetch_section_by_slug(slug: String) -> Result<Section, AppError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     db::fetch_section_by_slug(&mut state.db, &slug)
         .await
         .srv_ctx("fetch section by slug")?
-        .ok_or_else(|| AppError::not_found("section").into())
+        .ok_or_else(|| AppError::not_found("section"))
 }
 
 #[server]
@@ -59,7 +57,7 @@ pub async fn create_section(
     title: String,
     media_kind: String,
     nested: bool,
-) -> Result<Uuid, ServerFnError> {
+) -> Result<Uuid, AppError> {
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -89,10 +87,11 @@ pub async fn create_section(
 
     let title = title.trim().to_string();
     if title.is_empty() {
-        return Err(AppError::validation(messages::NAME_REQUIRED).into());
+        return Err(AppError::validation(messages::NAME_REQUIRED));
     }
 
-    let kind = MediaKind::try_from(media_kind.as_str()).map_err(|e| AppError::public(e))?;
+    let kind = MediaKind::try_from(media_kind.as_str())
+        .map_err(|e| AppError::internal("invalid media_kind", e))?;
     let prefix = prefix_for(kind, nested);
 
     for attempt in 0..4 {
@@ -106,23 +105,27 @@ pub async fn create_section(
             if attempt < 3 {
                 continue;
             }
-            return Err(
-                AppError::internal("create section", messages::UNIQUE_SECTION_ID_FAILED).into(),
-            );
+            return Err(AppError::internal(
+                "create section",
+                messages::UNIQUE_SECTION_ID_FAILED,
+            ));
         }
 
         match db::insert_section(&mut state.db, &slug, &title, media_kind.as_str(), nested).await {
             Ok(id) => return Ok(id),
             Err(e) => {
-                leptos::logging::error!("[sections] insert failed: {e}");
                 if attempt < 3 {
+                    leptos::logging::warn!("[sections] insert retry {attempt}: {e}");
                     continue;
                 }
-                return Err(AppError::internal("create section", e).into());
+                return Err(AppError::internal("create section", e));
             }
         }
     }
-    Err(AppError::internal("create section", messages::UNIQUE_SECTION_ID_FAILED).into())
+    Err(AppError::internal(
+        "create section",
+        messages::UNIQUE_SECTION_ID_FAILED,
+    ))
 }
 
 #[server]
@@ -131,11 +134,12 @@ pub async fn update_section(
     title: String,
     media_kind: String,
     nested: bool,
-) -> Result<(), ServerFnError> {
+) -> Result<(), AppError> {
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
+    MediaKind::try_from(media_kind.as_str())
+        .map_err(|e| AppError::internal("invalid media_kind", e))?;
     db::update_section(&mut state.db, id, &title, &media_kind, nested)
         .await
         .srv_ctx("update section")?;
@@ -143,7 +147,7 @@ pub async fn update_section(
 }
 
 #[server]
-pub async fn delete_section(id: Uuid) -> Result<(), ServerFnError> {
+pub async fn delete_section(id: Uuid) -> Result<(), AppError> {
     use crate::app::server::AppState;
     use crate::app::server::db::DeleteSectionOutcome;
 
@@ -158,7 +162,6 @@ pub async fn delete_section(id: Uuid) -> Result<(), ServerFnError> {
             messages::SECTION_NOT_EMPTY,
             collection_count,
             if collection_count == 1 { "" } else { "s" },
-        ))
-        .into()),
+        ))),
     }
 }

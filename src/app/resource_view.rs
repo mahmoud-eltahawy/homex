@@ -4,12 +4,13 @@ use leptos::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::app::error::AppError;
 use crate::app::error_view::{ErrorStyle, ErrorView};
 use crate::app::icons::LoadingIcon;
 
 #[component]
 pub fn ResourceView<ResourceViewFn, ResourceValue, ViewValue, Props, Adapter>(
-    resource: Resource<Result<ResourceValue, ServerFnError>>,
+    resource: Resource<Result<ResourceValue, AppError>>,
     view_fn: ResourceViewFn,
     adapter: Adapter,
     #[prop(optional, into)] fallback: Option<ViewFn>,

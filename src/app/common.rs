@@ -1,4 +1,5 @@
 use crate::app::collections::{fetch_collections, fetch_collections_count};
+use crate::app::error::AppError;
 use crate::app::icons::EmptyStateIcon;
 use crate::app::model::Collection;
 use crate::app::tags::TagList;
@@ -86,10 +87,8 @@ pub fn EmptyState(#[prop(into)] label: String) -> impl IntoView {
     }
 }
 
-pub fn refetch_on_success<V, A, R>(
-    action: Action<A, Result<V, ServerFnError>>,
-    resource: Resource<R>,
-) where
+pub fn refetch_on_success<V, A, R>(action: Action<A, Result<V, AppError>>, resource: Resource<R>)
+where
     A: Send + Sync + 'static + Clone,
     V: Send + Sync + 'static + Clone,
     R: Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -101,8 +100,8 @@ pub fn refetch_on_success<V, A, R>(
     });
 }
 
-pub type CollectionPage = Resource<Result<Vec<Collection>, ServerFnError>>;
-pub type CollectionCount = Resource<Result<usize, ServerFnError>>;
+pub type CollectionPage = Resource<Result<Vec<Collection>, AppError>>;
+pub type CollectionCount = Resource<Result<usize, AppError>>;
 
 pub fn collections_paginated(
     slug: impl Fn() -> String + Clone + Send + Sync + 'static,

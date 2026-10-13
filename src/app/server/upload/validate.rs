@@ -1,5 +1,3 @@
-use leptos::prelude::ServerFnError;
-
 use crate::app::error::AppError;
 use crate::app::model::MediaKind;
 use crate::app::server::convert::{
@@ -9,7 +7,7 @@ use crate::app::server::convert::{
 
 use super::types::UploadPayload;
 
-pub fn validate_extensions(payload: &UploadPayload, kind: MediaKind) -> Result<(), ServerFnError> {
+pub fn validate_extensions(payload: &UploadPayload, kind: MediaKind) -> Result<(), AppError> {
     for f in &payload.files {
         let ext = f
             .filename
@@ -22,7 +20,10 @@ pub fn validate_extensions(payload: &UploadPayload, kind: MediaKind) -> Result<(
             MediaKind::Audio => is_audio_container_supported(&ext) || is_convertible_audio(&ext),
         };
         if !ok {
-            return Err(AppError::public(format!("Unsupported format: {}", f.filename)).into());
+            return Err(AppError::public(format!(
+                "Unsupported format: {}",
+                f.filename
+            )));
         }
     }
     Ok(())

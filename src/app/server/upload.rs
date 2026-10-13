@@ -13,8 +13,7 @@ use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};
 
-use leptos::prelude::ServerFnError;
-
+use crate::app::error::AppError;
 use crate::app::model::MediaKind;
 use crate::app::server::convert::{JobPhase, job_set_phase};
 use crate::app::server::{AppState, Jobs};
@@ -33,7 +32,7 @@ async fn stage_phase(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
-) -> Result<Vec<StagedFile>, ServerFnError> {
+) -> Result<Vec<StagedFile>, AppError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
     files::stage_files(payload, state, kind, job_id).await
 }
@@ -43,7 +42,7 @@ async fn persist_phase(
     payload: &UploadPayload,
     staged: &[StagedFile],
     job_id: Option<&str>,
-) -> Result<(), ServerFnError> {
+) -> Result<(), AppError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
     let mut db = state.db.clone();
     let file_rows = persist::insert_files(&mut db, staged).await?;
@@ -63,7 +62,7 @@ async fn execute_upload(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
-) -> Result<String, ServerFnError> {
+) -> Result<String, AppError> {
     let staged = stage_phase(payload, state, kind, job_id).await?;
     persist_phase(state, payload, &staged, job_id).await?;
     finish_job(state, job_id).await;
@@ -75,6 +74,6 @@ pub async fn process_upload(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
-) -> Result<String, ServerFnError> {
+) -> Result<String, AppError> {
     execute_upload(&payload, state, kind, job_id).await
 }

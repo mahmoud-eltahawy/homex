@@ -1,12 +1,11 @@
-use crate::app::constants::messages;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use leptos::prelude::ServerFnError;
 use server_fn::codec::MultipartData;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+use crate::app::constants::messages;
 use crate::app::error::AppError;
 
 use super::naming::extension_of;
@@ -14,11 +13,11 @@ use super::types::{UploadFile, UploadPayload};
 
 mod fields;
 
-fn fresh_temp_dir() -> Result<tempfile::TempDir, ServerFnError> {
+fn fresh_temp_dir() -> Result<tempfile::TempDir, AppError> {
     tempfile::Builder::new()
         .prefix("homex-upload-")
         .tempdir()
-        .map_err(|e| AppError::internal("create upload temp dir", e).into())
+        .map_err(|e| AppError::internal("create upload temp dir", e))
 }
 
 struct StagedTempFile {
@@ -80,7 +79,7 @@ fn classify_field(name: &str) -> FieldKind {
 async fn handle_poster_field(
     acc: &mut Accumulator,
     field: multer::Field<'_>,
-) -> Result<(), ServerFnError> {
+) -> Result<(), AppError> {
     let fname = field.file_name().map(String::from).unwrap_or_default();
     let bytes = field.bytes().await?.to_vec();
     if !bytes.is_empty() {
@@ -89,15 +88,12 @@ async fn handle_poster_field(
     Ok(())
 }
 
-async fn handle_text_field(
-    dest: &mut String,
-    field: multer::Field<'_>,
-) -> Result<(), ServerFnError> {
+async fn handle_text_field(dest: &mut String, field: multer::Field<'_>) -> Result<(), AppError> {
     *dest = field.text().await?;
     Ok(())
 }
 
-async fn handle_uuid_field(dest: &mut Uuid, field: multer::Field<'_>) -> Result<(), ServerFnError> {
+async fn handle_uuid_field(dest: &mut Uuid, field: multer::Field<'_>) -> Result<(), AppError> {
     let raw = field.text().await?;
     *dest = Uuid::parse_str(&raw)
         .map_err(|e| AppError::hidden("Invalid request", "collection_id parse", e))?;
@@ -107,7 +103,7 @@ async fn handle_uuid_field(dest: &mut Uuid, field: multer::Field<'_>) -> Result<
 async fn handle_optional_i64_field(
     dest: &mut Option<i64>,
     field: multer::Field<'_>,
-) -> Result<(), ServerFnError> {
+) -> Result<(), AppError> {
     *dest = field.text().await?.parse().ok();
     Ok(())
 }
@@ -116,7 +112,7 @@ async fn handle_file_title_field(
     acc: &mut Accumulator,
     idx: usize,
     field: multer::Field<'_>,
-) -> Result<(), ServerFnError> {
+) -> Result<(), AppError> {
     acc.file_titles.insert(idx, field.text().await?);
     Ok(())
 }
@@ -126,7 +122,7 @@ async fn handle_file_field(
     temp_dir: &Path,
     idx: usize,
     mut field: multer::Field<'_>,
-) -> Result<(), ServerFnError> {
+) -> Result<(), AppError> {
     let fname = field.file_name().map(String::from).unwrap_or_default();
     let temp_path = temp_dir.join(format!("{idx}.bin"));
     let size = stream_field_to_file(&mut field, &temp_path).await?;
@@ -141,10 +137,7 @@ async fn handle_file_field(
     Ok(())
 }
 
-async fn stream_field_to_file(
-    field: &mut multer::Field<'_>,
-    dest: &Path,
-) -> Result<u64, ServerFnError> {
+async fn stream_field_to_file(field: &mut multer::Field<'_>, dest: &Path) -> Result<u64, AppError> {
     let mut out = tokio::fs::File::create(dest)
         .await
         .map_err(|e| AppError::internal("create upload temp file", e))?;
@@ -159,7 +152,7 @@ async fn stream_field_to_file(
     Ok(size)
 }
 
-async fn drain_field(mut field: multer::Field<'_>) -> Result<(), ServerFnError> {
+async fn drain_field(mut field: multer::Field<'_>) -> Result<(), AppError> {
     while field.chunk().await?.is_some() {}
     Ok(())
 }
@@ -168,7 +161,7 @@ async fn handle_field(
     acc: &mut Accumulator,
     temp_dir: &Path,
     field: multer::Field<'_>,
-) -> Result<(), ServerFnError> {
+) -> Result<(), AppError> {
     let name = field.name().map(String::from).unwrap_or_default();
     match classify_field(&name) {
         FieldKind::Poster => handle_poster_field(acc, field).await,
@@ -186,7 +179,7 @@ async fn handle_field(
 async fn run_parse_loop(
     multipart: &mut multer::Multipart<'static>,
     temp_dir: &Path,
-) -> Result<Accumulator, ServerFnError> {
+) -> Result<Accumulator, AppError> {
     let mut acc = Accumulator::default();
     while let Some(field) = multipart.next_field().await? {
         handle_field(&mut acc, temp_dir, field).await?;
@@ -212,12 +205,12 @@ fn build_upload_files(
         .collect()
 }
 
-fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPayload, ServerFnError> {
+fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPayload, AppError> {
     if acc.files.is_empty() {
-        return Err(AppError::public(messages::NO_FILES_RECEIVED).into());
+        return Err(AppError::public(messages::NO_FILES_RECEIVED));
     }
     if acc.section_slug.is_empty() {
-        return Err(AppError::public(messages::SECTION_SLUG_MISSING).into());
+        return Err(AppError::public(messages::SECTION_SLUG_MISSING));
     }
     let files = build_upload_files(acc.files, acc.file_titles);
     Ok(UploadPayload {
@@ -232,7 +225,7 @@ fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPaylo
     })
 }
 
-pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload, ServerFnError> {
+pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload, AppError> {
     let mut multipart = data
         .into_inner()
         .ok_or_else(|| AppError::internal("multipart", "missing multipart body"))?;

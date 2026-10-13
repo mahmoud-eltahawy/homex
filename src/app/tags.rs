@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 
+use crate::app::error::AppError;
 use crate::app::inline_edit::use_edit_mode;
 use crate::app::model::Tag;
 use uuid::Uuid;
@@ -59,7 +60,7 @@ pub fn TagList(tags: Vec<Tag>, #[prop(optional)] max: Option<usize>) -> impl Int
 // ─── Server fn ────────────────────────────────────────────────────────────
 
 #[server]
-pub async fn fetch_all_tags() -> Result<Vec<Tag>, ServerFnError> {
+pub async fn fetch_all_tags() -> Result<Vec<Tag>, AppError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
     db::fetch_all_tags(&mut state.db)
@@ -71,7 +72,7 @@ pub async fn fetch_all_tags() -> Result<Vec<Tag>, ServerFnError> {
 
 #[derive(Clone, Copy)]
 pub struct TagsCache {
-    all: Resource<Result<Vec<Tag>, ServerFnError>>,
+    all: Resource<Result<Vec<Tag>, AppError>>,
     tick: RwSignal<u32>,
 }
 
