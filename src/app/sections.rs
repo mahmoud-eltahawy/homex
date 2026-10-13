@@ -5,9 +5,11 @@ use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorContext;
 
 #[cfg(feature = "ssr")]
-use crate::app::server::{ToastyErr, db};
+use crate::app::server::db;
 
 #[server]
 pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError> {
@@ -19,7 +21,7 @@ pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError
     }
     db::update_section_title(&mut state.db, id, t)
         .await
-        .srv_ctx("patch section title")?;
+        .context("patch section title")?;
     Ok(())
 }
 
@@ -29,7 +31,7 @@ pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), AppEr
     let mut state: AppState = expect_context();
     db::set_section_tags(&mut state.db, id, &tags)
         .await
-        .srv_ctx("patch section tags")?;
+        .context("patch section tags")?;
     Ok(())
 }
 
@@ -39,7 +41,7 @@ pub async fn fetch_sections() -> Result<Vec<Section>, AppError> {
     let mut state: AppState = expect_context();
     db::fetch_sections(&mut state.db)
         .await
-        .srv_ctx("fetch sections")
+        .context("fetch sections")
 }
 
 #[server]
@@ -48,7 +50,7 @@ pub async fn fetch_section_by_slug(slug: String) -> Result<Section, AppError> {
     let mut state: AppState = expect_context();
     db::fetch_section_by_slug(&mut state.db, &slug)
         .await
-        .srv_ctx("fetch section by slug")?
+        .context("fetch section by slug")?
         .ok_or_else(|| AppError::not_found("section"))
 }
 
@@ -99,7 +101,7 @@ pub async fn create_section(
 
         if db::fetch_section_by_slug(&mut state.db, &slug)
             .await
-            .srv_ctx("check slug uniqueness")?
+            .context("check slug uniqueness")?
             .is_some()
         {
             if attempt < 3 {
@@ -142,7 +144,7 @@ pub async fn update_section(
         .map_err(|e| AppError::internal("invalid media_kind", e))?;
     db::update_section(&mut state.db, id, &title, &media_kind, nested)
         .await
-        .srv_ctx("update section")?;
+        .context("update section")?;
     Ok(())
 }
 
@@ -154,7 +156,7 @@ pub async fn delete_section(id: Uuid) -> Result<(), AppError> {
     let mut state: AppState = expect_context();
     match db::delete_section(&mut state.db, id)
         .await
-        .srv_ctx("delete section")?
+        .context("delete section")?
     {
         DeleteSectionOutcome::Deleted => Ok(()),
         DeleteSectionOutcome::NotEmpty { collection_count } => Err(AppError::public(format!(

@@ -3,9 +3,8 @@ use toasty::{Db, Transaction};
 use uuid::Uuid;
 
 use super::types::{StagedFile, UploadPayload};
-use crate::app::error::AppError;
+use crate::app::error::{AppError, ErrorContext};
 use crate::app::model::{CollectionRow, Item};
-use crate::app::server::ToastyErr;
 use crate::app::server::db;
 use crate::app::server::poster::write_poster;
 
@@ -17,7 +16,7 @@ pub async fn insert_files(
     for f in staged {
         let id = db::insert_file(db, &f.rel, f.size as i64, f.duration)
             .await
-            .srv_ctx("upload: insert file")?;
+            .context("upload: insert file")?;
         out.push((id, f.title.clone()));
     }
     Ok(out)
@@ -50,12 +49,12 @@ pub async fn insert_items_and_poster(
     let mut tx = db
         .transaction()
         .await
-        .srv_ctx("upload: begin transaction")?;
+        .context("upload: begin transaction")?;
 
     let collection_id = payload.collection_id;
     let start = next_item_number_tx(&mut tx, collection_id, payload.season_number)
         .await
-        .srv_ctx("upload: next item number")?;
+        .context("upload: next item number")?;
 
     for (i, (fid, title)) in file_rows.iter().enumerate() {
         toasty::create!(Item {
@@ -69,19 +68,19 @@ pub async fn insert_items_and_poster(
         })
         .exec(&mut tx)
         .await
-        .srv_ctx("upload: insert item")?;
+        .context("upload: insert item")?;
     }
 
     let mut collection = CollectionRow::get_by_id(&mut tx, &collection_id)
         .await
-        .srv_ctx("upload: load collection")?;
+        .context("upload: load collection")?;
     let new_count = collection.items_count + file_rows.len() as i64;
     collection
         .update()
         .items_count(new_count)
         .exec(&mut tx)
         .await
-        .srv_ctx("upload: bump item count")?;
+        .context("upload: bump item count")?;
 
     if let Some((ext, bytes)) = payload.poster.as_ref() {
         let url = write_poster(data_dir, &payload.section_slug, collection_id, ext, bytes).await?;
@@ -90,9 +89,9 @@ pub async fn insert_items_and_poster(
             .poster(Some(url))
             .exec(&mut tx)
             .await
-            .srv_ctx("upload: set collection poster")?;
+            .context("upload: set collection poster")?;
     }
 
-    tx.commit().await.srv_ctx("upload: commit transaction")?;
+    tx.commit().await.context("upload: commit transaction")?;
     Ok(())
 }

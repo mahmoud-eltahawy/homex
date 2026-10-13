@@ -5,9 +5,11 @@ use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorContext;
 
 #[cfg(feature = "ssr")]
-use crate::app::server::{ToastyErr, db};
+use crate::app::server::db;
 
 // ─── Multipart form field names (poster upload) ───────────────────────────────
 
@@ -35,7 +37,7 @@ pub async fn fetch_collections(
         search_query.as_deref(),
     )
     .await
-    .srv_ctx("fetch collections")
+    .context("fetch collections")
 }
 
 #[server]
@@ -47,7 +49,7 @@ pub async fn fetch_collections_count(
     let mut state: AppState = expect_context();
     let n = db::fetch_collections_count(&mut state.db, &section_slug, search_query.as_deref())
         .await
-        .srv_ctx("fetch collections count")?;
+        .context("fetch collections count")?;
     Ok(n as usize)
 }
 
@@ -60,7 +62,7 @@ pub async fn fetch_collection_detail(
     let mut state: AppState = expect_context();
     db::fetch_collection_detail(&mut state.db, &section_slug, collection_id)
         .await
-        .srv_ctx("fetch collection detail")?
+        .context("fetch collection detail")?
         .ok_or_else(|| AppError::public(messages::COLLECTION_NOT_FOUND))
 }
 
@@ -70,7 +72,7 @@ pub async fn fetch_items(collection_id: Uuid) -> Result<Vec<Item>, AppError> {
     let mut state: AppState = expect_context();
     db::fetch_items(&mut state.db, collection_id)
         .await
-        .srv_ctx("fetch items")
+        .context("fetch items")
 }
 
 #[server]
@@ -79,7 +81,7 @@ pub async fn create_empty_collection(section_slug: String) -> Result<Uuid, AppEr
     let mut state: AppState = expect_context();
     db::insert_empty_collection(&mut state.db, &section_slug)
         .await
-        .srv_ctx("insert empty collection")
+        .context("insert empty collection")
 }
 
 #[server]
@@ -106,7 +108,7 @@ pub async fn patch_collection_field(
 
     db::update_collection_field(&mut state.db, id, f, value.as_deref())
         .await
-        .srv_ctx("patch collection field")?;
+        .context("patch collection field")?;
     Ok(())
 }
 
@@ -116,7 +118,7 @@ pub async fn patch_collection_tags(id: Uuid, tags: Vec<String>) -> Result<(), Ap
     let mut state: AppState = expect_context();
     db::set_collection_tags(&mut state.db, id, &tags)
         .await
-        .srv_ctx("patch collection tags")?;
+        .context("patch collection tags")?;
     Ok(())
 }
 
@@ -131,7 +133,7 @@ pub async fn patch_item_title(id: Uuid, title: String) -> Result<(), AppError> {
     };
     db::update_item_title(&mut state.db, id, t.as_deref())
         .await
-        .srv_ctx("patch item title")?;
+        .context("patch item title")?;
     Ok(())
 }
 
@@ -141,7 +143,7 @@ pub async fn delete_collection(id: Uuid) -> Result<(), AppError> {
     let mut state: AppState = expect_context();
     let del = db::delete_collection_cascade(&mut state.db, id)
         .await
-        .srv_ctx("delete collection cascade")?;
+        .context("delete collection cascade")?;
     remove_poster(&state, del.poster_url.as_deref()).await;
     remove_media_files(&state, &del.media_paths).await;
     Ok(())
@@ -153,7 +155,7 @@ pub async fn delete_item(id: Uuid) -> Result<(), AppError> {
     let mut state: AppState = expect_context();
     let del = db::delete_item_cascade(&mut state.db, id)
         .await
-        .srv_ctx("delete item cascade")?;
+        .context("delete item cascade")?;
     remove_media_files(&state, &del.media_paths).await;
     Ok(())
 }
@@ -196,7 +198,7 @@ pub async fn upload_collection_poster(
 
     let collection = db::fetch_collection_detail(&mut state.db, &section_slug, id)
         .await
-        .srv_ctx("fetch collection for poster")?
+        .context("fetch collection for poster")?
         .ok_or_else(|| AppError::public(messages::COLLECTION_NOT_FOUND))?;
 
     let url = write_poster(
@@ -210,7 +212,7 @@ pub async fn upload_collection_poster(
 
     db::update_collection_field(&mut state.db, id, CollectionField::Poster, Some(&url))
         .await
-        .srv_ctx("set collection poster")?;
+        .context("set collection poster")?;
     Ok(url)
 }
 
@@ -220,7 +222,7 @@ pub async fn move_item(id: Uuid, is_up: bool) -> Result<(), AppError> {
     let mut state: AppState = expect_context();
     db::swap_item_order(&mut state.db, id, is_up)
         .await
-        .srv_ctx("swap item order")?;
+        .context("swap item order")?;
     Ok(())
 }
 
@@ -260,7 +262,7 @@ pub async fn move_collection_to_section(
             Some(&new_url),
         )
         .await
-        .srv_ctx("move collection poster")?;
+        .context("move collection poster")?;
     }
 
     Ok(())
@@ -274,7 +276,7 @@ pub async fn fetch_collection_summaries(
     let mut state: AppState = expect_context();
     db::fetch_collection_summaries(&mut state.db, &media_kind)
         .await
-        .srv_ctx("fetch collection summaries")
+        .context("fetch collection summaries")
 }
 
 #[server]
@@ -286,6 +288,6 @@ pub async fn move_items_to_collection(
     let mut state: AppState = expect_context();
     db::move_items_to_collection(&mut state.db, &item_ids, to_collection_id)
         .await
-        .srv_ctx("move items to collection")?;
+        .context("move items to collection")?;
     Ok(())
 }

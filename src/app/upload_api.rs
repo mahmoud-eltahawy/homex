@@ -6,6 +6,8 @@ use crate::app::error::AppError;
 
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorContext;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadResult {
@@ -36,14 +38,14 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
         needs_conversion, parse_upload_multipart, process_upload, schedule_job_eviction,
         validate_extensions,
     };
-    use crate::app::server::{AppState, ToastyErr, db};
+    use crate::app::server::{AppState, db};
 
     let mut state: AppState = expect_context();
     let payload = parse_upload_multipart(data).await?;
 
     let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
         .await
-        .srv_ctx("fetch section kind for upload")?
+        .context("fetch section kind for upload")?
         .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
     let kind = MediaKind::try_from(kind_str.as_str())
         .map_err(|e| AppError::internal("section has invalid media_kind", e))?;

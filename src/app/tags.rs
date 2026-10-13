@@ -6,7 +6,9 @@ use crate::app::model::Tag;
 use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
-use crate::app::server::{ToastyErr, db};
+use crate::app::error::ErrorContext;
+#[cfg(feature = "ssr")]
+use crate::app::server::db;
 
 // ─── Tag pill ─────────────────────────────────────────────────────────────
 
@@ -65,7 +67,7 @@ pub async fn fetch_all_tags() -> Result<Vec<Tag>, AppError> {
     let mut state: AppState = expect_context();
     db::fetch_all_tags(&mut state.db)
         .await
-        .srv_ctx("fetch all tags")
+        .context("fetch all tags")
 }
 
 // ─── Shared tag cache ─────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ pub use convert::Jobs;
 
 // Re-export the centralized error API so `use crate::app::server::{ToastyErr, db}`
 // keeps working across the codebase.
-pub use crate::app::error::{AppError, ErrorContext, ToastyErr};
+pub use crate::app::error::{AppError, ErrorContext};
 
 #[derive(Clone)]
 pub struct AppState {
