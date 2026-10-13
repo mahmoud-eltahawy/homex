@@ -5,6 +5,11 @@
 //! moved into a collection in one shot, reusing the normal upload staging /
 //! conversion / persist pipeline.
 //!
+//! The current folder is encoded in the URL as `?path=<relative>`, so
+//! browser back/forward navigates the tree naturally. The URL is the single
+//! source of truth: `rel_path` is a `Signal` derived from the query map, and
+//! every folder click is a navigation rather than a signal write.
+//!
 //! Progress is reported through the shared `state.jobs` map, exactly like the
 //! normal upload flow, so the client can show a real progress bar and a
 //! final success / failure message.
@@ -12,11 +17,13 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::either::Either;
 use leptos::prelude::*;
+use leptos_router::hooks::{use_navigate, use_query_map};
 use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::collections::create_collection_named;
+use crate::app::constants::routes;
 use crate::app::error::AppError;
 use crate::app::error_view::{ErrorStyle, ErrorView, action_error};
 use crate::app::model::{CollectionSummary, MediaKind};
@@ -98,6 +105,26 @@ fn file_stem(name: &str) -> String {
     name.rsplit_once('.')
         .map(|(s, _)| s.to_string())
         .unwrap_or_else(|| name.to_string())
+}
+
+/// Percent-encode a path for use as a query-string value. Keeps `/` and
+/// unreserved characters untouched, so the URL stays human-readable
+/// (`?path=movies/action`). Only the characters that would break the query
+/// string (`&`, `=`, `#`, `?`, space, control chars, non-ASCII) get encoded.
+fn encode_query_path(s: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(b as char);
+            }
+            _ => {
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+    }
+    out
 }
 
 // ─── Selection helpers ────────────────────────────────────────────────────────
@@ -545,11 +572,37 @@ impl LazyRoute for UnclassifiedPage {
     }
 
     fn view(_this: Self) -> AnyView {
-        let rel_path = RwSignal::new(String::new());
+        let query = use_query_map();
+        let navigate = use_navigate();
+
+        // The current folder is derived from the URL. This is the only place
+        // that produces it — everything else reads `rel_path`.
+        let rel_path: Signal<String> =
+            Signal::derive(move || query.with(|q| q.get("path")).unwrap_or_default());
+
+        // A folder click is a URL navigation, not a signal write. This pushes
+        // a history entry, so the browser back button returns to the previous
+        // folder.
+        let on_navigate = Callback::new(move |new_path: String| {
+            let url = if new_path.is_empty() {
+                routes::UNCLASSIFIED.to_string()
+            } else {
+                format!(
+                    "{}?path={}",
+                    routes::UNCLASSIFIED,
+                    encode_query_path(&new_path)
+                )
+            };
+            navigate(&url, Default::default());
+        });
+
         let refresh = RwSignal::new(0u32);
         let selection: RwSignal<Vec<UnclassifiedEntry>> = RwSignal::new(Vec::new());
         let modal_open = RwSignal::new(false);
 
+        // The resource tracks the URL. When the folder changes, it refetches.
+        // `refresh` lets us force a refetch after a successful classify
+        // without touching the URL.
         let entries: Resource<Result<Vec<UnclassifiedEntry>, AppError>> = Resource::new(
             move || (rel_path.get(), refresh.get()),
             |(path, _)| list_unclassified(path),
@@ -557,7 +610,8 @@ impl LazyRoute for UnclassifiedPage {
 
         let classify = ClassifyJob::new();
 
-        // Clear the selection when the user navigates to another folder.
+        // Clear the selection whenever the folder changes — the files in the
+        // new folder are a different set.
         Effect::new(move |_| {
             let _ = rel_path.get();
             selection.set(Vec::new());
@@ -577,7 +631,7 @@ impl LazyRoute for UnclassifiedPage {
 
         let adapter = move |list: Vec<UnclassifiedEntry>| EntryListProps {
             entries: list,
-            rel_path,
+            on_navigate,
             selection,
             modal_open,
             classify,
@@ -593,7 +647,7 @@ impl LazyRoute for UnclassifiedPage {
                     </p>
                 </div>
 
-                <Breadcrumb rel_path=rel_path/>
+                <Breadcrumb rel_path=rel_path on_navigate=on_navigate/>
 
                 <ResourceView
                     resource=entries
@@ -609,7 +663,7 @@ impl LazyRoute for UnclassifiedPage {
 // ─── Breadcrumb ───────────────────────────────────────────────────────────────
 
 #[component]
-fn Breadcrumb(rel_path: RwSignal<String>) -> impl IntoView {
+fn Breadcrumb(rel_path: Signal<String>, on_navigate: Callback<String>) -> impl IntoView {
     let segments = Memo::new(move |_| {
         let path = rel_path.get();
         let mut out: Vec<(String, String)> = vec![("Incoming".to_string(), String::new())];
@@ -645,7 +699,7 @@ fn Breadcrumb(rel_path: RwSignal<String>) -> impl IntoView {
                             <div class="flex items-center gap-1">
                                 <button
                                     type="button"
-                                    on:click=move |_| rel_path.set(target.clone())
+                                    on:click=move |_| on_navigate.run(target.clone())
                                     class=class
                                 >
                                     {label}
@@ -667,7 +721,7 @@ fn Breadcrumb(rel_path: RwSignal<String>) -> impl IntoView {
 #[derive(Clone)]
 pub struct EntryListProps {
     entries: Vec<UnclassifiedEntry>,
-    rel_path: RwSignal<String>,
+    on_navigate: Callback<String>,
     selection: RwSignal<Vec<UnclassifiedEntry>>,
     modal_open: RwSignal<bool>,
     classify: ClassifyJob,
@@ -677,7 +731,7 @@ pub struct EntryListProps {
 fn render_entry_list(props: EntryListProps) -> AnyView {
     let EntryListProps {
         entries,
-        rel_path,
+        on_navigate,
         selection,
         modal_open,
         classify,
@@ -700,7 +754,9 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
         .into_iter()
         .map(|entry| {
             if entry.is_dir {
-                Either::Left(view! { <DirRow entry=entry rel_path=rel_path/> })
+                Either::Left(view! {
+                    <DirRow entry=entry on_navigate=on_navigate/>
+                })
             } else {
                 Either::Right(view! {
                     <FileRow
@@ -758,7 +814,6 @@ fn SelectionBar(
     let on_select_all = {
         let entries = entries.clone();
         Callback::new(move |ev: web_sys::Event| {
-            // Trust the DOM state; don't re-toggle.
             if event_target_checked(&ev) {
                 select_all(selection, entries.clone());
             } else {
@@ -866,13 +921,13 @@ fn FileIcon() -> impl IntoView {
 // ─── Rows ─────────────────────────────────────────────────────────────────────
 
 #[component]
-fn DirRow(entry: UnclassifiedEntry, rel_path: RwSignal<String>) -> impl IntoView {
+fn DirRow(entry: UnclassifiedEntry, on_navigate: Callback<String>) -> impl IntoView {
     let target = entry.rel_path.clone();
     let name = entry.name.clone();
     view! {
         <button
             type="button"
-            on:click=move |_| rel_path.set(target.clone())
+            on:click=move |_| on_navigate.run(target.clone())
             class="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition"
         >
             <span class="w-4 shrink-0"></span>
@@ -900,9 +955,6 @@ fn FileRow(
     let is_selected =
         Signal::derive(move || selection.get().iter().any(|e| e.rel_path == rel_path_key));
 
-    // The browser already flipped the box before `on:change` fires, so we just
-    // read the new value and reconcile the selection signal. No prevent_default,
-    // no fighting the DOM.
     let on_change = Callback::new(move |ev: web_sys::Event| {
         let checked = event_target_checked(&ev);
         let entry = entry_for_change.clone();
@@ -1026,6 +1078,8 @@ fn ClassifyModal(
         }
     });
 
+    // ─── Reset on open ────────────────────────────────────────────────────────
+
     Effect::new(move |_| {
         if open.get() {
             let sel = selection.get_untracked();
@@ -1048,12 +1102,16 @@ fn ClassifyModal(
         }
     });
 
+    // When the section changes, drop the collection selection and close any
+    // in-progress "create new" panel.
     Effect::new(move |_| {
         let _ = chosen_section_slug.get();
         chosen_collection_id.set(None);
         creating_new.set(false);
         new_collection_title.set(String::new());
     });
+
+    // ─── Derived signals ──────────────────────────────────────────────────────
 
     let chosen_section: Signal<Option<SectionWithCollections>> = Signal::derive(move || {
         let slug = chosen_section_slug.get();
@@ -1078,6 +1136,8 @@ fn ClassifyModal(
             season.set("1".to_string());
         }
     });
+
+    // ─── Actions ──────────────────────────────────────────────────────────────
 
     let try_close = Callback::new(move |_: ()| {
         let busy =
@@ -1147,6 +1207,8 @@ fn ClassifyModal(
         }
     });
 
+    // ─── Phase signals ────────────────────────────────────────────────────────
+
     let show_setup = Signal::derive(move || classify.status.get().is_none());
     let show_progress =
         Signal::derive(move || classify.status.get().is_some() && classify.result.get().is_none());
@@ -1160,6 +1222,8 @@ fn ClassifyModal(
     let create_pending = create_action.pending();
 
     let can_move = Signal::derive(move || chosen_collection_id.get().is_some());
+
+    // ─── View ─────────────────────────────────────────────────────────────────
 
     view! {
         {move || {
@@ -1210,6 +1274,7 @@ fn ClassifyModal(
                             </button>
                         </div>
 
+                        // ─── Setup ───
                         <Show when=move || show_setup.get()>
                             <div class="space-y-4">
                                 <Show when=move || is_single.get()>
@@ -1278,8 +1343,6 @@ fn ClassifyModal(
                                                           uppercase tracking-wider">
                                                 "Collection"
                                             </label>
-                                            // Always-visible "create new" affordance.
-                                            // Shown only while not already in create mode.
                                             <Show when=move || !creating_new.get()>
                                                 <button
                                                     type="button"
@@ -1295,7 +1358,6 @@ fn ClassifyModal(
                                             </Show>
                                         </div>
 
-                                        // Existing dropdown (or empty-state hint)
                                         <Show when=move || !creating_new.get()>
                                             {move || {
                                                 let Some(s) = chosen_section.get() else {
@@ -1347,7 +1409,6 @@ fn ClassifyModal(
                                             }}
                                         </Show>
 
-                                        // Inline create form
                                         <Show when=move || creating_new.get()>
                                             <div class="space-y-2">
                                                 <div class="flex items-stretch gap-2">
@@ -1463,6 +1524,7 @@ fn ClassifyModal(
                             </div>
                         </Show>
 
+                        // ─── Progress ───
                         <Show when=move || show_progress.get()>
                             <div class="space-y-3">
                                 <UploadProgress status=status_signal/>
@@ -1472,6 +1534,7 @@ fn ClassifyModal(
                             </div>
                         </Show>
 
+                        // ─── Final ───
                         <Show when=move || show_final.get()>
                             <div class="space-y-4">
                                 <Show when=move || {
