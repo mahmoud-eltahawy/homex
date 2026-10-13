@@ -1,8 +1,8 @@
 //! Unclassified media browser.
 //!
 //! Exposes the optional incoming folder (`HOMEX_UNCLASSIFIED_DIR`) as a
-//! navigateable tree. Selecting a file opens a picker; confirming moves the
-//! file into the chosen collection by reusing the normal upload staging /
+//! navigateable tree. Files can be selected individually or in bulk and
+//! moved into a collection in one shot, reusing the normal upload staging /
 //! conversion / persist pipeline.
 //!
 //! Progress is reported through the shared `state.jobs` map, exactly like the
@@ -50,6 +50,15 @@ pub struct SectionWithCollections {
     pub collections: Vec<CollectionSummary>,
 }
 
+/// One file to classify. `title` becomes the item's display name; the client
+/// derives it from the filename stem unless the user is classifying a single
+/// file and typed a custom title.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClassifyInput {
+    pub rel_path: String,
+    pub title: String,
+}
+
 // ─── Client-side media-kind inference ─────────────────────────────────────────
 
 const VIDEO_EXTS: &[&str] = &[
@@ -89,6 +98,32 @@ fn file_stem(name: &str) -> String {
     name.rsplit_once('.')
         .map(|(s, _)| s.to_string())
         .unwrap_or_else(|| name.to_string())
+}
+
+// ─── Selection helpers ────────────────────────────────────────────────────────
+
+/// Select every supported file that matches the current selection's kind (or
+/// the kind of the first supported file, if the selection is empty).
+fn select_all(selection: RwSignal<Vec<UnclassifiedEntry>>, entries: Vec<UnclassifiedEntry>) {
+    selection.update(|v| {
+        let target_kind = v
+            .first()
+            .and_then(|e| kind_for_ext(e.ext.as_deref()))
+            .or_else(|| entries.iter().find_map(|e| kind_for_ext(e.ext.as_deref())));
+        v.clear();
+        for e in entries {
+            let k = kind_for_ext(e.ext.as_deref());
+            if k.is_none() {
+                continue;
+            }
+            if let Some(tk) = target_kind
+                && k != Some(tk)
+            {
+                continue;
+            }
+            v.push(e);
+        }
+    });
 }
 
 // ─── Path safety (server-only) ────────────────────────────────────────────────
@@ -231,11 +266,13 @@ pub async fn fetch_sections_with_collections(
     Ok(out)
 }
 
+/// Kick off a classify job for one or more files. Returns the job id for
+/// progress polling. Every file lands in the same collection, with the same
+/// season number; item numbering continues from whatever's already there.
 #[server]
-pub async fn classify_unclassified_file(
-    rel_path: String,
+pub async fn classify_unclassified_files(
+    files: Vec<ClassifyInput>,
     collection_id: Uuid,
-    title: String,
     season_number: Option<i64>,
 ) -> Result<String, AppError> {
     use crate::app::model::{CollectionRow, MediaKind, SectionRow};
@@ -245,6 +282,10 @@ pub async fn classify_unclassified_file(
         UploadFile, UploadPayload, process_upload, schedule_job_eviction,
     };
 
+    if files.is_empty() {
+        return Err(AppError::public("No files selected"));
+    }
+
     let state: AppState = expect_context();
     let root = state
         .config
@@ -253,29 +294,51 @@ pub async fn classify_unclassified_file(
         .clone()
         .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
 
-    let clean = sanitize_rel(&rel_path)?;
-    if clean.is_empty() {
-        return Err(AppError::public("No file selected"));
-    }
-    let source_abs = root.join(&clean);
-
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
-    let source_canon = tokio::fs::canonicalize(&source_abs)
-        .await
-        .map_err(|e| AppError::public(format!("File not found: {e}")))?;
-    if !source_canon.starts_with(&root_canon) {
-        return Err(AppError::public("Invalid path"));
-    }
 
-    let meta = tokio::fs::metadata(&source_canon)
-        .await
-        .context("stat source file")?;
-    if !meta.is_file() {
-        return Err(AppError::public("Not a file"));
+    // Validate every path up front. If any file is bad, the whole batch is
+    // rejected — no partial moves.
+    let mut upload_files: Vec<UploadFile> = Vec::with_capacity(files.len());
+    for input in &files {
+        let clean = sanitize_rel(&input.rel_path)?;
+        if clean.is_empty() {
+            return Err(AppError::public("Empty file path"));
+        }
+        let source_abs = root.join(&clean);
+        let source_canon = tokio::fs::canonicalize(&source_abs)
+            .await
+            .map_err(|e| AppError::public(format!("File not found: {e}")))?;
+        if !source_canon.starts_with(&root_canon) {
+            return Err(AppError::public("Invalid path"));
+        }
+        let meta = tokio::fs::metadata(&source_canon)
+            .await
+            .context("stat source file")?;
+        if !meta.is_file() {
+            return Err(AppError::public("Not a file"));
+        }
+        let filename = source_canon
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+        let fallback_title = file_stem(&filename);
+        let display_title = {
+            let t = input.title.trim();
+            if t.is_empty() {
+                fallback_title
+            } else {
+                t.to_string()
+            }
+        };
+        upload_files.push(UploadFile {
+            filename,
+            title: display_title,
+            temp_path: source_canon,
+            size: meta.len(),
+        });
     }
-    let size = meta.len();
 
     let mut db = state.db.clone();
     let collection = CollectionRow::get_by_id(&mut db, &collection_id)
@@ -296,20 +359,6 @@ pub async fn classify_unclassified_file(
     let kind = MediaKind::try_from(section.media_kind.as_str())
         .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
 
-    let filename = source_canon
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "file".to_string());
-    let fallback_title = file_stem(&filename);
-    let display_title = {
-        let t = title.trim();
-        if t.is_empty() {
-            fallback_title.clone()
-        } else {
-            t.to_string()
-        }
-    };
-
     let is_video_series = section.nested && kind == MediaKind::Video;
     let season_number = if is_video_series && season_number.is_none() {
         Some(1)
@@ -318,8 +367,9 @@ pub async fn classify_unclassified_file(
     };
 
     leptos::logging::log!(
-        "[classify] rel={clean} col={collection_id} season={season_number:?} \
-         kind={kind:?} nested={} title={display_title:?}",
+        "[classify] n={} col={collection_id} season={season_number:?} \
+         kind={kind:?} nested={}",
+        upload_files.len(),
         section.nested,
     );
 
@@ -332,12 +382,7 @@ pub async fn classify_unclassified_file(
         title: collection.title.clone(),
         description: String::new(),
         season_number,
-        files: vec![UploadFile {
-            filename,
-            title: display_title,
-            temp_path: source_canon,
-            size,
-        }],
+        files: upload_files,
         poster: None,
         temp_dir,
     };
@@ -376,7 +421,7 @@ pub async fn classify_unclassified_file(
 
 #[derive(Clone, Copy)]
 pub struct ClassifyJob {
-    action: Action<(String, Uuid, String, Option<i64>), Result<String, AppError>>,
+    action: Action<(Vec<ClassifyInput>, Uuid, Option<i64>), Result<String, AppError>>,
     pub status: RwSignal<Option<ConversionStatus>>,
     pub result: RwSignal<Option<Result<(), AppError>>>,
     active_job: RwSignal<Option<String>>,
@@ -385,8 +430,8 @@ pub struct ClassifyJob {
 impl ClassifyJob {
     pub fn new() -> Self {
         let action = Action::new_local(
-            |(path, col, title, season): &(String, Uuid, String, Option<i64>)| {
-                classify_unclassified_file(path.clone(), *col, title.clone(), *season)
+            |(files, col, season): &(Vec<ClassifyInput>, Uuid, Option<i64>)| {
+                classify_unclassified_files(files.clone(), *col, *season)
             },
         );
         let status = RwSignal::new(None);
@@ -419,10 +464,10 @@ impl ClassifyJob {
         }
     }
 
-    pub fn dispatch(&self, path: String, col: Uuid, title: String, season: Option<i64>) {
+    pub fn dispatch(&self, files: Vec<ClassifyInput>, col: Uuid, season: Option<i64>) {
         self.status.set(Some(ConversionStatus::Writing));
         self.result.set(None);
-        self.action.dispatch((path, col, title, season));
+        self.action.dispatch((files, col, season));
     }
 
     pub fn reset(&self) {
@@ -502,7 +547,8 @@ impl LazyRoute for UnclassifiedPage {
     fn view(_this: Self) -> AnyView {
         let rel_path = RwSignal::new(String::new());
         let refresh = RwSignal::new(0u32);
-        let selected = RwSignal::new(None::<UnclassifiedEntry>);
+        let selection: RwSignal<Vec<UnclassifiedEntry>> = RwSignal::new(Vec::new());
+        let modal_open = RwSignal::new(false);
 
         let entries: Resource<Result<Vec<UnclassifiedEntry>, AppError>> = Resource::new(
             move || (rel_path.get(), refresh.get()),
@@ -511,14 +557,29 @@ impl LazyRoute for UnclassifiedPage {
 
         let classify = ClassifyJob::new();
 
+        // Clear the selection when the user navigates to another folder.
+        Effect::new(move |_| {
+            let _ = rel_path.get();
+            selection.set(Vec::new());
+        });
+
+        // Modal can't be open without a selection.
+        Effect::new(move |_| {
+            if selection.get().is_empty() && modal_open.get() {
+                modal_open.set(false);
+            }
+        });
+
         let on_modal_close = Callback::new(move |_: ()| {
+            selection.set(Vec::new());
             refresh.update(|n| *n = n.wrapping_add(1));
         });
 
         let adapter = move |list: Vec<UnclassifiedEntry>| EntryListProps {
             entries: list,
             rel_path,
-            selected,
+            selection,
+            modal_open,
             classify,
             on_modal_close,
         };
@@ -607,7 +668,8 @@ fn Breadcrumb(rel_path: RwSignal<String>) -> impl IntoView {
 pub struct EntryListProps {
     entries: Vec<UnclassifiedEntry>,
     rel_path: RwSignal<String>,
-    selected: RwSignal<Option<UnclassifiedEntry>>,
+    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    modal_open: RwSignal<bool>,
     classify: ClassifyJob,
     on_modal_close: Callback<()>,
 }
@@ -616,7 +678,8 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
     let EntryListProps {
         entries,
         rel_path,
-        selected,
+        selection,
+        modal_open,
         classify,
         on_modal_close,
     } = props;
@@ -631,30 +694,148 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
         .into_any();
     }
 
+    let entries_for_bar = entries.clone();
+
     let rows = entries
         .into_iter()
         .map(|entry| {
             if entry.is_dir {
                 Either::Left(view! { <DirRow entry=entry rel_path=rel_path/> })
             } else {
-                Either::Right(view! { <FileRow entry=entry selected=selected/> })
+                Either::Right(view! {
+                    <FileRow
+                        entry=entry
+                        selection=selection
+                        modal_open=modal_open
+                    />
+                })
             }
         })
         .collect_view();
 
     view! {
         <div>
+            <SelectionBar
+                entries=entries_for_bar
+                selection=selection
+                modal_open=modal_open
+            />
             <div class="border border-white/10 rounded-xl overflow-hidden bg-white/[0.02]">
                 <div class="divide-y divide-white/5">{rows}</div>
             </div>
             <ClassifyModal
-                selected=selected
+                selection=selection
+                open=modal_open
                 classify=classify
                 on_close=on_modal_close
             />
         </div>
     }
     .into_any()
+}
+
+// ─── Selection bar ────────────────────────────────────────────────────────────
+
+#[component]
+fn SelectionBar(
+    entries: Vec<UnclassifiedEntry>,
+    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    modal_open: RwSignal<bool>,
+) -> impl IntoView {
+    let total_supported = entries
+        .iter()
+        .filter(|e| !e.is_dir && kind_for_ext(e.ext.as_deref()).is_some())
+        .count();
+
+    let all_selected = {
+        let total = total_supported;
+        move || {
+            let n = selection.get().len();
+            total > 0 && n == total
+        }
+    };
+
+    let on_select_all = {
+        let entries = entries.clone();
+        Callback::new(move |ev: web_sys::Event| {
+            // Trust the DOM state; don't re-toggle.
+            if event_target_checked(&ev) {
+                select_all(selection, entries.clone());
+            } else {
+                selection.set(Vec::new());
+            }
+        })
+    };
+
+    let on_clear = Callback::new(move |_: ()| selection.set(Vec::new()));
+
+    let on_classify = Callback::new(move |_: ()| {
+        if !selection.get_untracked().is_empty() {
+            modal_open.set(true);
+        }
+    });
+
+    view! {
+        <div class="flex items-center justify-between gap-3 mb-3 px-1 min-h-9">
+            <div class="flex items-center gap-3 min-w-0">
+                <Show when=move || { total_supported > 0 }>
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            prop:checked=all_selected
+                            on:change=move |ev| on_select_all.run(ev)
+                            class="accent-cyan-400 w-4 h-4"
+                        />
+                        <span class="text-xs text-gray-400">"Select all"</span>
+                    </label>
+                </Show>
+                {move || {
+                    let n = selection.get().len();
+                    if n == 0 {
+                        None
+                    } else {
+                        Some(view! {
+                            <span class="text-xs text-cyan-300 font-medium">
+                                {format!("{n} selected")}
+                            </span>
+                        })
+                    }
+                }}
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0">
+                {move || {
+                    let n = selection.get().len();
+                    if n == 0 {
+                        None
+                    } else {
+                        Some(view! {
+                            <>
+                                <button
+                                    type="button"
+                                    on:click=move |_| on_clear.run(())
+                                    class="text-xs px-2 py-1 rounded-lg text-gray-300 \
+                                           hover:bg-white/10 transition"
+                                >
+                                    "Clear"
+                                </button>
+                                <button
+                                    type="button"
+                                    on:click=move |_| on_classify.run(())
+                                    class="text-xs px-3 py-1.5 rounded-lg \
+                                           bg-gradient-to-r from-cyan-500 to-blue-500 \
+                                           hover:from-cyan-400 hover:to-blue-400 \
+                                           text-white font-bold transition"
+                                >
+                                    {move || format!("Classify {n}")}
+                                </button>
+                            </>
+                        })
+                    }
+                }}
+            </div>
+        </div>
+    }
 }
 
 // ─── Row icons ────────────────────────────────────────────────────────────────
@@ -694,6 +875,7 @@ fn DirRow(entry: UnclassifiedEntry, rel_path: RwSignal<String>) -> impl IntoView
             on:click=move |_| rel_path.set(target.clone())
             class="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition"
         >
+            <span class="w-4 shrink-0"></span>
             <span class="text-cyan-400 shrink-0"><FolderIcon/></span>
             <span class="text-white text-sm truncate flex-1">{name}</span>
             <span class="text-gray-500 text-xs shrink-0">"Open →"</span>
@@ -704,43 +886,86 @@ fn DirRow(entry: UnclassifiedEntry, rel_path: RwSignal<String>) -> impl IntoView
 #[component]
 fn FileRow(
     entry: UnclassifiedEntry,
-    selected: RwSignal<Option<UnclassifiedEntry>>,
+    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    modal_open: RwSignal<bool>,
 ) -> impl IntoView {
     let is_supported = kind_for_ext(entry.ext.as_deref()).is_some();
     let name = entry.name.clone();
     let size = entry.size;
-    let entry_for_click = entry;
+    let rel_path_key = entry.rel_path.clone();
+
+    let entry_for_change = entry.clone();
+    let entry_for_classify = entry.clone();
+
+    let is_selected =
+        Signal::derive(move || selection.get().iter().any(|e| e.rel_path == rel_path_key));
+
+    // The browser already flipped the box before `on:change` fires, so we just
+    // read the new value and reconcile the selection signal. No prevent_default,
+    // no fighting the DOM.
+    let on_change = Callback::new(move |ev: web_sys::Event| {
+        let checked = event_target_checked(&ev);
+        let entry = entry_for_change.clone();
+        selection.update(|v| {
+            if checked {
+                if v.iter().any(|e| e.rel_path == entry.rel_path) {
+                    return;
+                }
+                let new_kind = kind_for_ext(entry.ext.as_deref());
+                let existing_kind = v.first().and_then(|e| kind_for_ext(e.ext.as_deref()));
+                if existing_kind.is_some() && existing_kind != new_kind {
+                    v.clear();
+                }
+                v.push(entry);
+            } else {
+                v.retain(|e| e.rel_path != entry.rel_path);
+            }
+        });
+    });
+
+    let on_single_classify = Callback::new(move |_: ()| {
+        selection.set(vec![entry_for_classify.clone()]);
+        modal_open.set(true);
+    });
 
     let row_class = if is_supported {
-        "w-full text-left flex items-center gap-3 px-4 py-2.5 transition hover:bg-white/5"
+        "flex items-center gap-3 px-4 py-2.5 transition hover:bg-white/5"
     } else {
-        "w-full text-left flex items-center gap-3 px-4 py-2.5 transition opacity-50 cursor-not-allowed"
-    };
-    let action_class = if is_supported {
-        "text-xs shrink-0 text-cyan-400"
-    } else {
-        "text-xs shrink-0 text-gray-600"
-    };
-    let action_label = if is_supported {
-        "Classify →"
-    } else {
-        "Unsupported"
+        "flex items-center gap-3 px-4 py-2.5 opacity-50"
     };
 
     view! {
-        <button
-            type="button"
-            disabled=!is_supported
-            on:click=move |_| selected.set(Some(entry_for_click.clone()))
-            class=row_class
-        >
+        <div class=row_class>
+            <input
+                type="checkbox"
+                disabled=!is_supported
+                prop:checked=move || is_selected.get()
+                on:change=move |ev| on_change.run(ev)
+                class="accent-cyan-400 w-4 h-4 shrink-0 cursor-pointer \
+                       disabled:cursor-not-allowed"
+            />
             <span class="text-gray-400 shrink-0"><FileIcon/></span>
             <span class="text-white text-sm truncate flex-1">{name}</span>
             <span class="text-gray-500 text-xs font-mono shrink-0">
                 {format_size(size)}
             </span>
-            <span class=action_class>{action_label}</span>
-        </button>
+            {if is_supported {
+                Either::Left(view! {
+                    <button
+                        type="button"
+                        on:click=move |_| on_single_classify.run(())
+                        class="text-xs shrink-0 text-cyan-400 hover:text-cyan-300 \
+                               transition"
+                    >
+                        "Classify →"
+                    </button>
+                })
+            } else {
+                Either::Right(view! {
+                    <span class="text-xs shrink-0 text-gray-600">"Unsupported"</span>
+                })
+            }}
+        </div>
     }
 }
 
@@ -748,15 +973,25 @@ fn FileRow(
 
 #[component]
 fn ClassifyModal(
-    selected: RwSignal<Option<UnclassifiedEntry>>,
+    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    open: RwSignal<bool>,
     classify: ClassifyJob,
     on_close: Callback<()>,
 ) -> impl IntoView {
-    let file_kind: Memo<Option<MediaKind>> =
-        Memo::new(move |_| selected.get().and_then(|e| kind_for_ext(e.ext.as_deref())));
+    let file_kind: Memo<Option<MediaKind>> = Memo::new(move |_| {
+        selection
+            .get()
+            .first()
+            .and_then(|e| kind_for_ext(e.ext.as_deref()))
+    });
 
     let sections: Resource<Result<Vec<SectionWithCollections>, AppError>> = Resource::new(
-        move || file_kind.get().map(|k| k.as_str().to_string()),
+        move || {
+            if !open.get() {
+                return None;
+            }
+            file_kind.get().map(|k| k.as_str().to_string())
+        },
         |k| async move {
             match k {
                 Some(s) => fetch_sections_with_collections(s).await,
@@ -765,7 +1000,9 @@ fn ClassifyModal(
         },
     );
 
-    let title = RwSignal::new(String::new());
+    let is_single = Signal::derive(move || selection.get().len() == 1);
+
+    let single_title = RwSignal::new(String::new());
     let chosen_section_slug = RwSignal::new(String::new());
     let chosen_collection_id = RwSignal::new(None::<Uuid>);
     let season = RwSignal::new(String::new());
@@ -780,10 +1017,6 @@ fn ClassifyModal(
             create_collection_named(slug.clone(), t.clone())
         });
 
-    // On successful create: refetch sections, select the new collection, exit
-    // creating mode. The refetched resource causes `chosen_section.get()` to
-    // now include the new collection, so the `<select>` re-renders with an
-    // option matching `chosen_collection_id`.
     Effect::new(move |_| {
         if let Some(Ok(id)) = create_action.value().get() {
             sections.refetch();
@@ -793,36 +1026,34 @@ fn ClassifyModal(
         }
     });
 
-    // ─── Reset on file/section change ─────────────────────────────────────────
-
     Effect::new(move |_| {
-        match selected.get() {
-            Some(entry) => title.set(file_stem(&entry.name)),
-            None => title.set(String::new()),
+        if open.get() {
+            let sel = selection.get_untracked();
+            if sel.len() == 1 {
+                single_title.set(file_stem(&sel[0].name));
+            } else {
+                single_title.set(String::new());
+            }
+            chosen_section_slug.set(String::new());
+            chosen_collection_id.set(None);
+            season.set(String::new());
+            creating_new.set(false);
+            new_collection_title.set(String::new());
         }
-        chosen_section_slug.set(String::new());
-        chosen_collection_id.set(None);
-        season.set(String::new());
-        creating_new.set(false);
-        new_collection_title.set(String::new());
     });
 
     Effect::new(move |_| {
-        if selected.get().is_none() {
+        if !open.get() {
             classify.reset();
         }
     });
 
-    // When the section changes, drop the collection selection and close any
-    // in-progress "create new" panel.
     Effect::new(move |_| {
         let _ = chosen_section_slug.get();
         chosen_collection_id.set(None);
         creating_new.set(false);
         new_collection_title.set(String::new());
     });
-
-    // ─── Derived signals ──────────────────────────────────────────────────────
 
     let chosen_section: Signal<Option<SectionWithCollections>> = Signal::derive(move || {
         let slug = chosen_section_slug.get();
@@ -848,8 +1079,6 @@ fn ClassifyModal(
         }
     });
 
-    // ─── Actions ──────────────────────────────────────────────────────────────
-
     let try_close = Callback::new(move |_: ()| {
         let busy =
             classify.status.get_untracked().is_some() && classify.result.get_untracked().is_none();
@@ -857,28 +1086,41 @@ fn ClassifyModal(
             return;
         }
         let success = matches!(classify.result.get_untracked(), Some(Ok(())));
-        selected.set(None);
+        open.set(false);
         if success {
             on_close.run(());
         }
     });
 
     let confirm = Callback::new(move |_: ()| {
-        let Some(entry) = selected.get_untracked() else {
+        let sel = selection.get_untracked();
+        if sel.is_empty() {
             return;
-        };
+        }
         let Some(col) = chosen_collection_id.get_untracked() else {
             return;
         };
-        let t = title.get_untracked();
         let s = season.get_untracked();
         let s = s.trim();
         let season_num: Option<i64> = if s.is_empty() { None } else { s.parse().ok() };
-        classify.dispatch(entry.rel_path.clone(), col, t, season_num);
+
+        let files: Vec<ClassifyInput> = if sel.len() == 1 {
+            vec![ClassifyInput {
+                rel_path: sel[0].rel_path.clone(),
+                title: single_title.get_untracked(),
+            }]
+        } else {
+            sel.into_iter()
+                .map(|e| ClassifyInput {
+                    title: file_stem(&e.name),
+                    rel_path: e.rel_path,
+                })
+                .collect()
+        };
+
+        classify.dispatch(files, col, season_num);
     });
 
-    // Create-new handlers. Both fire the same action; the success effect above
-    // selects the new collection.
     let submit_create = Callback::new(move |_: ()| {
         let slug = chosen_section_slug.get_untracked();
         if slug.is_empty() {
@@ -897,17 +1139,13 @@ fn ClassifyModal(
         new_collection_title.set(String::new());
     });
 
-    // Pre-fill the "new collection" input with the file's stem the first time
-    // the user opens the panel — a good guess for a single-file collection.
     Effect::new(move |_| {
         if creating_new.get() && new_collection_title.get_untracked().is_empty() {
-            if let Some(entry) = selected.get_untracked() {
-                new_collection_title.set(file_stem(&entry.name));
+            if let Some(first) = selection.get_untracked().first() {
+                new_collection_title.set(file_stem(&first.name));
             }
         }
     });
-
-    // ─── Phase signals ────────────────────────────────────────────────────────
 
     let show_setup = Signal::derive(move || classify.status.get().is_none());
     let show_progress =
@@ -923,15 +1161,22 @@ fn ClassifyModal(
 
     let can_move = Signal::derive(move || chosen_collection_id.get().is_some());
 
-    // ─── View ─────────────────────────────────────────────────────────────────
-
     view! {
         {move || {
-            let Some(entry) = selected.get() else {
+            if !open.get() {
                 return ().into_any();
+            }
+            let sel = selection.get();
+            if sel.is_empty() {
+                return ().into_any();
+            }
+
+            let count = sel.len();
+            let header_line = if count == 1 {
+                sel[0].name.clone()
+            } else {
+                format!("{count} files")
             };
-            let entry_name = entry.name.clone();
-            let supported = kind_for_ext(entry.ext.as_deref()).is_some();
 
             view! {
                 <div
@@ -941,14 +1186,16 @@ fn ClassifyModal(
                 >
                     <div
                         class="bg-[#12121a] border border-white/10 rounded-2xl p-6 \
-                               w-full max-w-lg shadow-2xl"
+                               w-full max-w-lg shadow-2xl max-h-[90vh] overflow-auto"
                         on:click=|ev| ev.stop_propagation()
                     >
                         <div class="flex items-start justify-between gap-3 mb-4">
                             <div class="min-w-0">
-                                <h3 class="text-white font-bold text-lg">"Classify file"</h3>
+                                <h3 class="text-white font-bold text-lg">
+                                    {if count == 1 { "Classify file" } else { "Classify files" }}
+                                </h3>
                                 <p class="text-gray-400 text-sm truncate mt-0.5">
-                                    {entry_name}
+                                    {header_line}
                                 </p>
                             </div>
                             <button
@@ -963,317 +1210,317 @@ fn ClassifyModal(
                             </button>
                         </div>
 
-                        {if !supported {
-                            view! {
-                                <div class="text-red-300 text-sm py-4 text-center">
-                                    "This file type is not supported."
+                        <Show when=move || show_setup.get()>
+                            <div class="space-y-4">
+                                <Show when=move || is_single.get()>
+                                    <div>
+                                        <label class="text-xs text-gray-500 \
+                                                      uppercase tracking-wider">
+                                            "Title"
+                                        </label>
+                                        <input
+                                            type="text"
+                                            prop:value=move || single_title.get()
+                                            on:input=move |e| single_title.set(event_target_value(&e))
+                                            placeholder="Item title"
+                                            class="mt-1 w-full bg-white/10 text-white \
+                                                   rounded-lg px-3 py-1.5 text-sm \
+                                                   focus:outline-none focus:ring-1 \
+                                                   focus:ring-cyan-400"
+                                        />
+                                    </div>
+                                </Show>
+
+                                <Show when=move || !is_single.get()>
+                                    <div class="text-xs text-gray-500 bg-white/5 \
+                                                border border-white/10 rounded-lg \
+                                                px-3 py-2">
+                                        "Each file keeps its own name as the item title."
+                                    </div>
+                                </Show>
+
+                                <div>
+                                    <label class="text-xs text-gray-500 \
+                                                  uppercase tracking-wider">
+                                        "Section"
+                                    </label>
+                                    <select
+                                        prop:value=move || chosen_section_slug.get()
+                                        on:change=move |e| {
+                                            chosen_section_slug.set(event_target_value(&e))
+                                        }
+                                        class="mt-1 w-full bg-white/10 text-white \
+                                               rounded-lg px-3 py-1.5 text-sm \
+                                               focus:outline-none focus:ring-1 \
+                                               focus:ring-cyan-400"
+                                    >
+                                        <option value="">"Choose a section…"</option>
+                                        {move || {
+                                            sections
+                                                .get()
+                                                .and_then(|r| r.ok())
+                                                .unwrap_or_default()
+                                                .into_iter()
+                                                .map(|s| view! {
+                                                    <option value=s.slug.clone()>
+                                                        {s.title.clone()}
+                                                    </option>
+                                                })
+                                                .collect_view()
+                                        }}
+                                    </select>
                                 </div>
-                            }
-                            .into_any()
-                        } else {
-                            view! {
-                                // ─── Setup ───
-                                <Show when=move || show_setup.get()>
-                                    <div class="space-y-4">
-                                        <div>
+
+                                <Show when=move || !chosen_section_slug.get().is_empty()>
+                                    <div>
+                                        <div class="flex items-center justify-between mb-1">
                                             <label class="text-xs text-gray-500 \
                                                           uppercase tracking-wider">
-                                                "Title"
+                                                "Collection"
                                             </label>
-                                            <input
-                                                type="text"
-                                                prop:value=move || title.get()
-                                                on:input=move |e| title.set(event_target_value(&e))
-                                                placeholder="Item title"
-                                                class="mt-1 w-full bg-white/10 text-white \
-                                                       rounded-lg px-3 py-1.5 text-sm \
-                                                       focus:outline-none focus:ring-1 \
-                                                       focus:ring-cyan-400"
-                                            />
+                                            // Always-visible "create new" affordance.
+                                            // Shown only while not already in create mode.
+                                            <Show when=move || !creating_new.get()>
+                                                <button
+                                                    type="button"
+                                                    on:click=move |_| creating_new.set(true)
+                                                    class="text-xs px-2 py-0.5 rounded-md \
+                                                           text-cyan-300 hover:text-white \
+                                                           bg-cyan-500/10 hover:bg-cyan-500/25 \
+                                                           border border-cyan-400/30 \
+                                                           transition whitespace-nowrap"
+                                                >
+                                                    "+ New collection"
+                                                </button>
+                                            </Show>
                                         </div>
 
-                                        <div>
-                                            <label class="text-xs text-gray-500 \
-                                                          uppercase tracking-wider">
-                                                "Section"
-                                            </label>
-                                            <select
-                                                prop:value=move || chosen_section_slug.get()
-                                                on:change=move |e| {
-                                                    chosen_section_slug.set(event_target_value(&e))
+                                        // Existing dropdown (or empty-state hint)
+                                        <Show when=move || !creating_new.get()>
+                                            {move || {
+                                                let Some(s) = chosen_section.get() else {
+                                                    return ().into_any();
+                                                };
+                                                if s.collections.is_empty() {
+                                                    return view! {
+                                                        <div class="text-sm text-gray-500 \
+                                                                    bg-white/5 border border-white/10 \
+                                                                    rounded-lg px-3 py-2">
+                                                            "No collections yet — click “+ New collection” above."
+                                                        </div>
+                                                    }
+                                                    .into_any();
                                                 }
-                                                class="mt-1 w-full bg-white/10 text-white \
-                                                       rounded-lg px-3 py-1.5 text-sm \
-                                                       focus:outline-none focus:ring-1 \
-                                                       focus:ring-cyan-400"
-                                            >
-                                                <option value="">"Choose a section…"</option>
-                                                {move || {
-                                                    sections
-                                                        .get()
-                                                        .and_then(|r| r.ok())
-                                                        .unwrap_or_default()
-                                                        .into_iter()
-                                                        .map(|s| view! {
-                                                            <option value=s.slug.clone()>
-                                                                {s.title.clone()}
-                                                            </option>
-                                                        })
-                                                        .collect_view()
-                                                }}
-                                            </select>
-                                        </div>
-
-                                        <Show when=move || !chosen_section_slug.get().is_empty()>
-                                            <div>
-                                                <label class="text-xs text-gray-500 \
-                                                              uppercase tracking-wider">
-                                                    "Collection"
-                                                </label>
-
-                                                // Existing collection dropdown
-                                                <Show when=move || !creating_new.get()>
-                                                    <div class="mt-1 flex items-stretch gap-2">
-                                                        <div class="flex-1">
-                                                            {move || {
-                                                                let Some(s) = chosen_section.get() else {
-                                                                    return ().into_any();
-                                                                };
-                                                                if s.collections.is_empty() {
-                                                                    return view! {
-                                                                        <div class="text-sm text-gray-500 \
-                                                                                    bg-white/5 border border-white/10 \
-                                                                                    rounded-lg px-3 py-2">
-                                                                            "No collections yet — create one."
-                                                                        </div>
-                                                                    }
-                                                                    .into_any();
-                                                                }
-                                                                view! {
-                                                                    <select
-                                                                        prop:value=move || {
-                                                                            chosen_collection_id
-                                                                                .get()
-                                                                                .map(|u| u.to_string())
-                                                                                .unwrap_or_default()
-                                                                        }
-                                                                        on:change=move |e| {
-                                                                            let v = event_target_value(&e);
-                                                                            chosen_collection_id.set(
-                                                                                Uuid::parse_str(&v).ok(),
-                                                                            );
-                                                                        }
-                                                                        class="w-full bg-white/10 text-white \
-                                                                               rounded-lg px-3 py-1.5 text-sm \
-                                                                               focus:outline-none focus:ring-1 \
-                                                                               focus:ring-cyan-400"
-                                                                    >
-                                                                        <option value="">
-                                                                            "Choose a collection…"
-                                                                        </option>
-                                                                        {s.collections
-                                                                            .into_iter()
-                                                                            .map(|c| view! {
-                                                                                <option value=c.id.to_string()>
-                                                                                    {c.title.clone()}
-                                                                                </option>
-                                                                            })
-                                                                            .collect_view()}
-                                                                    </select>
-                                                                }
-                                                                .into_any()
-                                                            }}
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            on:click=move |_| creating_new.set(true)
-                                                            class="shrink-0 px-3 rounded-lg \
-                                                                   bg-white/10 hover:bg-white/20 \
-                                                                   text-white text-sm transition \
-                                                                   whitespace-nowrap"
-                                                            title="Create a new collection in this section"
-                                                        >
-                                                            "+ New"
-                                                        </button>
-                                                    </div>
-                                                </Show>
-
-                                                // Inline "create new collection" form
-                                                <Show when=move || creating_new.get()>
-                                                    <div class="mt-1 space-y-2">
-                                                        <div class="flex items-stretch gap-2">
-                                                            <input
-                                                                type="text"
-                                                                prop:value=move || new_collection_title.get()
-                                                                on:input=move |e| {
-                                                                    new_collection_title.set(event_target_value(&e))
-                                                                }
-                                                                on:keydown=move |e| {
-                                                                    if e.key() == "Enter" {
-                                                                        e.prevent_default();
-                                                                        submit_create.run(());
-                                                                    } else if e.key() == "Escape" {
-                                                                        cancel_create.run(());
-                                                                    }
-                                                                }
-                                                                autofocus=true
-                                                                placeholder="New collection title"
-                                                                class="flex-1 bg-white/10 text-white \
-                                                                       rounded-lg px-3 py-1.5 text-sm \
-                                                                       focus:outline-none focus:ring-1 \
-                                                                       focus:ring-cyan-400"
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                on:click=move |_| submit_create.run(())
-                                                                disabled=move || {
-                                                                    create_pending.get()
-                                                                        || new_collection_title
-                                                                            .get()
-                                                                            .trim()
-                                                                            .is_empty()
-                                                                }
-                                                                class="shrink-0 px-3 rounded-lg \
-                                                                       bg-cyan-500/30 hover:bg-cyan-500/40 \
-                                                                       text-white text-sm font-medium \
-                                                                       transition disabled:opacity-50"
-                                                            >
-                                                                {move || if create_pending.get() {
-                                                                    "Creating…"
-                                                                } else {
-                                                                    "Create"
-                                                                }}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                on:click=move |_| cancel_create.run(())
-                                                                disabled=move || create_pending.get()
-                                                                class="shrink-0 px-3 rounded-lg \
-                                                                       bg-white/5 hover:bg-white/15 \
-                                                                       text-gray-300 text-sm \
-                                                                       transition disabled:opacity-50"
-                                                            >
-                                                                "Cancel"
-                                                            </button>
-                                                        </div>
-                                                        <ErrorView error=create_error/>
-                                                    </div>
-                                                </Show>
-                                            </div>
-                                        </Show>
-
-                                        <Show when=move || chosen_is_series.get()>
-                                            <div>
-                                                <label class="text-xs text-gray-500 \
-                                                              uppercase tracking-wider">
-                                                    "Season"
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    placeholder="1"
-                                                    prop:value=move || season.get()
-                                                    on:input=move |e| season.set(event_target_value(&e))
-                                                    class="mt-1 w-full bg-white/10 text-white \
-                                                           rounded-lg px-3 py-1.5 text-sm \
-                                                           focus:outline-none focus:ring-1 \
-                                                           focus:ring-cyan-400"
-                                                />
-                                            </div>
-                                        </Show>
-
-                                        <div class="flex justify-end gap-2 pt-2">
-                                            <button
-                                                type="button"
-                                                on:click=move |_| try_close.run(())
-                                                class="px-4 py-2 rounded-lg text-gray-300 \
-                                                       hover:bg-white/10 transition text-sm"
-                                            >
-                                                "Cancel"
-                                            </button>
-                                            <button
-                                                type="button"
-                                                on:click=move |_| confirm.run(())
-                                                disabled=move || !can_move.get()
-                                                class="px-4 py-2 rounded-lg \
-                                                       bg-gradient-to-r from-cyan-500 to-blue-500 \
-                                                       hover:from-cyan-400 hover:to-blue-400 \
-                                                       text-white font-bold text-sm \
-                                                       disabled:opacity-50 transition"
-                                            >
-                                                "Move"
-                                            </button>
-                                        </div>
-                                    </div>
-                                </Show>
-
-                                // ─── Progress ───
-                                <Show when=move || show_progress.get()>
-                                    <div class="space-y-3">
-                                        <UploadProgress status=status_signal/>
-                                        <div class="text-xs text-gray-500 text-center pt-2">
-                                            "Please wait — the file is being moved."
-                                        </div>
-                                    </div>
-                                </Show>
-
-                                // ─── Final ───
-                                <Show when=move || show_final.get()>
-                                    <div class="space-y-4">
-                                        <Show when=move || {
-                                            matches!(classify.result.get(), Some(Ok(())))
-                                        }>
-                                            <div class="bg-green-500/15 border border-green-500/30 \
-                                                        rounded-xl p-4 flex items-start gap-3">
-                                                <span class="text-green-400 text-xl \
-                                                             leading-none shrink-0">
-                                                    "✓"
-                                                </span>
-                                                <div class="min-w-0">
-                                                    <div class="text-green-300 font-bold">
-                                                        "Moved successfully"
-                                                    </div>
-                                                    <div class="text-green-300/70 text-xs mt-1">
-                                                        {move || {
-                                                            selected
+                                                view! {
+                                                    <select
+                                                        prop:value=move || {
+                                                            chosen_collection_id
                                                                 .get()
-                                                                .map(|e| format!(
-                                                                    "\"{}\" was added to the collection.",
-                                                                    e.name,
-                                                                ))
+                                                                .map(|u| u.to_string())
                                                                 .unwrap_or_default()
+                                                        }
+                                                        on:change=move |e| {
+                                                            let v = event_target_value(&e);
+                                                            chosen_collection_id.set(
+                                                                Uuid::parse_str(&v).ok(),
+                                                            );
+                                                        }
+                                                        class="w-full bg-white/10 text-white \
+                                                               rounded-lg px-3 py-1.5 text-sm \
+                                                               focus:outline-none focus:ring-1 \
+                                                               focus:ring-cyan-400"
+                                                    >
+                                                        <option value="">
+                                                            "Choose a collection…"
+                                                        </option>
+                                                        {s.collections
+                                                            .into_iter()
+                                                            .map(|c| view! {
+                                                                <option value=c.id.to_string()>
+                                                                    {c.title.clone()}
+                                                                </option>
+                                                            })
+                                                            .collect_view()}
+                                                    </select>
+                                                }
+                                                .into_any()
+                                            }}
+                                        </Show>
+
+                                        // Inline create form
+                                        <Show when=move || creating_new.get()>
+                                            <div class="space-y-2">
+                                                <div class="flex items-stretch gap-2">
+                                                    <input
+                                                        type="text"
+                                                        prop:value=move || new_collection_title.get()
+                                                        on:input=move |e| {
+                                                            new_collection_title.set(event_target_value(&e))
+                                                        }
+                                                        on:keydown=move |e| {
+                                                            if e.key() == "Enter" {
+                                                                e.prevent_default();
+                                                                submit_create.run(());
+                                                            } else if e.key() == "Escape" {
+                                                                cancel_create.run(());
+                                                            }
+                                                        }
+                                                        autofocus=true
+                                                        placeholder="New collection title"
+                                                        class="flex-1 bg-white/10 text-white \
+                                                               rounded-lg px-3 py-1.5 text-sm \
+                                                               focus:outline-none focus:ring-1 \
+                                                               focus:ring-cyan-400"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        on:click=move |_| submit_create.run(())
+                                                        disabled=move || {
+                                                            create_pending.get()
+                                                                || new_collection_title
+                                                                    .get()
+                                                                    .trim()
+                                                                    .is_empty()
+                                                        }
+                                                        class="shrink-0 px-3 rounded-lg \
+                                                               bg-cyan-500/30 hover:bg-cyan-500/40 \
+                                                               text-white text-sm font-medium \
+                                                               transition disabled:opacity-50"
+                                                    >
+                                                        {move || if create_pending.get() {
+                                                            "Creating…"
+                                                        } else {
+                                                            "Create"
                                                         }}
-                                                    </div>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        on:click=move |_| cancel_create.run(())
+                                                        disabled=move || create_pending.get()
+                                                        class="shrink-0 px-3 rounded-lg \
+                                                               bg-white/5 hover:bg-white/15 \
+                                                               text-gray-300 text-sm \
+                                                               transition disabled:opacity-50"
+                                                    >
+                                                        "Cancel"
+                                                    </button>
                                                 </div>
+                                                <ErrorView error=create_error/>
                                             </div>
                                         </Show>
+                                    </div>
+                                </Show>
 
-                                        <Show when=move || {
-                                            matches!(classify.result.get(), Some(Err(_)))
-                                        }>
-                                            <ErrorView
-                                                error=error_signal
-                                                style=ErrorStyle::Banner
-                                                heading="Move failed"
-                                            />
-                                        </Show>
+                                <Show when=move || chosen_is_series.get()>
+                                    <div>
+                                        <label class="text-xs text-gray-500 \
+                                                      uppercase tracking-wider">
+                                            "Season"
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            placeholder="1"
+                                            prop:value=move || season.get()
+                                            on:input=move |e| season.set(event_target_value(&e))
+                                            class="mt-1 w-full bg-white/10 text-white \
+                                                   rounded-lg px-3 py-1.5 text-sm \
+                                                   focus:outline-none focus:ring-1 \
+                                                   focus:ring-cyan-400"
+                                        />
+                                    </div>
+                                </Show>
 
-                                        <div class="flex justify-end">
-                                            <button
-                                                type="button"
-                                                on:click=move |_| try_close.run(())
-                                                class="px-4 py-2 rounded-lg bg-white/10 \
-                                                       hover:bg-white/20 text-white text-sm \
-                                                       transition"
-                                            >
-                                                "Close"
-                                            </button>
+                                <div class="flex justify-end gap-2 pt-2">
+                                    <button
+                                        type="button"
+                                        on:click=move |_| try_close.run(())
+                                        class="px-4 py-2 rounded-lg text-gray-300 \
+                                               hover:bg-white/10 transition text-sm"
+                                    >
+                                        "Cancel"
+                                    </button>
+                                    <button
+                                        type="button"
+                                        on:click=move |_| confirm.run(())
+                                        disabled=move || !can_move.get()
+                                        class="px-4 py-2 rounded-lg \
+                                               bg-gradient-to-r from-cyan-500 to-blue-500 \
+                                               hover:from-cyan-400 hover:to-blue-400 \
+                                               text-white font-bold text-sm \
+                                               disabled:opacity-50 transition"
+                                    >
+                                        {move || {
+                                            let n = selection.get().len();
+                                            if n <= 1 {
+                                                "Move".to_string()
+                                            } else {
+                                                format!("Move {n} files")
+                                            }
+                                        }}
+                                    </button>
+                                </div>
+                            </div>
+                        </Show>
+
+                        <Show when=move || show_progress.get()>
+                            <div class="space-y-3">
+                                <UploadProgress status=status_signal/>
+                                <div class="text-xs text-gray-500 text-center pt-2">
+                                    "Please wait — files are being moved."
+                                </div>
+                            </div>
+                        </Show>
+
+                        <Show when=move || show_final.get()>
+                            <div class="space-y-4">
+                                <Show when=move || {
+                                    matches!(classify.result.get(), Some(Ok(())))
+                                }>
+                                    <div class="bg-green-500/15 border border-green-500/30 \
+                                                rounded-xl p-4 flex items-start gap-3">
+                                        <span class="text-green-400 text-xl \
+                                                     leading-none shrink-0">
+                                            "✓"
+                                        </span>
+                                        <div class="min-w-0">
+                                            <div class="text-green-300 font-bold">
+                                                {move || {
+                                                    let n = selection.get().len();
+                                                    if n <= 1 { "Moved successfully".to_string() }
+                                                    else { format!("Moved {n} files") }
+                                                }}
+                                            </div>
+                                            <div class="text-green-300/70 text-xs mt-1">
+                                                "The items are now in the collection."
+                                            </div>
                                         </div>
                                     </div>
                                 </Show>
-                            }
-                            .into_any()
-                        }}
+
+                                <Show when=move || {
+                                    matches!(classify.result.get(), Some(Err(_)))
+                                }>
+                                    <ErrorView
+                                        error=error_signal
+                                        style=ErrorStyle::Banner
+                                        heading="Move failed"
+                                    />
+                                </Show>
+
+                                <div class="flex justify-end">
+                                    <button
+                                        type="button"
+                                        on:click=move |_| try_close.run(())
+                                        class="px-4 py-2 rounded-lg bg-white/10 \
+                                               hover:bg-white/20 text-white text-sm \
+                                               transition"
+                                    >
+                                        "Close"
+                                    </button>
+                                </div>
+                            </div>
+                        </Show>
                     </div>
                 </div>
             }
