@@ -7,10 +7,10 @@ mod validate;
 
 use std::time::Duration;
 
-pub use files::stage_files;
+use tokio_util::sync::CancellationToken;
+
 pub use multipart::parse_upload_multipart;
 pub use naming::{extension_of, sanitize_filename, slugify};
-pub use persist::{insert_files, insert_items_and_poster};
 use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};
@@ -34,9 +34,10 @@ async fn stage_phase(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<Vec<StagedFile>, AppError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
-    files::stage_files(payload, state, kind, job_id).await
+    files::stage_files(payload, state, kind, job_id, cancel).await
 }
 
 async fn persist_phase(
@@ -64,8 +65,9 @@ async fn execute_upload(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<String, AppError> {
-    let staged = stage_phase(payload, state, kind, job_id).await?;
+    let staged = stage_phase(payload, state, kind, job_id, cancel).await?;
     persist_phase(state, payload, &staged, job_id).await?;
     finish_job(state, job_id).await;
     Ok(format!("Successfully uploaded {} file(s)", staged.len()))
@@ -76,6 +78,7 @@ pub async fn process_upload(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<String, AppError> {
-    execute_upload(&payload, state, kind, job_id).await
+    execute_upload(&payload, state, kind, job_id, cancel).await
 }

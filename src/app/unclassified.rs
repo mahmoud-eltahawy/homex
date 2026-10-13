@@ -10,20 +10,16 @@
 //! in its own `tokio::spawn` task. The client tracks all jobs by id and shows
 //! one progress bar per file.
 //!
-//! Concurrency is bounded by a process-wide semaphore so a folder with
-//! hundreds of files doesn't spawn hundreds of concurrent ffmpeg processes.
-//! Each job also has a hard timeout, after which it's marked failed so the
-//! client's poll loop always reaches a terminal state.
+//! Concurrency is bounded by a process-wide semaphore. Each job has a hard
+//! timeout and its own `CancellationToken`, so a batch can be cancelled
+//! mid-flight and stalled conversions never hang the UI.
 //!
 //! Item numbering is serialized by a global lock in
-//! `server::upload::persist::insert_items_and_poster`, so parallel jobs
-//! produce contiguous item numbers within a collection.
+//! `server::upload::persist::insert_items_and_poster`.
 //!
 //! ## URL as source of truth
 //!
-//! The current folder is encoded in the URL as `?path=<relative>`. `rel_path`
-//! is a `Signal` derived from the query map — browser back/forward navigates
-//! the tree naturally.
+//! The current folder is encoded in the URL as `?path=<relative>`.
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::either::Either;
@@ -31,6 +27,7 @@ use leptos::prelude::*;
 use leptos_router::hooks::{use_navigate, use_query_map};
 use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ssr")]
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -44,6 +41,8 @@ use crate::app::upload_api::ConversionStatus;
 
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
+#[cfg(feature = "ssr")]
+use tokio_util::sync::CancellationToken;
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  Constants
@@ -52,13 +51,8 @@ use crate::app::error::ErrorContext;
 const POLL_INTERVAL_MS: u32 = 700;
 const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
-/// Hard timeout per classification job. A job that exceeds this is marked
-/// failed so the client's poll loop can reach a terminal state.
 #[cfg(feature = "ssr")]
 const JOB_TIMEOUT_SECS: u64 = 15 * 60;
-
-/// Deadline for the background watchers that clean up source folders and
-/// release classify locks. Prevents leaks if a job never reaches terminal.
 #[cfg(feature = "ssr")]
 const WATCHER_DEADLINE_SECS: u64 = 30 * 60;
 
@@ -114,15 +108,18 @@ pub enum FolderDestination {
     New { section_title: String },
 }
 
-/// One file's job. Returned by the classify server fns; the client polls each
-/// `job_id` through `poll_batch`.
+/// One file's job. The client polls each `job_id` through `poll_batch` and
+/// uses `section_slug` / `collection_id` to render a post-success link.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileJobHandle {
     pub name: String,
     pub job_id: String,
+    pub section_slug: String,
+    /// `Some` for direct file classify; `None` for folder classify (each
+    /// group has its own collection, so we link to the section instead).
+    pub collection_id: Option<Uuid>,
 }
 
-/// UI-only: which side of the folder modal's destination toggle is active.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DestinationMode {
     Existing,
@@ -337,13 +334,9 @@ fn ensure_kind_matches(files: &[RawFile], kind: MediaKind) -> Result<(), AppErro
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Concurrency and config guards
+//  Concurrency, cancel and config guards
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// Process-wide semaphore bounding concurrent file operations. Size is
-/// `min(16, max(2, cpus * 2))`. Acquired by each file job's worker before
-/// touching the filesystem, so a folder with hundreds of files doesn't
-/// spawn hundreds of concurrent ffmpeg processes.
 #[cfg(feature = "ssr")]
 fn upload_semaphore() -> &'static tokio::sync::Semaphore {
     use std::sync::OnceLock;
@@ -358,12 +351,6 @@ fn upload_semaphore() -> &'static tokio::sync::Semaphore {
     })
 }
 
-/// Canonicalize `media_root` once per process. The result is leaked so it can
-/// be reused across requests without re-running syscalls.
-///
-/// Assumes a single `media_root` per process — true in production. In tests
-/// with multiple `AppState`s the first one wins; that's an acceptable
-/// limitation for a dev convenience function.
 #[cfg(feature = "ssr")]
 fn canonical_media_root(
     media_root: &std::path::Path,
@@ -381,9 +368,6 @@ fn canonical_media_root(
     }
 }
 
-/// Refuse to operate if the unclassified root and the media root overlap.
-/// `media_root`'s canonical form is cached; the disjointness check itself is
-/// a cheap prefix comparison.
 #[cfg(feature = "ssr")]
 fn ensure_roots_disjoint(
     unclassified_canon: &std::path::Path,
@@ -407,9 +391,6 @@ fn ensure_roots_disjoint(
     Ok(())
 }
 
-/// Process-wide set of canonical source paths currently being classified.
-/// Serialises classifications of the same folder or file so two requests
-/// can't race each other's file moves.
 #[cfg(feature = "ssr")]
 fn active_classifications()
 -> &'static std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>> {
@@ -419,7 +400,6 @@ fn active_classifications()
     SET.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// RAII guard releasing every path acquired by `acquire_classify_locks`.
 #[cfg(feature = "ssr")]
 struct ClassifyLocks(Vec<std::path::PathBuf>);
 
@@ -435,8 +415,6 @@ impl Drop for ClassifyLocks {
     }
 }
 
-/// Atomically acquire locks on every path. Fails if any is already locked.
-/// The lock is held until the returned guard is dropped.
 #[cfg(feature = "ssr")]
 fn acquire_classify_locks(paths: Vec<std::path::PathBuf>) -> Result<ClassifyLocks, AppError> {
     if paths.is_empty() {
@@ -459,9 +437,6 @@ fn acquire_classify_locks(paths: Vec<std::path::PathBuf>) -> Result<ClassifyLock
     Ok(ClassifyLocks(paths))
 }
 
-/// Map of collection title → id for every collection currently in
-/// `section_slug`. Used both to dedup subfolder batches and to resume a
-/// partially-completed files-only classify.
 #[cfg(feature = "ssr")]
 async fn existing_collection_titles(
     db: &mut toasty::Db,
@@ -683,6 +658,7 @@ pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, A
                 },
                 JobPhase::Finalizing => ConversionStatus::Finalizing,
                 JobPhase::Done => ConversionStatus::Done,
+                JobPhase::Cancelled => ConversionStatus::Cancelled,
                 JobPhase::Failed(e) => ConversionStatus::Failed(e.clone()),
             },
             // Job evicted after terminal — treat as success so the batch
@@ -691,6 +667,22 @@ pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, A
         });
     }
     Ok(out)
+}
+
+// ── Cancel a running batch ───────────────────────────────────────────────────
+
+#[server]
+pub async fn cancel_classify(job_ids: Vec<String>) -> Result<(), AppError> {
+    use crate::app::server::AppState;
+
+    let state: AppState = expect_context();
+    let jobs = state.jobs.read().await;
+    for id in &job_ids {
+        if let Some(job) = jobs.get(id) {
+            job.cancel.cancel();
+        }
+    }
+    Ok(())
 }
 
 // ── Classify files ────────────────────────────────────────────────────────────
@@ -720,9 +712,6 @@ pub async fn classify_unclassified_files(
         .context("canonicalize unclassified root")?;
     ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
-    // Validate all paths up front. This also returns the canonical path of
-    // every file, which we lock to prevent concurrent classification of the
-    // same file.
     let mut upload_files = Vec::with_capacity(files.len());
     for input in &files {
         upload_files.push(resolve_upload_file(&root, &root_canon, input).await?);
@@ -766,7 +755,14 @@ pub async fn classify_unclassified_files(
         )?);
     }
 
-    let handles = register_and_spawn(&state, prepared).await;
+    let handles = register_and_spawn(
+        &state,
+        prepared,
+        &collection.section_slug,
+        Some(collection_id),
+    )
+    .await;
+
     let job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
     spawn_lock_holder(state.clone(), job_ids, _lock);
 
@@ -819,7 +815,6 @@ pub async fn classify_unclassified_folder(
     let subdirs = read_immediate_subdirs(&abs_canon).await?;
     let has_subdirs = !subdirs.is_empty();
 
-    // ── Resolve destination (kind, nested, section slug) ─────────────────────
     enum Dest {
         Existing {
             slug: String,
@@ -879,7 +874,6 @@ pub async fn classify_unclassified_folder(
         Dest::New { kind, nested, .. } => (*kind, *nested),
     };
 
-    // ── Build per-subfolder file groups (or one group for files-only) ────────
     struct Group {
         title: String,
         season: Option<i64>,
@@ -936,28 +930,21 @@ pub async fn classify_unclassified_folder(
         });
     }
 
-    // ── Dedup / resume against existing collection titles ────────────────────
     let existing = match &dest {
         Dest::Existing { slug, .. } => existing_collection_titles(&mut db, slug).await?,
         Dest::New { .. } => Default::default(),
     };
 
-    // Pre-computed collection ids per group. For files-only with a title
-    // collision in Existing mode, we reuse the existing collection so a
-    // retry after a partial failure appends rather than creating duplicates.
     let mut group_collection_ids: Vec<Option<Uuid>> = vec![None; groups.len()];
 
     if has_subdirs {
         let before = groups.len();
-        let mut kept: Vec<Group> = Vec::with_capacity(before);
-        let mut kept_ids: Vec<Option<Uuid>> = Vec::with_capacity(before);
-        for (g, _) in groups.into_iter().zip(0..before) {
-            // Retain only groups whose title doesn't already exist.
+        let mut kept: Vec<Group> = Vec::new();
+        for g in groups {
             if existing.contains_key(&g.title) {
                 continue;
             }
             kept.push(g);
-            kept_ids.push(None);
         }
         let skipped = before - kept.len();
         if kept.is_empty() {
@@ -973,13 +960,11 @@ pub async fn classify_unclassified_folder(
             );
         }
         groups = kept;
-        group_collection_ids = kept_ids;
+        group_collection_ids = vec![None; groups.len()];
     } else if let Some(&id) = existing.get(&groups[0].title) {
-        // Files-only resume: append to the existing collection.
         group_collection_ids[0] = Some(id);
     }
 
-    // ── Create section (New mode) ────────────────────────────────────────────
     let section_slug = match &dest {
         Dest::Existing { slug, .. } => slug.clone(),
         Dest::New { title, .. } => {
@@ -991,7 +976,6 @@ pub async fn classify_unclassified_folder(
         }
     };
 
-    // ── Create collections (unless reused) and prepare every file job ────────
     let mut prepared: Vec<PreparedJob> = Vec::new();
     let mut cleanup_watchers: Vec<(Vec<String>, std::path::PathBuf)> = Vec::new();
 
@@ -1026,11 +1010,10 @@ pub async fn classify_unclassified_folder(
         cleanup_watchers.push((group_job_ids, group.cleanup_dir));
     }
 
-    let handles = register_and_spawn(&state, prepared).await;
+    // For folder classify, every file's handle points at the section, not a
+    // specific collection (each group has its own).
+    let handles = register_and_spawn(&state, prepared, &section_slug, None).await;
 
-    // One lock-holder task for the whole folder. It waits for every job to
-    // reach a terminal phase, then drops the lock. The watcher per group
-    // removes the source subfolder.
     let all_job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
     spawn_lock_holder(state.clone(), all_job_ids, _lock);
 
@@ -1094,13 +1077,13 @@ fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
     tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))
 }
 
-/// One file's job, fully prepared but not yet registered or spawned.
 #[cfg(feature = "ssr")]
 struct PreparedJob {
     name: String,
     job_id: String,
     payload: crate::app::server::upload::UploadPayload,
     kind: MediaKind,
+    cancel: CancellationToken,
 }
 
 #[cfg(feature = "ssr")]
@@ -1128,15 +1111,16 @@ fn prepare_file_job(
             temp_dir: make_dummy_tempdir()?,
         },
         kind,
+        cancel: CancellationToken::new(),
     })
 }
 
-/// Register every prepared job in one lock acquisition, then spawn one worker
-/// per job. Returns the handles for the client to poll.
 #[cfg(feature = "ssr")]
 async fn register_and_spawn(
     state: &crate::app::server::AppState,
     prepared: Vec<PreparedJob>,
+    section_slug: &str,
+    collection_id: Option<Uuid>,
 ) -> Vec<FileJobHandle> {
     use crate::app::server::convert::{Job, JobPhase};
 
@@ -1145,10 +1129,11 @@ async fn register_and_spawn(
         .map(|p| FileJobHandle {
             name: p.name.clone(),
             job_id: p.job_id.clone(),
+            section_slug: section_slug.to_string(),
+            collection_id,
         })
         .collect();
 
-    // Single write lock, one pass.
     {
         let mut jobs = state.jobs.write().await;
         for p in &prepared {
@@ -1157,6 +1142,7 @@ async fn register_and_spawn(
                 Job {
                     phase: JobPhase::Writing,
                     started_at: std::time::Instant::now(),
+                    cancel: p.cancel.clone(),
                 },
             );
         }
@@ -1169,26 +1155,33 @@ async fn register_and_spawn(
     handles
 }
 
-/// Spawn one tokio task that drives `process_upload` for a single prepared
-/// job, bounded by a semaphore and a hard timeout.
 #[cfg(feature = "ssr")]
 fn spawn_job_worker(state: crate::app::server::AppState, p: PreparedJob) {
     use crate::app::server::convert::JobPhase;
     use crate::app::server::upload::{process_upload, schedule_job_eviction};
 
     tokio::spawn(async move {
-        // Throttle concurrent file operations globally.
         let _permit = upload_semaphore().acquire().await.ok();
+        let cancel = p.cancel.clone();
 
         let outcome = tokio::time::timeout(
             Duration::from_secs(JOB_TIMEOUT_SECS),
-            process_upload(p.payload, &state, p.kind, Some(&p.job_id)),
+            process_upload(p.payload, &state, p.kind, Some(&p.job_id), &cancel),
         )
         .await;
 
+        // Decide the final phase. Success leaves `process_upload`'s own
+        // `Done` + scheduled eviction in place.
         match outcome {
-            Ok(Ok(_s)) => {
-                // `process_upload` already set the phase to Done on success.
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) if cancel.is_cancelled() => {
+                crate::app::server::convert::job_set_phase(
+                    &state.jobs,
+                    Some(&p.job_id),
+                    JobPhase::Cancelled,
+                )
+                .await;
+                schedule_job_eviction(state.jobs.clone(), p.job_id);
             }
             Ok(Err(e)) => {
                 crate::app::server::convert::job_set_phase(
@@ -1197,8 +1190,11 @@ fn spawn_job_worker(state: crate::app::server::AppState, p: PreparedJob) {
                     JobPhase::Failed(e),
                 )
                 .await;
+                schedule_job_eviction(state.jobs.clone(), p.job_id);
             }
             Err(_) => {
+                // Timeout: kill any running ffmpeg, mark failed.
+                cancel.cancel();
                 let e = AppError::public("Timed out").transient();
                 crate::app::server::convert::job_set_phase(
                     &state.jobs,
@@ -1206,14 +1202,12 @@ fn spawn_job_worker(state: crate::app::server::AppState, p: PreparedJob) {
                     JobPhase::Failed(e),
                 )
                 .await;
+                schedule_job_eviction(state.jobs.clone(), p.job_id);
             }
         }
-
-        schedule_job_eviction(state.jobs.clone(), p.job_id);
     });
 }
 
-/// Wait (bounded) until every job id reaches a terminal phase.
 #[cfg(feature = "ssr")]
 async fn wait_for_terminal(state: &crate::app::server::AppState, job_ids: &[String]) {
     use crate::app::server::convert::JobPhase;
@@ -1224,7 +1218,12 @@ async fn wait_for_terminal(state: &crate::app::server::AppState, job_ids: &[Stri
             let jobs = state.jobs.read().await;
             let all_terminal = job_ids.iter().all(|id| {
                 jobs.get(id)
-                    .map(|j| matches!(j.phase, JobPhase::Done | JobPhase::Failed(_)))
+                    .map(|j| {
+                        matches!(
+                            j.phase,
+                            JobPhase::Done | JobPhase::Cancelled | JobPhase::Failed(_)
+                        )
+                    })
                     .unwrap_or(true)
             });
             drop(jobs);
@@ -1234,12 +1233,9 @@ async fn wait_for_terminal(state: &crate::app::server::AppState, job_ids: &[Stri
         }
     };
 
-    // Hard deadline so a stuck job can't leak this task forever.
     let _ = tokio::time::timeout(Duration::from_secs(WATCHER_DEADLINE_SECS), wait).await;
 }
 
-/// Hold a `ClassifyLocks` guard for the duration of the batch, releasing it
-/// once every job has reached a terminal phase.
 #[cfg(feature = "ssr")]
 fn spawn_lock_holder(
     state: crate::app::server::AppState,
@@ -1252,7 +1248,6 @@ fn spawn_lock_holder(
     });
 }
 
-/// Remove a source folder once every job in its group has finished.
 #[cfg(feature = "ssr")]
 fn spawn_cleanup_watcher(
     state: crate::app::server::AppState,
@@ -1297,32 +1292,35 @@ async fn generate_unique_slug(
 //  Client-side batch tracker
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// One file's slot in the batch UI. Holds its status independently so each
-/// bar can update on its own.
 #[derive(Clone)]
 struct FileSlot {
     name: String,
     job_id: String,
+    section_slug: String,
+    collection_id: Option<Uuid>,
     status: RwSignal<Option<ConversionStatus>>,
 }
 
-/// UI-phase derived from the batch's per-file statuses.
 #[derive(Clone)]
 enum BatchPhase {
     Setup,
     Running,
-    /// Some files completed, some failed. Both counts are > 0.
+    /// All slots reached terminal, and every one succeeded.
+    Done,
+    /// All slots reached terminal, and every one was cancelled.
+    Cancelled,
+    /// All slots reached terminal, and every one failed.
+    Failed(AppError),
+    /// Mixed terminal states. `first_error` is `None` when there were no
+    /// failures — e.g. some succeeded, some were cancelled.
     Partial {
         succeeded: usize,
         failed: usize,
-        first_error: AppError,
+        cancelled: usize,
+        first_error: Option<AppError>,
     },
-    Done,
-    Failed(AppError),
 }
 
-/// Tracks N parallel classification jobs. Each file gets its own status
-/// signal; a single poll request every `POLL_INTERVAL_MS` updates them all.
 #[derive(Clone, Copy)]
 pub struct BatchTracker {
     slots: RwSignal<Vec<FileSlot>>,
@@ -1345,6 +1343,8 @@ impl BatchTracker {
             .map(|h| FileSlot {
                 name: h.name,
                 job_id: h.job_id,
+                section_slug: h.section_slug,
+                collection_id: h.collection_id,
                 status: RwSignal::new(None),
             })
             .collect();
@@ -1366,7 +1366,6 @@ impl BatchTracker {
         let slots_sig = self.slots;
         let error = self.error;
         Signal::derive(move || {
-            // A poll-loop failure dominates everything else.
             if let Some(e) = error.get() {
                 return BatchPhase::Failed(e);
             }
@@ -1379,19 +1378,20 @@ impl BatchTracker {
             let statuses: Vec<Option<ConversionStatus>> =
                 slots.iter().map(|s| s.status.get()).collect();
 
-            // Not all files have reported yet.
             if statuses.iter().any(|s| s.is_none()) {
                 return BatchPhase::Running;
             }
 
             let mut succeeded = 0usize;
             let mut failed = 0usize;
+            let mut cancelled = 0usize;
             let mut first_error: Option<AppError> = None;
             let mut all_terminal = true;
 
             for s in &statuses {
                 match s {
                     Some(ConversionStatus::Done) => succeeded += 1,
+                    Some(ConversionStatus::Cancelled) => cancelled += 1,
                     Some(ConversionStatus::Failed(e)) => {
                         failed += 1;
                         if first_error.is_none() {
@@ -1407,15 +1407,17 @@ impl BatchTracker {
                 return BatchPhase::Running;
             }
 
-            match (succeeded, failed) {
-                (_, 0) => BatchPhase::Done,
-                (0, _) => BatchPhase::Failed(
+            match (succeeded, failed, cancelled) {
+                (_, 0, 0) => BatchPhase::Done,
+                (0, 0, _) => BatchPhase::Cancelled,
+                (0, _, 0) => BatchPhase::Failed(
                     first_error.unwrap_or_else(|| AppError::public("Move failed")),
                 ),
-                (_, _) => BatchPhase::Partial {
+                _ => BatchPhase::Partial {
                     succeeded,
                     failed,
-                    first_error: first_error.unwrap(),
+                    cancelled,
+                    first_error,
                 },
             }
         })
@@ -1423,6 +1425,24 @@ impl BatchTracker {
 
     fn slots(&self) -> RwSignal<Vec<FileSlot>> {
         self.slots
+    }
+
+    /// Job ids for slots that haven't reached a terminal state yet. Used by
+    /// the cancel path so we don't waste a server round-trip on finished jobs.
+    fn pending_job_ids(&self) -> Vec<String> {
+        self.slots
+            .get_untracked()
+            .iter()
+            .filter(|s| {
+                !matches!(
+                    s.status.get_untracked(),
+                    Some(ConversionStatus::Done)
+                        | Some(ConversionStatus::Cancelled)
+                        | Some(ConversionStatus::Failed(_))
+                )
+            })
+            .map(|s| s.job_id.clone())
+            .collect()
     }
 }
 
@@ -1446,9 +1466,14 @@ async fn poll_batch_loop(tracker: BatchTracker) {
         match poll_batch(job_ids.clone()).await {
             Ok(statuses) => {
                 consecutive_errors = 0;
-                let all_terminal = statuses
-                    .iter()
-                    .all(|s| matches!(s, ConversionStatus::Done | ConversionStatus::Failed(_)));
+                let all_terminal = statuses.iter().all(|s| {
+                    matches!(
+                        s,
+                        ConversionStatus::Done
+                            | ConversionStatus::Cancelled
+                            | ConversionStatus::Failed(_)
+                    )
+                });
 
                 tracker.slots.update(|slots| {
                     for (slot, status) in slots.iter_mut().zip(statuses.iter()) {
@@ -1519,6 +1544,16 @@ impl ClassifyJob {
     pub fn tracker(&self) -> BatchTracker {
         self.tracker
     }
+
+    pub fn cancel(&self) {
+        let ids = self.tracker.pending_job_ids();
+        if ids.is_empty() {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            let _ = cancel_classify(ids).await;
+        });
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1558,6 +1593,16 @@ impl FolderClassifyJob {
 
     pub fn tracker(&self) -> BatchTracker {
         self.tracker
+    }
+
+    pub fn cancel(&self) {
+        let ids = self.tracker.pending_job_ids();
+        if ids.is_empty() {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            let _ = cancel_classify(ids).await;
+        });
     }
 }
 
@@ -2108,39 +2153,31 @@ fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>) -> 
     view! {
         {move || {
             let s = status.get();
-            let (label, pct, bar_class, indeterminate) = match &s {
+            let (label, pct, bar_class, indeterminate, text_class) = match &s {
                 None => ("Waiting…".to_string(), 0.0_f32,
-                         "bg-gradient-to-r from-cyan-400 to-blue-500", true),
+                         "bg-gradient-to-r from-cyan-400 to-blue-500", true, "text-gray-300"),
                 Some(ConversionStatus::Writing) => ("Moving…".to_string(), 0.0,
-                         "bg-gradient-to-r from-cyan-400 to-blue-500", true),
+                         "bg-gradient-to-r from-cyan-400 to-blue-500", true, "text-gray-300"),
                 Some(ConversionStatus::Converting { progress, .. }) => {
                     let p = if progress.is_finite() { *progress } else { 0.0 };
-                    (
-                        format!("Converting {:.0}%", p * 100.0),
-                        p,
-                        "bg-gradient-to-r from-cyan-400 to-blue-500",
-                        false,
-                    )
+                    (format!("Converting {:.0}%", p * 100.0), p,
+                     "bg-gradient-to-r from-cyan-400 to-blue-500", false, "text-gray-300")
                 }
-                Some(ConversionStatus::Finalizing) => (
-                    "Saving…".to_string(), 1.0,
-                    "bg-gradient-to-r from-cyan-400 to-blue-500", true,
-                ),
-                Some(ConversionStatus::Done) => (
-                    "Done".to_string(), 1.0,
-                    "bg-gradient-to-r from-emerald-400 to-green-500", false,
-                ),
-                Some(ConversionStatus::Failed(e)) => (
-                    format!("Failed: {}", e.message), 0.0,
-                    "bg-red-500/60", false,
-                ),
+                Some(ConversionStatus::Finalizing) => ("Saving…".to_string(), 1.0,
+                         "bg-gradient-to-r from-cyan-400 to-blue-500", true, "text-gray-300"),
+                Some(ConversionStatus::Done) => ("Done".to_string(), 1.0,
+                         "bg-gradient-to-r from-emerald-400 to-green-500", false, "text-emerald-300"),
+                Some(ConversionStatus::Cancelled) => ("Cancelled".to_string(), 0.0,
+                         "bg-gray-500/50", false, "text-gray-500"),
+                Some(ConversionStatus::Failed(e)) => (format!("Failed: {}", e.message), 0.0,
+                         "bg-red-500/60", false, "text-red-300"),
             };
 
             let name = name.clone();
             view! {
                 <div class="space-y-1">
                     <div class="flex items-center justify-between gap-2 text-[11px]">
-                        <span class="text-gray-300 truncate">{name}</span>
+                        <span class=format!("truncate {text_class}")>{name}</span>
                         <span class="text-gray-500 shrink-0">{label}</span>
                     </div>
                     <div class="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
@@ -2166,17 +2203,28 @@ fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>) -> 
     }
 }
 
-// ── Batch progress panel ──────────────────────────────────────────────────────
+// ── Batch progress panel with cancel ──────────────────────────────────────────
 
 #[component]
-fn BatchProgress(tracker: BatchTracker) -> impl IntoView {
+fn BatchProgress(
+    tracker: BatchTracker,
+    on_cancel: Callback<()>,
+    cancel_pending: Signal<bool>,
+) -> impl IntoView {
     let slots = tracker.slots();
     let total = move || slots.get().len();
     let done = move || {
         slots
             .get()
             .iter()
-            .filter(|s| matches!(s.status.get(), Some(ConversionStatus::Done)))
+            .filter(|s| {
+                matches!(
+                    s.status.get(),
+                    Some(ConversionStatus::Done)
+                        | Some(ConversionStatus::Cancelled)
+                        | Some(ConversionStatus::Failed(_))
+                )
+            })
             .count()
     };
 
@@ -2186,7 +2234,14 @@ fn BatchProgress(tracker: BatchTracker) -> impl IntoView {
                 <span class="text-gray-400">
                     {move || format!("{} / {} done", done(), total())}
                 </span>
-                <span class="text-gray-500">"Please wait…"</span>
+                <button type="button"
+                    on:click=move |_| on_cancel.run(())
+                    disabled=move || cancel_pending.get()
+                    class="text-xs px-2 py-1 rounded-md text-gray-300 \
+                           hover:bg-white/10 hover:text-white transition \
+                           disabled:opacity-30 disabled:cursor-not-allowed">
+                    {move || if cancel_pending.get() { "Cancelling…" } else { "Cancel" }}
+                </button>
             </div>
             <div class="space-y-1.5 max-h-72 overflow-auto pr-1">
                 {move || slots.get().into_iter().map(|slot| view! {
@@ -2197,13 +2252,60 @@ fn BatchProgress(tracker: BatchTracker) -> impl IntoView {
     }
 }
 
+// ── Failed / cancelled file list ──────────────────────────────────────────────
+
+#[component]
+fn FailedFilesList(tracker: BatchTracker) -> impl IntoView {
+    let slots = tracker.slots();
+
+    view! {
+        {move || {
+            let failures: Vec<(String, String, bool)> = slots
+                .get()
+                .into_iter()
+                .filter_map(|s| match s.status.get() {
+                    Some(ConversionStatus::Failed(e)) => {
+                        Some((s.name.clone(), e.message, true))
+                    }
+                    Some(ConversionStatus::Cancelled) => {
+                        Some((s.name.clone(), "cancelled".to_string(), false))
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            if failures.is_empty() {
+                return ().into_any();
+            }
+
+            view! {
+                <div class="text-xs bg-white/[0.03] border border-white/10 \
+                            rounded-lg p-2 max-h-32 overflow-auto space-y-0.5">
+                    {failures.into_iter().map(|(name, msg, is_error)| {
+                        let color = if is_error { "text-red-300/80" } else { "text-gray-400" };
+                        view! {
+                            <div class="truncate">
+                                <span class="text-gray-300">{name}</span>
+                                <span class=format!(" ml-1 {color}")>" — " {msg}</span>
+                            </div>
+                        }
+                    }).collect_view()}
+                </div>
+            }
+            .into_any()
+        }}
+    }
+}
+
 // ── Final phase (shared) ──────────────────────────────────────────────────────
 
 #[component]
 fn PhaseFinal(
     phase: Signal<BatchPhase>,
+    tracker: BatchTracker,
     success_heading: Signal<String>,
     success_detail: Signal<String>,
+    link: Signal<Option<(String, Option<Uuid>)>>,
     on_close: Callback<()>,
 ) -> impl IntoView {
     view! {
@@ -2212,12 +2314,43 @@ fn PhaseFinal(
                 <div class="bg-green-500/15 border border-green-500/30 rounded-xl p-4 \
                             flex items-start gap-3">
                     <span class="text-green-400 text-xl leading-none shrink-0">"✓"</span>
-                    <div class="min-w-0">
+                    <div class="min-w-0 flex-1">
                         <div class="text-green-300 font-bold">
                             {move || success_heading.get()}
                         </div>
                         <div class="text-green-300/70 text-xs mt-1">
                             {move || success_detail.get()}
+                        </div>
+                        {move || link.get().map(|(slug, collection_id)| {
+                            let href = match collection_id {
+                                Some(id) => routes::collection(&slug, id),
+                                None => routes::section(&slug),
+                            };
+                            let label = if collection_id.is_some() {
+                                "View collection →"
+                            } else {
+                                "View section →"
+                            };
+                            view! {
+                                <a href=href
+                                    class="inline-block mt-2 text-xs text-green-300 \
+                                           hover:text-green-200 underline underline-offset-2">
+                                    {label}
+                                </a>
+                            }
+                        })}
+                    </div>
+                </div>
+            </Show>
+
+            <Show when=move || matches!(phase.get(), BatchPhase::Cancelled)>
+                <div class="bg-gray-500/15 border border-gray-500/30 rounded-xl p-4 \
+                            flex items-start gap-3">
+                    <span class="text-gray-400 text-xl leading-none shrink-0">"■"</span>
+                    <div class="min-w-0">
+                        <div class="text-gray-300 font-bold">"Cancelled"</div>
+                        <div class="text-gray-400 text-xs mt-1">
+                            "No files were moved."
                         </div>
                     </div>
                 </div>
@@ -2225,26 +2358,35 @@ fn PhaseFinal(
 
             <Show when=move || matches!(phase.get(), BatchPhase::Partial { .. })>
                 {move || {
-                    let (succeeded, failed, msg) = match phase.get() {
-                        BatchPhase::Partial { succeeded, failed, first_error } => {
-                            (succeeded, failed, first_error.message)
+                    let (succeeded, failed, cancelled, first_error_msg) = match phase.get() {
+                        BatchPhase::Partial { succeeded, failed, cancelled, first_error } => {
+                            (succeeded, failed, cancelled, first_error.map(|e| e.message))
                         }
                         _ => return ().into_any(),
                     };
+                    let total = succeeded + failed + cancelled;
+
+                    let mut parts: Vec<String> = Vec::new();
+                    if succeeded > 0 { parts.push(format!("{succeeded} moved")); }
+                    if failed > 0 { parts.push(format!("{failed} failed")); }
+                    if cancelled > 0 { parts.push(format!("{cancelled} cancelled")); }
+                    let summary = format!(
+                        "{} of {total}: {}",
+                        succeeded,
+                        parts.join(", "),
+                    );
+
                     view! {
                         <div class="bg-amber-500/15 border border-amber-500/30 rounded-xl p-4 \
                                     flex items-start gap-3">
                             <span class="text-amber-400 text-xl leading-none shrink-0">"!"</span>
                             <div class="min-w-0">
-                                <div class="text-amber-300 font-bold">
-                                    {format!(
-                                        "{succeeded} of {} moved",
-                                        succeeded + failed,
-                                    )}
-                                </div>
-                                <div class="text-amber-300/70 text-xs mt-1 break-all">
-                                    {format!("{failed} failed: {msg}")}
-                                </div>
+                                <div class="text-amber-300 font-bold">{summary}</div>
+                                {first_error_msg.map(|msg| view! {
+                                    <div class="text-amber-300/70 text-xs mt-1 break-all">
+                                        {format!("First error: {msg}")}
+                                    </div>
+                                })}
                             </div>
                         </div>
                     }
@@ -2261,6 +2403,10 @@ fn PhaseFinal(
                     style=ErrorStyle::Banner
                     heading="Move failed"
                 />
+            </Show>
+
+            <Show when=move || !matches!(phase.get(), BatchPhase::Done)>
+                <FailedFilesList tracker/>
             </Show>
 
             <div class="flex justify-end">
@@ -2420,7 +2566,10 @@ fn ClassifyModal(
     let show_final = Signal::derive(move || {
         matches!(
             phase.get(),
-            BatchPhase::Done | BatchPhase::Partial { .. } | BatchPhase::Failed(_)
+            BatchPhase::Done
+                | BatchPhase::Cancelled
+                | BatchPhase::Partial { .. }
+                | BatchPhase::Failed(_)
         )
     });
 
@@ -2454,12 +2603,21 @@ fn ClassifyModal(
     });
     let success_detail = Signal::derive(|| "The items are now in the collection.".to_string());
 
+    // Post-success link: derived from the first slot's section + collection.
+    let link: Signal<Option<(String, Option<Uuid>)>> = Signal::derive(move || {
+        tracker
+            .slots()
+            .get()
+            .first()
+            .map(|s| (s.section_slug.clone(), s.collection_id))
+    });
+
+    let cancel_pending = RwSignal::new(false);
+
     let try_close = Callback::new(move |_: ()| {
         if is_busy.get_untracked() {
             return;
         }
-        // Refresh the listing for Done *and* Partial, since some files
-        // may have moved in either case.
         let refresh = matches!(
             phase.get_untracked(),
             BatchPhase::Done | BatchPhase::Partial { .. }
@@ -2470,6 +2628,16 @@ fn ClassifyModal(
         }
     });
 
+    let on_cancel = Callback::new(move |_: ()| {
+        if cancel_pending.get_untracked() {
+            return;
+        }
+        cancel_pending.set(true);
+        job.cancel();
+        // The poll loop will see Cancelled for the affected jobs; no need to
+        // reset the flag — the modal moves to the final phase.
+    });
+
     let confirm = Callback::new(move |_: ()| {
         let Some(col) = form.collection_id.get_untracked() else {
             return;
@@ -2478,6 +2646,7 @@ fn ClassifyModal(
         if sel.is_empty() {
             return;
         }
+        cancel_pending.set(false);
         let season = parse_season(&form.season.get_untracked());
         let files = if sel.len() == 1 {
             vec![ClassifyInput {
@@ -2566,13 +2735,19 @@ fn ClassifyModal(
                         </div>
                     </Show>
                     <Show when=move || show_running.get()>
-                        <BatchProgress tracker/>
+                        <BatchProgress
+                            tracker=tracker
+                            on_cancel=on_cancel
+                            cancel_pending=cancel_pending.into()
+                        />
                     </Show>
                     <Show when=move || show_final.get()>
                         <PhaseFinal
                             phase=phase
+                            tracker=tracker
                             success_heading=success_heading
                             success_detail=success_detail
+                            link=link
                             on_close=try_close
                         />
                     </Show>
@@ -2765,7 +2940,10 @@ fn FolderClassifyModal(
     let show_final = Signal::derive(move || {
         matches!(
             phase.get(),
-            BatchPhase::Done | BatchPhase::Partial { .. } | BatchPhase::Failed(_)
+            BatchPhase::Done
+                | BatchPhase::Cancelled
+                | BatchPhase::Partial { .. }
+                | BatchPhase::Failed(_)
         )
     });
 
@@ -2792,6 +2970,16 @@ fn FolderClassifyModal(
         format!("{files} file{} moved.", plural(files))
     });
 
+    let link: Signal<Option<(String, Option<Uuid>)>> = Signal::derive(move || {
+        tracker
+            .slots()
+            .get()
+            .first()
+            .map(|s| (s.section_slug.clone(), s.collection_id))
+    });
+
+    let cancel_pending = RwSignal::new(false);
+
     let try_close = Callback::new(move |_: ()| {
         if is_busy.get_untracked() {
             return;
@@ -2804,6 +2992,14 @@ fn FolderClassifyModal(
         if refresh {
             on_close.run(());
         }
+    });
+
+    let on_cancel = Callback::new(move |_: ()| {
+        if cancel_pending.get_untracked() {
+            return;
+        }
+        cancel_pending.set(true);
+        job.cancel();
     });
 
     let confirm = Callback::new(move |_: ()| {
@@ -2829,6 +3025,7 @@ fn FolderClassifyModal(
                 }
             }
         };
+        cancel_pending.set(false);
         job.dispatch(entry.rel_path.clone(), dest);
     });
 
@@ -2859,13 +3056,19 @@ fn FolderClassifyModal(
                         />
                     </Show>
                     <Show when=move || show_running.get()>
-                        <BatchProgress tracker/>
+                        <BatchProgress
+                            tracker=tracker
+                            on_cancel=on_cancel
+                            cancel_pending=cancel_pending.into()
+                        />
                     </Show>
                     <Show when=move || show_final.get()>
                         <PhaseFinal
                             phase=phase
+                            tracker=tracker
                             success_heading=success_heading
                             success_detail=success_detail
+                            link=link
                             on_close=try_close
                         />
                     </Show>

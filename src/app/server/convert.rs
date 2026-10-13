@@ -23,8 +23,9 @@ pub enum JobPhase {
     },
     Finalizing,
     Done,
-    /// Carries the full `AppError` so the client's `ErrorView` can read
-    /// `disposition` directly instead of reconstructing a synthetic one.
+    /// The job was cancelled. Distinguished from `Failed` so the client can
+    /// render a neutral state and skip the "retry" affordance.
+    Cancelled,
     Failed(AppError),
 }
 
@@ -32,6 +33,10 @@ pub enum JobPhase {
 pub struct Job {
     pub phase: JobPhase,
     pub started_at: Instant,
+    /// Per-job cancellation. A child of `AppState::cancel`, so process
+    /// shutdown still cancels everything, but this can be fired
+    /// independently.
+    pub cancel: CancellationToken,
 }
 
 pub type Jobs = Arc<RwLock<HashMap<String, Job>>>;
@@ -95,13 +100,8 @@ pub fn is_convertible_audio(ext: &str) -> bool {
 
 // ─── ffprobe ──────────────────────────────────────────────────────────────
 
-/// Probe a file's duration in seconds.
-///
-/// Returns `0.0` on any failure — a missing `ffprobe`, a malformed file, or
-/// an unparseable output. The failure is logged with the path so that a
-/// **pattern** of zero durations (rather than a one-off) is visible in the
-/// server log. `0.0` remains the fallback because there's no better answer
-/// without a second probe, and downstream code already guards against it.
+/// Probe a file's duration in seconds. Returns `0.0` on any failure —
+/// downstream code guards against that.
 pub async fn ffprobe_duration(path: &Path) -> f64 {
     let out = match Command::new("ffprobe")
         .args([

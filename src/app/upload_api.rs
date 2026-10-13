@@ -27,8 +27,10 @@ pub enum ConversionStatus {
     },
     Finalizing,
     Done,
-    /// Carries the original `AppError` from the server, including its
-    /// `Disposition`. The client no longer reconstructs a synthetic error.
+    /// The user cancelled the job (or a parent token was cancelled at
+    /// shutdown). Distinguished from `Failed` so the UI can show a neutral
+    /// "cancelled" state rather than a red error.
+    Cancelled,
     Failed(AppError),
 }
 
@@ -55,7 +57,10 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     validate_extensions(&payload, kind)?;
 
     if !needs_conversion(&payload, kind) {
-        let msg = process_upload(payload, &state, kind, None).await?;
+        // Fast path: no job, no polling. Cancellation is still available
+        // in principle via the child token, though nothing will fire it.
+        let cancel = state.cancel.child_token();
+        let msg = process_upload(payload, &state, kind, None, &cancel).await?;
         return Ok(UploadResult {
             success: true,
             message: msg,
@@ -64,6 +69,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     }
 
     let job_id = uuid::Uuid::new_v4().to_string();
+    let cancel = state.cancel.child_token();
     {
         let mut jobs = state.jobs.write().await;
         jobs.insert(
@@ -71,22 +77,25 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
             Job {
                 phase: JobPhase::Writing,
                 started_at: std::time::Instant::now(),
+                cancel: cancel.clone(),
             },
         );
     }
 
     let state_bg = state.clone();
     let job_id_bg = job_id.clone();
+    let cancel_bg = cancel.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id_bg)).await {
-            // `e` is a fully-formed `AppError` — no flattening.
-            crate::app::server::convert::job_set_phase(
-                &state_bg.jobs,
-                Some(&job_id_bg),
-                JobPhase::Failed(e),
-            )
-            .await;
+        if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id_bg), &cancel_bg).await
+        {
+            let phase = if cancel_bg.is_cancelled() {
+                JobPhase::Cancelled
+            } else {
+                JobPhase::Failed(e)
+            };
+            crate::app::server::convert::job_set_phase(&state_bg.jobs, Some(&job_id_bg), phase)
+                .await;
             schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
         }
     });
@@ -124,6 +133,7 @@ pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, AppErro
         },
         JobPhase::Finalizing => ConversionStatus::Finalizing,
         JobPhase::Done => ConversionStatus::Done,
+        JobPhase::Cancelled => ConversionStatus::Cancelled,
         JobPhase::Failed(e) => ConversionStatus::Failed(e.clone()),
     })
 }

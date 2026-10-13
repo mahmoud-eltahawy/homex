@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::app::error::AppError;
@@ -163,7 +164,7 @@ async fn stage_converted_file(
         &file.filename,
         &ctx.state.jobs,
         ctx.job_id,
-        &ctx.state.cancel,
+        ctx.cancel,
     )
     .await
     .map_err(|e| AppError::internal("convert file", e))?;
@@ -214,6 +215,7 @@ struct StagingContext<'a> {
     plan: &'a StagingPlan,
     media_root: &'a Path,
     job_id: Option<&'a str>,
+    cancel: &'a CancellationToken,
     conversion_pos: usize,
     conversion_count: usize,
 }
@@ -279,6 +281,7 @@ pub async fn stage_files(
     state: &AppState,
     kind: MediaKind,
     job_id: Option<&str>,
+    cancel: &CancellationToken,
 ) -> Result<Vec<StagedFile>, AppError> {
     let plan = build_staging_plan(payload);
     ensure_plan_dir(&plan, &state.config.storage.media_root).await?;
@@ -292,6 +295,7 @@ pub async fn stage_files(
         plan: &plan,
         media_root: &state.config.storage.media_root,
         job_id,
+        cancel,
         conversion_pos: 0,
         conversion_count,
     };

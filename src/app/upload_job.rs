@@ -165,9 +165,20 @@ pub fn UploadProgress(status: Signal<Option<ConversionStatus>>) -> impl IntoView
                 .into_any(),
                 ConversionStatus::Finalizing => view! { <FinalizingStage/> }.into_any(),
                 ConversionStatus::Done => view! { <DoneStage/> }.into_any(),
+                ConversionStatus::Cancelled => view! { <CancelledStage/> }.into_any(),
                 ConversionStatus::Failed(e) => view! { <FailedStage error=e/> }.into_any(),
             })}
         </Show>
+    }
+}
+
+#[component]
+fn CancelledStage() -> impl IntoView {
+    view! {
+        <div class="bg-gray-500/15 border border-gray-500/30 rounded-xl p-3 \
+                    text-gray-300 text-sm">
+            "Cancelled"
+        </div>
     }
 }
 
