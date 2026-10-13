@@ -8,10 +8,12 @@
 //!
 //! Every file in a classify request becomes its own independent job running
 //! in its own `tokio::spawn` task. The client tracks all jobs by id and shows
-//! one progress bar per file. Conversion progress and file-move progress are
-//! reported through the existing `JobPhase` machinery (see `server::convert`),
-//! so the client uses the same `ConversionStatus` type as the classic upload
-//! flow.
+//! one progress bar per file.
+//!
+//! Concurrency is bounded by a process-wide semaphore so a folder with
+//! hundreds of files doesn't spawn hundreds of concurrent ffmpeg processes.
+//! Each job also has a hard timeout, after which it's marked failed so the
+//! client's poll loop always reaches a terminal state.
 //!
 //! Item numbering is serialized by a global lock in
 //! `server::upload::persist::insert_items_and_poster`, so parallel jobs
@@ -29,6 +31,7 @@ use leptos::prelude::*;
 use leptos_router::hooks::{use_navigate, use_query_map};
 use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::app::collections::create_collection_named;
@@ -48,6 +51,16 @@ use crate::app::error::ErrorContext;
 
 const POLL_INTERVAL_MS: u32 = 700;
 const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+
+/// Hard timeout per classification job. A job that exceeds this is marked
+/// failed so the client's poll loop can reach a terminal state.
+#[cfg(feature = "ssr")]
+const JOB_TIMEOUT_SECS: u64 = 15 * 60;
+
+/// Deadline for the background watchers that clean up source folders and
+/// release classify locks. Prevents leaks if a job never reaches terminal.
+#[cfg(feature = "ssr")]
+const WATCHER_DEADLINE_SECS: u64 = 30 * 60;
 
 const VIDEO_EXTS: &[&str] = &[
     "mp4", "mkv", "mov", "webm", "avi", "m4v", "wmv", "flv", "ts", "mpg", "mpeg", "3gp", "ogv",
@@ -323,17 +336,62 @@ fn ensure_kind_matches(files: &[RawFile], kind: MediaKind) -> Result<(), AppErro
     Ok(())
 }
 
-/// Refuse to operate if the unclassified root and the media root overlap.
+// ══════════════════════════════════════════════════════════════════════════════
+//  Concurrency and config guards
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// Process-wide semaphore bounding concurrent file operations. Size is
+/// `min(16, max(2, cpus * 2))`. Acquired by each file job's worker before
+/// touching the filesystem, so a folder with hundreds of files doesn't
+/// spawn hundreds of concurrent ffmpeg processes.
 #[cfg(feature = "ssr")]
-async fn ensure_roots_disjoint(
+fn upload_semaphore() -> &'static tokio::sync::Semaphore {
+    use std::sync::OnceLock;
+    use tokio::sync::Semaphore;
+    static SEM: OnceLock<Semaphore> = OnceLock::new();
+    SEM.get_or_init(|| {
+        let permits = std::thread::available_parallelism()
+            .map(|n| n.get() * 2)
+            .unwrap_or(4)
+            .clamp(2, 16);
+        Semaphore::new(permits)
+    })
+}
+
+/// Canonicalize `media_root` once per process. The result is leaked so it can
+/// be reused across requests without re-running syscalls.
+///
+/// Assumes a single `media_root` per process — true in production. In tests
+/// with multiple `AppState`s the first one wins; that's an acceptable
+/// limitation for a dev convenience function.
+#[cfg(feature = "ssr")]
+fn canonical_media_root(
+    media_root: &std::path::Path,
+) -> Result<&'static std::path::Path, AppError> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Result<&'static std::path::PathBuf, String>> = OnceLock::new();
+    let result = CACHE.get_or_init(|| {
+        std::fs::canonicalize(media_root)
+            .map(|p| Box::leak(Box::new(p)) as &'static std::path::PathBuf)
+            .map_err(|e| format!("canonicalize media_root: {e}"))
+    });
+    match result {
+        Ok(p) => Ok(p.as_path()),
+        Err(e) => Err(AppError::internal("config", e.clone())),
+    }
+}
+
+/// Refuse to operate if the unclassified root and the media root overlap.
+/// `media_root`'s canonical form is cached; the disjointness check itself is
+/// a cheap prefix comparison.
+#[cfg(feature = "ssr")]
+fn ensure_roots_disjoint(
     unclassified_canon: &std::path::Path,
     media_root: &std::path::Path,
 ) -> Result<(), AppError> {
-    let media_canon = tokio::fs::canonicalize(media_root)
-        .await
-        .map_err(|e| AppError::internal("canonicalize media_root", e))?;
+    let media_canon = canonical_media_root(media_root)?;
     if unclassified_canon == media_canon
-        || unclassified_canon.starts_with(&media_canon)
+        || unclassified_canon.starts_with(media_canon)
         || media_canon.starts_with(unclassified_canon)
     {
         leptos::logging::error!(
@@ -350,6 +408,8 @@ async fn ensure_roots_disjoint(
 }
 
 /// Process-wide set of canonical source paths currently being classified.
+/// Serialises classifications of the same folder or file so two requests
+/// can't race each other's file moves.
 #[cfg(feature = "ssr")]
 fn active_classifications()
 -> &'static std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>> {
@@ -359,39 +419,56 @@ fn active_classifications()
     SET.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// RAII guard releasing every path acquired by `acquire_classify_locks`.
 #[cfg(feature = "ssr")]
-struct ClassifyLock(std::path::PathBuf);
+struct ClassifyLocks(Vec<std::path::PathBuf>);
 
 #[cfg(feature = "ssr")]
-impl Drop for ClassifyLock {
+impl Drop for ClassifyLocks {
     fn drop(&mut self) {
         let mut set = active_classifications()
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        set.remove(&self.0);
+        for p in &self.0 {
+            set.remove(p);
+        }
     }
 }
 
+/// Atomically acquire locks on every path. Fails if any is already locked.
+/// The lock is held until the returned guard is dropped.
 #[cfg(feature = "ssr")]
-fn acquire_classify_lock(path: std::path::PathBuf) -> Result<ClassifyLock, AppError> {
+fn acquire_classify_locks(paths: Vec<std::path::PathBuf>) -> Result<ClassifyLocks, AppError> {
+    if paths.is_empty() {
+        return Ok(ClassifyLocks(Vec::new()));
+    }
     let mut set = active_classifications()
         .lock()
         .unwrap_or_else(|p| p.into_inner());
-    if !set.insert(path.clone()) {
-        return Err(AppError::public(
-            "A classification is already running for this folder",
-        ));
+    for p in &paths {
+        if set.contains(p) {
+            return Err(AppError::public(
+                "A classification is already running for one of these paths",
+            ));
+        }
     }
-    Ok(ClassifyLock(path))
+    for p in &paths {
+        set.insert(p.clone());
+    }
+    drop(set);
+    Ok(ClassifyLocks(paths))
 }
 
+/// Map of collection title → id for every collection currently in
+/// `section_slug`. Used both to dedup subfolder batches and to resume a
+/// partially-completed files-only classify.
 #[cfg(feature = "ssr")]
 async fn existing_collection_titles(
     db: &mut toasty::Db,
     section_slug: &str,
-) -> Result<std::collections::HashSet<String>, AppError> {
+) -> Result<std::collections::HashMap<String, Uuid>, AppError> {
     use crate::app::model::CollectionRow;
-    use std::collections::HashSet;
+    use std::collections::HashMap;
     let rows = CollectionRow::filter(
         CollectionRow::fields()
             .section_slug()
@@ -400,7 +477,10 @@ async fn existing_collection_titles(
     .exec(db)
     .await
     .context("load existing collections")?;
-    Ok(rows.into_iter().map(|r| r.title).collect::<HashSet<_>>())
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.title, r.id))
+        .collect::<HashMap<_, _>>())
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -422,7 +502,7 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
-    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
     let clean = sanitize_rel(&rel_path)?;
     let abs = if clean.is_empty() {
@@ -536,7 +616,7 @@ pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspe
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
-    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
     let clean = sanitize_rel(&rel_path)?;
     if clean.is_empty() {
@@ -605,7 +685,9 @@ pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, A
                 JobPhase::Done => ConversionStatus::Done,
                 JobPhase::Failed(e) => ConversionStatus::Failed(e.clone()),
             },
-            None => ConversionStatus::Failed(AppError::public("Job not found")),
+            // Job evicted after terminal — treat as success so the batch
+            // doesn't flip to Failed for a job that actually succeeded.
+            None => ConversionStatus::Done,
         });
     }
     Ok(out)
@@ -636,13 +718,18 @@ pub async fn classify_unclassified_files(
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
-    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
-    // Validate all paths up front.
+    // Validate all paths up front. This also returns the canonical path of
+    // every file, which we lock to prevent concurrent classification of the
+    // same file.
     let mut upload_files = Vec::with_capacity(files.len());
     for input in &files {
         upload_files.push(resolve_upload_file(&root, &root_canon, input).await?);
     }
+
+    let paths: Vec<std::path::PathBuf> = upload_files.iter().map(|f| f.temp_path.clone()).collect();
+    let _lock = acquire_classify_locks(paths)?;
 
     let mut db = state.db.clone();
     let collection = CollectionRow::get_by_id(&mut db, &collection_id)
@@ -667,21 +754,22 @@ pub async fn classify_unclassified_files(
         season_number
     };
 
-    let mut handles = Vec::with_capacity(upload_files.len());
+    let mut prepared = Vec::with_capacity(upload_files.len());
     for file in upload_files {
-        handles.push(
-            spawn_single_file_job(
-                &state,
-                file,
-                collection_id,
-                &collection.section_slug,
-                &collection.title,
-                season_number,
-                kind,
-            )
-            .await?,
-        );
+        prepared.push(prepare_file_job(
+            file,
+            collection_id,
+            &collection.section_slug,
+            &collection.title,
+            season_number,
+            kind,
+        )?);
     }
+
+    let handles = register_and_spawn(&state, prepared).await;
+    let job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
+    spawn_lock_holder(state.clone(), job_ids, _lock);
+
     Ok(handles)
 }
 
@@ -705,7 +793,7 @@ pub async fn classify_unclassified_folder(
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
-    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
     let clean = sanitize_rel(&rel_path)?;
     if clean.is_empty() {
@@ -725,7 +813,7 @@ pub async fn classify_unclassified_folder(
         return Err(AppError::public("Not a folder"));
     }
 
-    let _lock = acquire_classify_lock(abs_canon.clone())?;
+    let _lock = acquire_classify_locks(vec![abs_canon.clone()])?;
 
     let mut db = state.db.clone();
     let subdirs = read_immediate_subdirs(&abs_canon).await?;
@@ -848,17 +936,31 @@ pub async fn classify_unclassified_folder(
         });
     }
 
-    // ── Dedup against existing collection titles ─────────────────────────────
+    // ── Dedup / resume against existing collection titles ────────────────────
     let existing = match &dest {
         Dest::Existing { slug, .. } => existing_collection_titles(&mut db, slug).await?,
         Dest::New { .. } => Default::default(),
     };
 
+    // Pre-computed collection ids per group. For files-only with a title
+    // collision in Existing mode, we reuse the existing collection so a
+    // retry after a partial failure appends rather than creating duplicates.
+    let mut group_collection_ids: Vec<Option<Uuid>> = vec![None; groups.len()];
+
     if has_subdirs {
         let before = groups.len();
-        groups.retain(|g| !existing.contains(&g.title));
-        let skipped = before - groups.len();
-        if groups.is_empty() {
+        let mut kept: Vec<Group> = Vec::with_capacity(before);
+        let mut kept_ids: Vec<Option<Uuid>> = Vec::with_capacity(before);
+        for (g, _) in groups.into_iter().zip(0..before) {
+            // Retain only groups whose title doesn't already exist.
+            if existing.contains_key(&g.title) {
+                continue;
+            }
+            kept.push(g);
+            kept_ids.push(None);
+        }
+        let skipped = before - kept.len();
+        if kept.is_empty() {
             return Err(AppError::public(format!(
                 "All {before} subfolder{} are already classified.",
                 plural(before),
@@ -870,18 +972,14 @@ pub async fn classify_unclassified_folder(
                 plural(skipped),
             );
         }
-    } else if !groups.is_empty() && existing.contains(&groups[0].title) {
-        let base = groups[0].title.clone();
-        let mut n = 2;
-        let mut candidate = format!("{base} ({n})");
-        while existing.contains(&candidate) {
-            n += 1;
-            candidate = format!("{base} ({n})");
-        }
-        groups[0].title = candidate;
+        groups = kept;
+        group_collection_ids = kept_ids;
+    } else if let Some(&id) = existing.get(&groups[0].title) {
+        // Files-only resume: append to the existing collection.
+        group_collection_ids[0] = Some(id);
     }
 
-    // ── Create section (New mode) + collections ──────────────────────────────
+    // ── Create section (New mode) ────────────────────────────────────────────
     let section_slug = match &dest {
         Dest::Existing { slug, .. } => slug.clone(),
         Dest::New { title, .. } => {
@@ -893,14 +991,19 @@ pub async fn classify_unclassified_folder(
         }
     };
 
-    // Map each group to a real collection row, then flatten to per-file jobs.
-    let mut handles: Vec<FileJobHandle> = Vec::new();
-    for group in groups {
-        let collection_id = db::insert_collection(&mut db, &section_slug, &group.title)
-            .await
-            .context("create collection")?;
+    // ── Create collections (unless reused) and prepare every file job ────────
+    let mut prepared: Vec<PreparedJob> = Vec::new();
+    let mut cleanup_watchers: Vec<(Vec<String>, std::path::PathBuf)> = Vec::new();
 
-        let mut job_ids: Vec<String> = Vec::new();
+    for (idx, group) in groups.into_iter().enumerate() {
+        let collection_id = match group_collection_ids[idx] {
+            Some(id) => id,
+            None => db::insert_collection(&mut db, &section_slug, &group.title)
+                .await
+                .context("create collection")?,
+        };
+
+        let mut group_job_ids: Vec<String> = Vec::new();
         for raw in group.files {
             let upload = crate::app::server::upload::UploadFile {
                 title: file_stem(&raw.filename),
@@ -908,51 +1011,31 @@ pub async fn classify_unclassified_folder(
                 temp_path: raw.abs,
                 size: raw.size,
             };
-            let handle = spawn_single_file_job(
-                &state,
+            let p = prepare_file_job(
                 upload,
                 collection_id,
                 &section_slug,
                 &group.title,
                 group.season,
                 kind,
-            )
-            .await?;
-            job_ids.push(handle.job_id.clone());
-            handles.push(handle);
+            )?;
+            group_job_ids.push(p.job_id.clone());
+            prepared.push(p);
         }
 
-        // Best-effort cleanup after all this group's files have moved.
-        // Runs in the background; watches the group's job ids and removes
-        // the source folder once they're all terminal.
-        let dir = group.cleanup_dir;
-        let state_bg = state.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                let jobs = state_bg.jobs.read().await;
-                let all_terminal = job_ids.iter().all(|id| {
-                    jobs.get(id)
-                        .map(|j| {
-                            matches!(
-                                j.phase,
-                                crate::app::server::convert::JobPhase::Done
-                                    | crate::app::server::convert::JobPhase::Failed(_)
-                            )
-                        })
-                        .unwrap_or(true)
-                });
-                drop(jobs);
-                if all_terminal {
-                    break;
-                }
-            }
-            if let Err(e) = tokio::fs::remove_dir(&dir).await
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                leptos::logging::warn!("[classify] could not remove {}: {e}", dir.display());
-            }
-        });
+        cleanup_watchers.push((group_job_ids, group.cleanup_dir));
+    }
+
+    let handles = register_and_spawn(&state, prepared).await;
+
+    // One lock-holder task for the whole folder. It waits for every job to
+    // reach a terminal phase, then drops the lock. The watcher per group
+    // removes the source subfolder.
+    let all_job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
+    spawn_lock_holder(state.clone(), all_job_ids, _lock);
+
+    for (job_ids, dir) in cleanup_watchers {
+        spawn_cleanup_watcher(state.clone(), job_ids, dir);
     }
 
     Ok(handles)
@@ -1011,63 +1094,179 @@ fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
     tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))
 }
 
-/// Spawn one classification job for a single file. Registers a `Job` entry
-/// and spawns a task that drives the existing single-file pipeline.
+/// One file's job, fully prepared but not yet registered or spawned.
 #[cfg(feature = "ssr")]
-async fn spawn_single_file_job(
-    state: &crate::app::server::AppState,
+struct PreparedJob {
+    name: String,
+    job_id: String,
+    payload: crate::app::server::upload::UploadPayload,
+    kind: MediaKind,
+}
+
+#[cfg(feature = "ssr")]
+fn prepare_file_job(
     file: crate::app::server::upload::UploadFile,
     collection_id: Uuid,
     section_slug: &str,
     collection_title: &str,
     season: Option<i64>,
     kind: MediaKind,
-) -> Result<FileJobHandle, AppError> {
+) -> Result<PreparedJob, AppError> {
+    use crate::app::server::upload::UploadPayload;
+
+    Ok(PreparedJob {
+        name: file.filename.clone(),
+        job_id: Uuid::new_v4().to_string(),
+        payload: UploadPayload {
+            section_slug: section_slug.to_string(),
+            collection_id,
+            title: collection_title.to_string(),
+            description: String::new(),
+            season_number: season,
+            files: vec![file],
+            poster: None,
+            temp_dir: make_dummy_tempdir()?,
+        },
+        kind,
+    })
+}
+
+/// Register every prepared job in one lock acquisition, then spawn one worker
+/// per job. Returns the handles for the client to poll.
+#[cfg(feature = "ssr")]
+async fn register_and_spawn(
+    state: &crate::app::server::AppState,
+    prepared: Vec<PreparedJob>,
+) -> Vec<FileJobHandle> {
     use crate::app::server::convert::{Job, JobPhase};
-    use crate::app::server::upload::{UploadPayload, process_upload, schedule_job_eviction};
 
-    let name = file.filename.clone();
-    let job_id = Uuid::new_v4().to_string();
+    let handles: Vec<FileJobHandle> = prepared
+        .iter()
+        .map(|p| FileJobHandle {
+            name: p.name.clone(),
+            job_id: p.job_id.clone(),
+        })
+        .collect();
 
-    let payload = UploadPayload {
-        section_slug: section_slug.to_string(),
-        collection_id,
-        title: collection_title.to_string(),
-        description: String::new(),
-        season_number: season,
-        files: vec![file],
-        poster: None,
-        temp_dir: make_dummy_tempdir()?,
-    };
-
-    // Register the job synchronously (awaited) so the client can poll
-    // immediately after this fn returns.
+    // Single write lock, one pass.
     {
-        let mut guard = state.jobs.write().await;
-        guard.insert(
-            job_id.clone(),
-            Job {
-                phase: JobPhase::Writing,
-                started_at: std::time::Instant::now(),
-            },
-        );
+        let mut jobs = state.jobs.write().await;
+        for p in &prepared {
+            jobs.insert(
+                p.job_id.clone(),
+                Job {
+                    phase: JobPhase::Writing,
+                    started_at: std::time::Instant::now(),
+                },
+            );
+        }
     }
 
-    let state_bg = state.clone();
-    let job_id_bg = job_id.clone();
-    tokio::spawn(async move {
-        if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id_bg)).await {
-            crate::app::server::convert::job_set_phase(
-                &state_bg.jobs,
-                Some(&job_id_bg),
-                JobPhase::Failed(e),
-            )
-            .await;
-        }
-        schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
-    });
+    for p in prepared {
+        spawn_job_worker(state.clone(), p);
+    }
 
-    Ok(FileJobHandle { name, job_id })
+    handles
+}
+
+/// Spawn one tokio task that drives `process_upload` for a single prepared
+/// job, bounded by a semaphore and a hard timeout.
+#[cfg(feature = "ssr")]
+fn spawn_job_worker(state: crate::app::server::AppState, p: PreparedJob) {
+    use crate::app::server::convert::JobPhase;
+    use crate::app::server::upload::{process_upload, schedule_job_eviction};
+
+    tokio::spawn(async move {
+        // Throttle concurrent file operations globally.
+        let _permit = upload_semaphore().acquire().await.ok();
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(JOB_TIMEOUT_SECS),
+            process_upload(p.payload, &state, p.kind, Some(&p.job_id)),
+        )
+        .await;
+
+        match outcome {
+            Ok(Ok(_s)) => {
+                // `process_upload` already set the phase to Done on success.
+            }
+            Ok(Err(e)) => {
+                crate::app::server::convert::job_set_phase(
+                    &state.jobs,
+                    Some(&p.job_id),
+                    JobPhase::Failed(e),
+                )
+                .await;
+            }
+            Err(_) => {
+                let e = AppError::public("Timed out").transient();
+                crate::app::server::convert::job_set_phase(
+                    &state.jobs,
+                    Some(&p.job_id),
+                    JobPhase::Failed(e),
+                )
+                .await;
+            }
+        }
+
+        schedule_job_eviction(state.jobs.clone(), p.job_id);
+    });
+}
+
+/// Wait (bounded) until every job id reaches a terminal phase.
+#[cfg(feature = "ssr")]
+async fn wait_for_terminal(state: &crate::app::server::AppState, job_ids: &[String]) {
+    use crate::app::server::convert::JobPhase;
+
+    let wait = async {
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let jobs = state.jobs.read().await;
+            let all_terminal = job_ids.iter().all(|id| {
+                jobs.get(id)
+                    .map(|j| matches!(j.phase, JobPhase::Done | JobPhase::Failed(_)))
+                    .unwrap_or(true)
+            });
+            drop(jobs);
+            if all_terminal {
+                return;
+            }
+        }
+    };
+
+    // Hard deadline so a stuck job can't leak this task forever.
+    let _ = tokio::time::timeout(Duration::from_secs(WATCHER_DEADLINE_SECS), wait).await;
+}
+
+/// Hold a `ClassifyLocks` guard for the duration of the batch, releasing it
+/// once every job has reached a terminal phase.
+#[cfg(feature = "ssr")]
+fn spawn_lock_holder(
+    state: crate::app::server::AppState,
+    job_ids: Vec<String>,
+    lock: ClassifyLocks,
+) {
+    tokio::spawn(async move {
+        let _lock = lock;
+        wait_for_terminal(&state, &job_ids).await;
+    });
+}
+
+/// Remove a source folder once every job in its group has finished.
+#[cfg(feature = "ssr")]
+fn spawn_cleanup_watcher(
+    state: crate::app::server::AppState,
+    job_ids: Vec<String>,
+    dir: std::path::PathBuf,
+) {
+    tokio::spawn(async move {
+        wait_for_terminal(&state, &job_ids).await;
+        if let Err(e) = tokio::fs::remove_dir(&dir).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            leptos::logging::warn!("[classify] could not remove {}: {e}", dir.display());
+        }
+    });
 }
 
 #[cfg(feature = "ssr")]
@@ -1112,6 +1311,12 @@ struct FileSlot {
 enum BatchPhase {
     Setup,
     Running,
+    /// Some files completed, some failed. Both counts are > 0.
+    Partial {
+        succeeded: usize,
+        failed: usize,
+        first_error: AppError,
+    },
     Done,
     Failed(AppError),
 }
@@ -1134,7 +1339,6 @@ impl BatchTracker {
         }
     }
 
-    /// Called when the server returns the per-file handles.
     fn begin(&self, handles: Vec<FileJobHandle>) {
         let slots: Vec<FileSlot> = handles
             .into_iter()
@@ -1162,34 +1366,57 @@ impl BatchTracker {
         let slots_sig = self.slots;
         let error = self.error;
         Signal::derive(move || {
+            // A poll-loop failure dominates everything else.
+            if let Some(e) = error.get() {
+                return BatchPhase::Failed(e);
+            }
+
             let slots = slots_sig.get();
             if slots.is_empty() {
-                if let Some(e) = error.get() {
-                    return BatchPhase::Failed(e);
-                }
                 return BatchPhase::Setup;
             }
+
             let statuses: Vec<Option<ConversionStatus>> =
                 slots.iter().map(|s| s.status.get()).collect();
+
+            // Not all files have reported yet.
             if statuses.iter().any(|s| s.is_none()) {
                 return BatchPhase::Running;
             }
-            if let Some(e) = statuses.iter().find_map(|s| match s {
-                Some(ConversionStatus::Failed(e)) => Some(e.clone()),
-                _ => None,
-            }) {
-                return BatchPhase::Failed(e);
+
+            let mut succeeded = 0usize;
+            let mut failed = 0usize;
+            let mut first_error: Option<AppError> = None;
+            let mut all_terminal = true;
+
+            for s in &statuses {
+                match s {
+                    Some(ConversionStatus::Done) => succeeded += 1,
+                    Some(ConversionStatus::Failed(e)) => {
+                        failed += 1;
+                        if first_error.is_none() {
+                            first_error = Some(e.clone());
+                        }
+                    }
+                    Some(_) => all_terminal = false,
+                    None => all_terminal = false,
+                }
             }
-            let all_terminal = statuses.iter().all(|s| {
-                matches!(
-                    s,
-                    Some(ConversionStatus::Done | ConversionStatus::Failed(_))
-                )
-            });
-            if all_terminal {
-                BatchPhase::Done
-            } else {
-                BatchPhase::Running
+
+            if !all_terminal {
+                return BatchPhase::Running;
+            }
+
+            match (succeeded, failed) {
+                (_, 0) => BatchPhase::Done,
+                (0, _) => BatchPhase::Failed(
+                    first_error.unwrap_or_else(|| AppError::public("Move failed")),
+                ),
+                (_, _) => BatchPhase::Partial {
+                    succeeded,
+                    failed,
+                    first_error: first_error.unwrap(),
+                },
             }
         })
     }
@@ -1886,12 +2113,15 @@ fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>) -> 
                          "bg-gradient-to-r from-cyan-400 to-blue-500", true),
                 Some(ConversionStatus::Writing) => ("Moving…".to_string(), 0.0,
                          "bg-gradient-to-r from-cyan-400 to-blue-500", true),
-                Some(ConversionStatus::Converting { progress, .. }) => (
-                    format!("Converting {:.0}%", progress * 100.0),
-                    *progress,
-                    "bg-gradient-to-r from-cyan-400 to-blue-500",
-                    false,
-                ),
+                Some(ConversionStatus::Converting { progress, .. }) => {
+                    let p = if progress.is_finite() { *progress } else { 0.0 };
+                    (
+                        format!("Converting {:.0}%", p * 100.0),
+                        p,
+                        "bg-gradient-to-r from-cyan-400 to-blue-500",
+                        false,
+                    )
+                }
                 Some(ConversionStatus::Finalizing) => (
                     "Saving…".to_string(), 1.0,
                     "bg-gradient-to-r from-cyan-400 to-blue-500", true,
@@ -1992,6 +2222,36 @@ fn PhaseFinal(
                     </div>
                 </div>
             </Show>
+
+            <Show when=move || matches!(phase.get(), BatchPhase::Partial { .. })>
+                {move || {
+                    let (succeeded, failed, msg) = match phase.get() {
+                        BatchPhase::Partial { succeeded, failed, first_error } => {
+                            (succeeded, failed, first_error.message)
+                        }
+                        _ => return ().into_any(),
+                    };
+                    view! {
+                        <div class="bg-amber-500/15 border border-amber-500/30 rounded-xl p-4 \
+                                    flex items-start gap-3">
+                            <span class="text-amber-400 text-xl leading-none shrink-0">"!"</span>
+                            <div class="min-w-0">
+                                <div class="text-amber-300 font-bold">
+                                    {format!(
+                                        "{succeeded} of {} moved",
+                                        succeeded + failed,
+                                    )}
+                                </div>
+                                <div class="text-amber-300/70 text-xs mt-1 break-all">
+                                    {format!("{failed} failed: {msg}")}
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    .into_any()
+                }}
+            </Show>
+
             <Show when=move || matches!(phase.get(), BatchPhase::Failed(_))>
                 <ErrorView
                     error={Signal::derive(move || match phase.get() {
@@ -2002,6 +2262,7 @@ fn PhaseFinal(
                     heading="Move failed"
                 />
             </Show>
+
             <div class="flex justify-end">
                 <button type="button"
                     on:click=move |_| on_close.run(())
@@ -2156,8 +2417,12 @@ fn ClassifyModal(
 
     let show_setup = Signal::derive(move || matches!(phase.get(), BatchPhase::Setup));
     let show_running = Signal::derive(move || matches!(phase.get(), BatchPhase::Running));
-    let show_final =
-        Signal::derive(move || matches!(phase.get(), BatchPhase::Done | BatchPhase::Failed(_)));
+    let show_final = Signal::derive(move || {
+        matches!(
+            phase.get(),
+            BatchPhase::Done | BatchPhase::Partial { .. } | BatchPhase::Failed(_)
+        )
+    });
 
     let can_move = Signal::derive(move || form.collection_id.get().is_some());
 
@@ -2193,9 +2458,14 @@ fn ClassifyModal(
         if is_busy.get_untracked() {
             return;
         }
-        let success = matches!(phase.get_untracked(), BatchPhase::Done);
+        // Refresh the listing for Done *and* Partial, since some files
+        // may have moved in either case.
+        let refresh = matches!(
+            phase.get_untracked(),
+            BatchPhase::Done | BatchPhase::Partial { .. }
+        );
         open.set(false);
-        if success {
+        if refresh {
             on_close.run(());
         }
     });
@@ -2492,8 +2762,12 @@ fn FolderClassifyModal(
 
     let show_setup = Signal::derive(move || matches!(phase.get(), BatchPhase::Setup));
     let show_running = Signal::derive(move || matches!(phase.get(), BatchPhase::Running));
-    let show_final =
-        Signal::derive(move || matches!(phase.get(), BatchPhase::Done | BatchPhase::Failed(_)));
+    let show_final = Signal::derive(move || {
+        matches!(
+            phase.get(),
+            BatchPhase::Done | BatchPhase::Partial { .. } | BatchPhase::Failed(_)
+        )
+    });
 
     let subtitle = Signal::derive(move || target.get().map(|e| e.name).unwrap_or_default());
 
@@ -2522,9 +2796,12 @@ fn FolderClassifyModal(
         if is_busy.get_untracked() {
             return;
         }
-        let success = matches!(phase.get_untracked(), BatchPhase::Done);
+        let refresh = matches!(
+            phase.get_untracked(),
+            BatchPhase::Done | BatchPhase::Partial { .. }
+        );
         target.set(None);
-        if success {
+        if refresh {
             on_close.run(());
         }
     });
