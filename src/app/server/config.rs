@@ -17,13 +17,25 @@ pub struct ServerSection {
 pub struct StorageSection {
     pub media_root: PathBuf,
     pub data_dir: PathBuf,
+    #[serde(default)]
+    pub unclassified_dir: Option<PathBuf>,
 }
 
 impl Config {
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
         let path = std::env::var(cfg::ENV_CONFIG).unwrap_or_else(|_| cfg::DEFAULT_PATH.into());
         let raw = std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}"))?;
-        Ok(toml::from_str(&raw)?)
+        let mut config: Config = toml::from_str(&raw)?;
+
+        // Env var wins over TOML — the deploy script can set it without editing files.
+        if let Ok(dir) = std::env::var(cfg::ENV_UNCLASSIFIED_DIR) {
+            let dir = dir.trim();
+            if !dir.is_empty() {
+                config.storage.unclassified_dir = Some(PathBuf::from(dir));
+            }
+        }
+
+        Ok(config)
     }
 
     pub fn db_path(&self) -> PathBuf {

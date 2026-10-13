@@ -33,6 +33,7 @@ mod sections;
 #[cfg(feature = "ssr")]
 pub mod server;
 mod tags;
+mod unclassified;
 mod upload_api;
 mod upload_job;
 
@@ -68,6 +69,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/s/:slug") view={Lazy::<SectionListingPage>::new()}/>
                     <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
                     <Route path=path!("/s/:slug/:id/item/:item_id") view={Lazy::<CollectionDetailPage>::new()}/>
+                    <Route path=path!("/unclassified") view={Lazy::<unclassified::UnclassifiedPage>::new()}/>
                 </ParentRoute>
             </Routes>
         </Router>

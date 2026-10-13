@@ -47,6 +47,8 @@ pub mod routes {
     pub fn poster(subdir: &str, filename: &str) -> String {
         format!("{POSTERS_URL_PREFIX}{subdir}/{filename}")
     }
+
+    pub const UNCLASSIFIED: &str = "/unclassified";
 }
 
 // ─── Storage layout ───────────────────────────────────────────────────────
@@ -73,6 +75,7 @@ pub mod config {
     pub const ENV_CONFIG: &str = "HOMEX_CONFIG";
     pub const ENV_RESET_SCHEMA: &str = "HOMEX_RESET_SCHEMA";
     pub const DEFAULT_PATH: &str = "homex.toml";
+    pub const ENV_UNCLASSIFIED_DIR: &str = "HOMEX_UNCLASSIFIED_DIR";
 }
 
 // ─── Protocol prefixes ────────────────────────────────────────────────────

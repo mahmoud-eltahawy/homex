@@ -144,6 +144,18 @@ where
 }
 
 #[component]
+fn InboxIcon() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 12h-6l-2 3h-4l-2-3H2"/>
+            <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+        </svg>
+    }
+}
+
+#[component]
 fn DesktopNavLinks() -> impl IntoView {
     view! {
         <div class="hidden md:flex items-center gap-2">
@@ -151,6 +163,11 @@ fn DesktopNavLinks() -> impl IntoView {
                 let icon = icon_for(s.media_kind(), s.nested);
                 view! { <NavLink href=s.href() label=s.title icon=icon/> }
             })}
+            <NavLink
+                href=crate::app::constants::routes::UNCLASSIFIED
+                icon={InboxIcon()}
+                label="Unclassified"
+            />
         </div>
     }
 }

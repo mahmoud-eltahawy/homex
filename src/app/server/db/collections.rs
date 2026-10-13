@@ -289,6 +289,7 @@ pub async fn fetch_collection_summaries(
             id: c.id,
             title: c.title,
             section_slug: c.section_slug,
+            nested: section.nested, // <-- new
         }));
     }
 

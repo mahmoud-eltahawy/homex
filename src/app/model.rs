@@ -242,6 +242,7 @@ pub struct CollectionSummary {
     pub title: String,
     pub section_slug: String,
     pub section_title: String,
+    pub nested: bool,
 }
 
 // ─── Row → domain conversions ─────────────────────────────────────────────
