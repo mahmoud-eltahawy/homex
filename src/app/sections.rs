@@ -92,8 +92,9 @@ pub async fn create_section(
         return Err(AppError::validation(messages::NAME_REQUIRED));
     }
 
-    let kind = MediaKind::try_from(media_kind.as_str())
-        .map_err(|e| AppError::internal("invalid media_kind", e))?;
+    // `media_kind` is a client parameter. A malformed value is a client bug
+    // and the user should see the constraint, not "Internal error".
+    let kind = MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
     let prefix = prefix_for(kind, nested);
 
     for attempt in 0..4 {
@@ -140,8 +141,9 @@ pub async fn update_section(
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    MediaKind::try_from(media_kind.as_str())
-        .map_err(|e| AppError::internal("invalid media_kind", e))?;
+    // Same reasoning as `create_section` — client-supplied enum, client
+    // error if malformed.
+    MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
     db::update_section(&mut state.db, id, &title, &media_kind, nested)
         .await
         .context("update section")?;

@@ -27,7 +27,9 @@ pub enum ConversionStatus {
     },
     Finalizing,
     Done,
-    Failed(String),
+    /// Carries the original `AppError` from the server, including its
+    /// `Disposition`. The client no longer reconstructs a synthetic error.
+    Failed(AppError),
 }
 
 #[server(input = MultipartFormData)]
@@ -78,10 +80,11 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
 
     tokio::spawn(async move {
         if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id_bg)).await {
+            // `e` is a fully-formed `AppError` — no flattening.
             crate::app::server::convert::job_set_phase(
                 &state_bg.jobs,
                 Some(&job_id_bg),
-                JobPhase::Failed(e.message.clone()),
+                JobPhase::Failed(e),
             )
             .await;
             schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);

@@ -8,6 +8,8 @@ use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+use crate::app::error::AppError;
+
 // ─── Job state ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -21,7 +23,9 @@ pub enum JobPhase {
     },
     Finalizing,
     Done,
-    Failed(String),
+    /// Carries the full `AppError` so the client's `ErrorView` can read
+    /// `disposition` directly instead of reconstructing a synthetic one.
+    Failed(AppError),
 }
 
 #[derive(Clone, Debug)]
@@ -114,7 +118,7 @@ pub async fn ffprobe_duration(path: &Path) -> f64 {
     {
         Ok(o) => o,
         Err(e) => {
-            leptos::logging::warn!("[ffprobe] spawn failed for {}: {e}", path.display(),);
+            leptos::logging::warn!("[ffprobe] spawn failed for {}: {e}", path.display());
             return 0.0;
         }
     };

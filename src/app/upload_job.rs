@@ -68,8 +68,11 @@ async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
             Err(_) => {
                 consecutive_errors += 1;
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    // Synthesize a transient failure. This is the only place
+                    // we fabricate an `AppError` — the connection died, so
+                    // there's nothing from the server to trust.
                     signals.status.set(Some(ConversionStatus::Failed(
-                        "Lost contact with the server".into(),
+                        AppError::public("Lost contact with the server").transient(),
                     )));
                     break;
                 }
@@ -193,8 +196,11 @@ fn DoneStage() -> impl IntoView {
 }
 
 #[component]
-fn FailedStage(#[prop(into)] error: String) -> impl IntoView {
-    let signal = Signal::derive(move || Some(AppError::public(error.clone()).transient()));
+fn FailedStage(error: AppError) -> impl IntoView {
+    // The `AppError` from the server already carries the right disposition —
+    // conversion failures are transient because a retry after fixing the
+    // input file can succeed. No wrapper, no reconstruction.
+    let signal = Signal::derive(move || Some(error.clone()));
     view! {
         <ErrorView
             error=signal
