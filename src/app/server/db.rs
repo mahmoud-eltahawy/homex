@@ -15,7 +15,7 @@ use super::Config;
 pub use collections::{
     CollectionDeletion, CollectionField, CollectionMove, MoveCollectionError,
     delete_collection_cascade, fetch_collection_detail, fetch_collection_summaries,
-    fetch_collections, fetch_collections_count, insert_empty_collection,
+    fetch_collections, fetch_collections_count, insert_collection, insert_empty_collection,
     move_collection_to_section, update_collection_field,
 };
 pub use files::{fetch_file_path, insert_file};

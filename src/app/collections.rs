@@ -291,3 +291,19 @@ pub async fn move_items_to_collection(
         .context("move items to collection")?;
     Ok(())
 }
+
+#[server]
+pub async fn create_collection_named(
+    section_slug: String,
+    title: String,
+) -> Result<Uuid, AppError> {
+    use crate::app::server::AppState;
+    let mut state: AppState = expect_context();
+    let t = title.trim();
+    if t.is_empty() {
+        return Err(AppError::validation(messages::TITLE_REQUIRED));
+    }
+    db::insert_collection(&mut state.db, &section_slug, t)
+        .await
+        .context("insert named collection")
+}

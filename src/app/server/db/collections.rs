@@ -140,25 +140,7 @@ pub async fn fetch_collection_detail(
 }
 
 pub async fn insert_empty_collection(db: &mut Db, section_slug: &str) -> toasty::Result<Uuid> {
-    let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.to_string()))
-        .first()
-        .exec(db)
-        .await?
-        .ok_or_else(|| err_not_found("section"))?;
-
-    let next = next_position(db, section.id).await?;
-    let row = toasty::create!(CollectionRow {
-        section_id: section.id,
-        section_slug: section.slug.clone(),
-        title: "بدون عنوان".to_string(),
-        poster: None,
-        description: None,
-        position: next,
-        items_count: 0,
-    })
-    .exec(db)
-    .await?;
-    Ok(row.id)
+    insert_collection(db, section_slug, "بدون عنوان").await
 }
 
 async fn next_position(db: &mut Db, section_id: Uuid) -> toasty::Result<i64> {
@@ -336,4 +318,30 @@ pub async fn delete_collection_cascade(
         media_paths,
         poster_url,
     })
+}
+
+pub async fn insert_collection(
+    db: &mut Db,
+    section_slug: &str,
+    title: &str,
+) -> toasty::Result<Uuid> {
+    let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.to_string()))
+        .first()
+        .exec(db)
+        .await?
+        .ok_or_else(|| err_not_found("section"))?;
+
+    let next = next_position(db, section.id).await?;
+    let row = toasty::create!(CollectionRow {
+        section_id: section.id,
+        section_slug: section.slug.clone(),
+        title: title.to_string(),
+        poster: None,
+        description: None,
+        position: next,
+        items_count: 0,
+    })
+    .exec(db)
+    .await?;
+    Ok(row.id)
 }

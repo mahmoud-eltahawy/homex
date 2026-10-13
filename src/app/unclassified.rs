@@ -16,8 +16,9 @@ use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::app::collections::create_collection_named;
 use crate::app::error::AppError;
-use crate::app::error_view::{ErrorStyle, ErrorView};
+use crate::app::error_view::{ErrorStyle, ErrorView, action_error};
 use crate::app::model::{CollectionSummary, MediaKind};
 use crate::app::resource_view::ResourceView;
 use crate::app::upload_api::{ConversionStatus, poll_conversion};
@@ -40,9 +41,6 @@ pub struct UnclassifiedEntry {
     pub ext: Option<String>,
 }
 
-/// A section of a given media kind, together with its collections. Used by the
-/// classify picker so the user sees structure ("Section → Collection") rather
-/// than an undifferentiated list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SectionWithCollections {
     pub id: Uuid,
@@ -185,10 +183,6 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
     Ok(entries)
 }
 
-/// Sections of the given media kind with their collections, for the classify
-/// picker. Sections with zero collections are still returned — the UI shows
-/// them with a hint, so the user knows they exist and can go create a
-/// collection there.
 #[server]
 pub async fn fetch_sections_with_collections(
     media_kind: String,
@@ -237,11 +231,6 @@ pub async fn fetch_sections_with_collections(
     Ok(out)
 }
 
-/// Kick off a classify job. Returns the job id for progress polling.
-///
-/// `title` becomes the item's display name. The media is stored on disk under a
-/// folder named after the destination collection — so all items in a
-/// collection share one directory — while the item row carries `title`.
 #[server]
 pub async fn classify_unclassified_file(
     rel_path: String,
@@ -321,10 +310,6 @@ pub async fn classify_unclassified_file(
         }
     };
 
-    // Series detail pages default the season selector to 1 and then filter
-    // `season_number == Some(1)`. An item classified with `None` would be
-    // invisible. Default to season 1 for series so the item shows up
-    // immediately.
     let is_video_series = section.nested && kind == MediaKind::Video;
     let season_number = if is_video_series && season_number.is_none() {
         Some(1)
@@ -344,8 +329,6 @@ pub async fn classify_unclassified_file(
     let payload = UploadPayload {
         section_slug: collection.section_slug.clone(),
         collection_id,
-        // Storage slug is derived from the collection title, so all items in a
-        // collection land under one directory.
         title: collection.title.clone(),
         description: String::new(),
         season_number,
@@ -417,9 +400,6 @@ impl ClassifyJob {
             match val {
                 Ok(id) => active_job.set(Some(id)),
                 Err(e) => {
-                    // The server fn itself failed (config error, validation,
-                    // etc.) — surface it as a terminal failure so the modal
-                    // switches to the final state instead of hanging.
                     status.set(Some(ConversionStatus::Failed(e.clone())));
                     result.set(Some(Err(e)));
                 }
@@ -531,8 +511,6 @@ impl LazyRoute for UnclassifiedPage {
 
         let classify = ClassifyJob::new();
 
-        // Refetch only after the user dismisses the modal — otherwise the
-        // success banner unmounts before it can be read.
         let on_modal_close = Callback::new(move |_: ()| {
             refresh.update(|n| *n = n.wrapping_add(1));
         });
@@ -792,8 +770,31 @@ fn ClassifyModal(
     let chosen_collection_id = RwSignal::new(None::<Uuid>);
     let season = RwSignal::new(String::new());
 
-    // Reset per-file UI state whenever a new file is selected. Pre-fill the
-    // title with the file's stem (filename minus extension).
+    // ─── Inline "create new collection" state ─────────────────────────────────
+
+    let creating_new = RwSignal::new(false);
+    let new_collection_title = RwSignal::new(String::new());
+
+    let create_action: Action<(String, String), Result<Uuid, AppError>> =
+        Action::new_local(|(slug, t): &(String, String)| {
+            create_collection_named(slug.clone(), t.clone())
+        });
+
+    // On successful create: refetch sections, select the new collection, exit
+    // creating mode. The refetched resource causes `chosen_section.get()` to
+    // now include the new collection, so the `<select>` re-renders with an
+    // option matching `chosen_collection_id`.
+    Effect::new(move |_| {
+        if let Some(Ok(id)) = create_action.value().get() {
+            sections.refetch();
+            chosen_collection_id.set(Some(id));
+            creating_new.set(false);
+            new_collection_title.set(String::new());
+        }
+    });
+
+    // ─── Reset on file/section change ─────────────────────────────────────────
+
     Effect::new(move |_| {
         match selected.get() {
             Some(entry) => title.set(file_stem(&entry.name)),
@@ -802,20 +803,26 @@ fn ClassifyModal(
         chosen_section_slug.set(String::new());
         chosen_collection_id.set(None);
         season.set(String::new());
+        creating_new.set(false);
+        new_collection_title.set(String::new());
     });
 
-    // Reset the running job whenever the modal closes.
     Effect::new(move |_| {
         if selected.get().is_none() {
             classify.reset();
         }
     });
 
-    // When the section changes, drop the collection selection.
+    // When the section changes, drop the collection selection and close any
+    // in-progress "create new" panel.
     Effect::new(move |_| {
         let _ = chosen_section_slug.get();
         chosen_collection_id.set(None);
+        creating_new.set(false);
+        new_collection_title.set(String::new());
     });
+
+    // ─── Derived signals ──────────────────────────────────────────────────────
 
     let chosen_section: Signal<Option<SectionWithCollections>> = Signal::derive(move || {
         let slug = chosen_section_slug.get();
@@ -835,13 +842,13 @@ fn ClassifyModal(
         chosen_section.get().map(|s| s.nested).unwrap_or(false)
     });
 
-    // Pre-fill season 1 for series so the submitted value matches the server
-    // default and the item is immediately visible.
     Effect::new(move |_| {
         if chosen_is_series.get() && season.get_untracked().trim().is_empty() {
             season.set("1".to_string());
         }
     });
+
+    // ─── Actions ──────────────────────────────────────────────────────────────
 
     let try_close = Callback::new(move |_: ()| {
         let busy =
@@ -870,6 +877,38 @@ fn ClassifyModal(
         classify.dispatch(entry.rel_path.clone(), col, t, season_num);
     });
 
+    // Create-new handlers. Both fire the same action; the success effect above
+    // selects the new collection.
+    let submit_create = Callback::new(move |_: ()| {
+        let slug = chosen_section_slug.get_untracked();
+        if slug.is_empty() {
+            return;
+        }
+        let t = new_collection_title.get_untracked();
+        let t = t.trim();
+        if t.is_empty() {
+            return;
+        }
+        create_action.dispatch((slug, t.to_string()));
+    });
+
+    let cancel_create = Callback::new(move |_: ()| {
+        creating_new.set(false);
+        new_collection_title.set(String::new());
+    });
+
+    // Pre-fill the "new collection" input with the file's stem the first time
+    // the user opens the panel — a good guess for a single-file collection.
+    Effect::new(move |_| {
+        if creating_new.get() && new_collection_title.get_untracked().is_empty() {
+            if let Some(entry) = selected.get_untracked() {
+                new_collection_title.set(file_stem(&entry.name));
+            }
+        }
+    });
+
+    // ─── Phase signals ────────────────────────────────────────────────────────
+
     let show_setup = Signal::derive(move || classify.status.get().is_none());
     let show_progress =
         Signal::derive(move || classify.status.get().is_some() && classify.result.get().is_none());
@@ -879,8 +918,12 @@ fn ClassifyModal(
 
     let status_signal = Signal::derive(move || classify.status.get());
     let error_signal = classify.error();
+    let create_error = action_error(create_action);
+    let create_pending = create_action.pending();
 
     let can_move = Signal::derive(move || chosen_collection_id.get().is_some());
+
+    // ─── View ─────────────────────────────────────────────────────────────────
 
     view! {
         {move || {
@@ -987,55 +1030,135 @@ fn ClassifyModal(
                                                               uppercase tracking-wider">
                                                     "Collection"
                                                 </label>
-                                                {move || {
-                                                    let Some(s) = chosen_section.get() else {
-                                                        return ().into_any();
-                                                    };
-                                                    if s.collections.is_empty() {
-                                                        return view! {
-                                                            <div class="mt-1 text-sm text-gray-500 \
-                                                                        bg-white/5 border border-white/10 \
-                                                                        rounded-lg px-3 py-2">
-                                                                "No collections in this section yet. \
-                                                                 Create one first."
-                                                            </div>
-                                                        }
-                                                        .into_any();
-                                                    }
-                                                    view! {
-                                                        <select
-                                                            prop:value=move || {
-                                                                chosen_collection_id
-                                                                    .get()
-                                                                    .map(|u| u.to_string())
-                                                                    .unwrap_or_default()
-                                                            }
-                                                            on:change=move |e| {
-                                                                let v = event_target_value(&e);
-                                                                chosen_collection_id.set(
-                                                                    Uuid::parse_str(&v).ok(),
-                                                                );
-                                                            }
-                                                            class="mt-1 w-full bg-white/10 text-white \
-                                                                   rounded-lg px-3 py-1.5 text-sm \
-                                                                   focus:outline-none focus:ring-1 \
-                                                                   focus:ring-cyan-400"
+
+                                                // Existing collection dropdown
+                                                <Show when=move || !creating_new.get()>
+                                                    <div class="mt-1 flex items-stretch gap-2">
+                                                        <div class="flex-1">
+                                                            {move || {
+                                                                let Some(s) = chosen_section.get() else {
+                                                                    return ().into_any();
+                                                                };
+                                                                if s.collections.is_empty() {
+                                                                    return view! {
+                                                                        <div class="text-sm text-gray-500 \
+                                                                                    bg-white/5 border border-white/10 \
+                                                                                    rounded-lg px-3 py-2">
+                                                                            "No collections yet — create one."
+                                                                        </div>
+                                                                    }
+                                                                    .into_any();
+                                                                }
+                                                                view! {
+                                                                    <select
+                                                                        prop:value=move || {
+                                                                            chosen_collection_id
+                                                                                .get()
+                                                                                .map(|u| u.to_string())
+                                                                                .unwrap_or_default()
+                                                                        }
+                                                                        on:change=move |e| {
+                                                                            let v = event_target_value(&e);
+                                                                            chosen_collection_id.set(
+                                                                                Uuid::parse_str(&v).ok(),
+                                                                            );
+                                                                        }
+                                                                        class="w-full bg-white/10 text-white \
+                                                                               rounded-lg px-3 py-1.5 text-sm \
+                                                                               focus:outline-none focus:ring-1 \
+                                                                               focus:ring-cyan-400"
+                                                                    >
+                                                                        <option value="">
+                                                                            "Choose a collection…"
+                                                                        </option>
+                                                                        {s.collections
+                                                                            .into_iter()
+                                                                            .map(|c| view! {
+                                                                                <option value=c.id.to_string()>
+                                                                                    {c.title.clone()}
+                                                                                </option>
+                                                                            })
+                                                                            .collect_view()}
+                                                                    </select>
+                                                                }
+                                                                .into_any()
+                                                            }}
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            on:click=move |_| creating_new.set(true)
+                                                            class="shrink-0 px-3 rounded-lg \
+                                                                   bg-white/10 hover:bg-white/20 \
+                                                                   text-white text-sm transition \
+                                                                   whitespace-nowrap"
+                                                            title="Create a new collection in this section"
                                                         >
-                                                            <option value="">
-                                                                "Choose a collection…"
-                                                            </option>
-                                                            {s.collections
-                                                                .into_iter()
-                                                                .map(|c| view! {
-                                                                    <option value=c.id.to_string()>
-                                                                        {c.title.clone()}
-                                                                    </option>
-                                                                })
-                                                                .collect_view()}
-                                                        </select>
-                                                    }
-                                                    .into_any()
-                                                }}
+                                                            "+ New"
+                                                        </button>
+                                                    </div>
+                                                </Show>
+
+                                                // Inline "create new collection" form
+                                                <Show when=move || creating_new.get()>
+                                                    <div class="mt-1 space-y-2">
+                                                        <div class="flex items-stretch gap-2">
+                                                            <input
+                                                                type="text"
+                                                                prop:value=move || new_collection_title.get()
+                                                                on:input=move |e| {
+                                                                    new_collection_title.set(event_target_value(&e))
+                                                                }
+                                                                on:keydown=move |e| {
+                                                                    if e.key() == "Enter" {
+                                                                        e.prevent_default();
+                                                                        submit_create.run(());
+                                                                    } else if e.key() == "Escape" {
+                                                                        cancel_create.run(());
+                                                                    }
+                                                                }
+                                                                autofocus=true
+                                                                placeholder="New collection title"
+                                                                class="flex-1 bg-white/10 text-white \
+                                                                       rounded-lg px-3 py-1.5 text-sm \
+                                                                       focus:outline-none focus:ring-1 \
+                                                                       focus:ring-cyan-400"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                on:click=move |_| submit_create.run(())
+                                                                disabled=move || {
+                                                                    create_pending.get()
+                                                                        || new_collection_title
+                                                                            .get()
+                                                                            .trim()
+                                                                            .is_empty()
+                                                                }
+                                                                class="shrink-0 px-3 rounded-lg \
+                                                                       bg-cyan-500/30 hover:bg-cyan-500/40 \
+                                                                       text-white text-sm font-medium \
+                                                                       transition disabled:opacity-50"
+                                                            >
+                                                                {move || if create_pending.get() {
+                                                                    "Creating…"
+                                                                } else {
+                                                                    "Create"
+                                                                }}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                on:click=move |_| cancel_create.run(())
+                                                                disabled=move || create_pending.get()
+                                                                class="shrink-0 px-3 rounded-lg \
+                                                                       bg-white/5 hover:bg-white/15 \
+                                                                       text-gray-300 text-sm \
+                                                                       transition disabled:opacity-50"
+                                                            >
+                                                                "Cancel"
+                                                            </button>
+                                                        </div>
+                                                        <ErrorView error=create_error/>
+                                                    </div>
+                                                </Show>
                                             </div>
                                         </Show>
 
