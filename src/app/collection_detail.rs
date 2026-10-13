@@ -816,7 +816,7 @@ fn MoveCollectionPicker(
             .value()
             .get()
             .and_then(|r| r.err())
-            .map(|e| e.to_string())
+            .map(|e| crate::app::error::user_message(&e))
     });
 
     view! {
@@ -1024,7 +1024,7 @@ fn OrganizeItemsPanel(
                 </button>
 
                 {move || move_action.value().get().and_then(|r| r.err()).map(|e| view! {
-                    <span class="text-red-300 text-sm">{e.to_string()}</span>
+                    <span class="text-red-300 text-sm">{crate::app::error::user_message(&e)}</span>
                 })}
             </div>
         </div>

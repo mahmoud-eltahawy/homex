@@ -3,16 +3,12 @@ use leptos::prelude::ServerFnError;
 use std::path::Path;
 use uuid::Uuid;
 
+use crate::app::error::AppError;
+
 const ALLOWED_POSTER_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
 
 const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 
-/// Resolve the canonical extension for a poster upload.
-///
-/// `infer` checks the magic bytes first — this defends against a client
-/// that names a non-image as `.jpg`, and against a client that names a
-/// PNG as `.jpeg`. Falls back to the client-supplied extension only if
-/// `infer` can't classify the bytes at all.
 fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, ServerFnError> {
     let candidate = match infer::get(bytes) {
         Some(kind) => kind.extension().to_string(),
@@ -23,7 +19,7 @@ fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, Se
         .iter()
         .find(|allowed| allowed.eq_ignore_ascii_case(&candidate))
         .copied()
-        .ok_or_else(|| ServerFnError::new(format!("Unsupported image format: .{candidate}")))
+        .ok_or_else(|| AppError::public(format!("Unsupported image format: .{candidate}")).into())
 }
 
 pub async fn write_poster(
@@ -34,10 +30,11 @@ pub async fn write_poster(
     bytes: &[u8],
 ) -> Result<String, ServerFnError> {
     if bytes.len() > MAX_POSTER_BYTES {
-        return Err(ServerFnError::new(format!(
+        return Err(AppError::public(format!(
             "Image size exceeds {} MB",
             MAX_POSTER_BYTES / 1024 / 1024
-        )));
+        ))
+        .into());
     }
 
     let ext = resolve_poster_ext(client_ext, bytes)?;
@@ -45,12 +42,12 @@ pub async fn write_poster(
     let dir = data_dir.join(storage::POSTERS_DIR).join(subdir);
     tokio::fs::create_dir_all(&dir)
         .await
-        .map_err(|e| ServerFnError::new(format!("mkdir posters: {e}")))?;
+        .map_err(|e| AppError::internal("mkdir posters", e))?;
 
     let filename = format!("{entity_id}.{ext}");
     tokio::fs::write(dir.join(&filename), bytes)
         .await
-        .map_err(|e| ServerFnError::new(format!("write poster: {e}")))?;
+        .map_err(|e| AppError::internal("write poster", e))?;
 
     Ok(routes::poster(subdir, &filename))
 }

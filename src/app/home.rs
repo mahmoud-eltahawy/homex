@@ -8,6 +8,7 @@ use crate::app::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
         collections_paginated, refetch_on_success,
     },
+    error,
     icons::{DeleteIcon, ViewAllIcon, icon_for},
     inline_edit::{EditableText, use_edit_mode},
     model::{Collection, MediaKind, Section},
@@ -241,7 +242,7 @@ fn SectionHeader(
                 .value()
                 .get()
                 .and_then(|r| r.err())
-                .map(|e| e.to_string())
+                .map(|e| error::user_message(&e))
         })
     };
 
@@ -428,7 +429,7 @@ fn use_new_section_form(
             title.set(String::new());
             error.set(None);
         }
-        Some(Err(e)) => error.set(Some(e.to_string())),
+        Some(Err(e)) => error.set(Some(error::user_message(&e))),
         None => {}
     });
 

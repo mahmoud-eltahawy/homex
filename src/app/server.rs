@@ -1,5 +1,4 @@
-use crate::app::constants::{self, messages, protocols, storage};
-use leptos::prelude::ServerFnError;
+use crate::app::constants::{self, protocols, storage};
 use toasty::Db;
 use tokio_util::sync::CancellationToken;
 
@@ -14,27 +13,16 @@ pub mod upload;
 pub use config::Config;
 pub use convert::Jobs;
 
+// Re-export the centralized error API so `use crate::app::server::{ToastyErr, db}`
+// keeps working across the codebase.
+pub use crate::app::error::{AppError, ErrorContext, LogLevel, ToastyErr};
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
     pub config: Config,
     pub jobs: Jobs,
     pub cancel: CancellationToken,
-}
-
-/// Toasty errors become a generic message at the API boundary. The real
-/// error is logged; the caller sees nothing useful about the DB.
-pub trait ToastyErr<T> {
-    fn srv(self) -> Result<T, ServerFnError>;
-}
-
-impl<T> ToastyErr<T> for toasty::Result<T> {
-    fn srv(self) -> Result<T, ServerFnError> {
-        self.map_err(|e| {
-            leptos::logging::error!("[db] {e}");
-            ServerFnError::new(messages::INTERNAL_ERROR)
-        })
-    }
 }
 
 pub async fn remove_media_files(state: &AppState, rel_paths: &[String]) {

@@ -62,15 +62,12 @@ pub fn TagList(tags: Vec<Tag>, #[prop(optional)] max: Option<usize>) -> impl Int
 pub async fn fetch_all_tags() -> Result<Vec<Tag>, ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    db::fetch_all_tags(&mut state.db).await.srv()
+    db::fetch_all_tags(&mut state.db)
+        .await
+        .srv_ctx("fetch all tags")
 }
 
 // ─── Shared tag cache ─────────────────────────────────────────────────────
-//
-// Provided once at the Layout level so every `TagEditor` on the page shares
-// the same list of tag names for autocompletion. `refresh()` bumps a tick
-// that the underlying `Resource` depends on, forcing a re-query after any
-// commit so a newly-created tag appears in future suggestions.
 
 #[derive(Clone, Copy)]
 pub struct TagsCache {
@@ -117,7 +114,6 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
     let input = RwSignal::new(String::new());
     let focused = RwSignal::new(false);
 
-    // All known tag names, loaded from the shared cache.
     let all_names: Memo<Vec<String>> = Memo::new(move |_| {
         cache
             .all
@@ -185,7 +181,6 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         _ => {}
     });
 
-    // Substring matches from the cache, minus tags already on this entity.
     let suggestions: Memo<Vec<String>> = Memo::new(move |_| {
         let q = input.get().trim().to_string();
         if q.is_empty() {
@@ -201,7 +196,6 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
             .collect()
     });
 
-    // Typed text matches an existing tag whose exact name isn't yet added.
     let exact_existing: Memo<bool> = Memo::new(move |_| {
         let q = input.get().trim().to_string();
         if q.is_empty() {
@@ -214,7 +208,6 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         all_names.get().iter().any(|n| ci_eq(n, &q))
     });
 
-    // Typed text doesn't match anything in the DB → offer to create a new tag.
     let show_create: Memo<bool> = Memo::new(move |_| {
         let q = input.get().trim().to_string();
         if q.is_empty() {
@@ -224,7 +217,6 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         !added.iter().any(|a| ci_eq(a, &q)) && !all_names.get().iter().any(|n| ci_eq(n, &q))
     });
 
-    // Typed text is already attached to this entity.
     let already_added: Memo<bool> = Memo::new(move |_| {
         let q = input.get().trim().to_string();
         if q.is_empty() {

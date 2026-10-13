@@ -5,6 +5,9 @@ use server_fn::codec::{MultipartData, MultipartFormData};
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
 
+#[cfg(feature = "ssr")]
+use crate::app::error::AppError;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadResult {
     pub success: bool,
@@ -41,9 +44,10 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
 
     let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
         .await
-        .srv()?
-        .ok_or_else(|| ServerFnError::new(messages::SECTION_NOT_FOUND))?;
-    let kind = MediaKind::try_from(kind_str.as_str()).map_err(ServerFnError::new)?;
+        .srv_ctx("fetch section kind for upload")?
+        .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
+    let kind = MediaKind::try_from(kind_str.as_str())
+        .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
 
     validate_extensions(&payload, kind)?;
 
@@ -76,7 +80,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, ServerFnE
             crate::app::server::convert::job_set_phase(
                 &state_bg.jobs,
                 Some(&job_id_bg),
-                JobPhase::Failed(e.to_string()),
+                JobPhase::Failed(crate::app::error::user_message(&e)),
             )
             .await;
             schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
@@ -99,7 +103,7 @@ pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, ServerF
     let jobs = state.jobs.read().await;
     let job = jobs
         .get(&job_id)
-        .ok_or_else(|| ServerFnError::new(messages::JOB_NOT_FOUND))?;
+        .ok_or_else(|| AppError::public(messages::JOB_NOT_FOUND))?;
 
     Ok(match &job.phase {
         JobPhase::Writing => ConversionStatus::Writing,

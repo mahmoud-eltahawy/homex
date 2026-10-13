@@ -6,6 +6,9 @@ use uuid::Uuid;
 use crate::app::constants::messages;
 
 #[cfg(feature = "ssr")]
+use crate::app::error::AppError;
+
+#[cfg(feature = "ssr")]
 use crate::app::server::{ToastyErr, db};
 
 #[server]
@@ -14,9 +17,11 @@ pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), ServerFn
     let mut state: AppState = expect_context();
     let t = title.trim();
     if t.is_empty() {
-        return Err(ServerFnError::new(messages::TITLE_REQUIRED));
+        return Err(AppError::validation(messages::TITLE_REQUIRED).into());
     }
-    db::update_section_title(&mut state.db, id, t).await.srv()?;
+    db::update_section_title(&mut state.db, id, t)
+        .await
+        .srv_ctx("patch section title")?;
     Ok(())
 }
 
@@ -24,7 +29,9 @@ pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), ServerFn
 pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    db::set_section_tags(&mut state.db, id, &tags).await.srv()?;
+    db::set_section_tags(&mut state.db, id, &tags)
+        .await
+        .srv_ctx("patch section tags")?;
     Ok(())
 }
 
@@ -32,7 +39,9 @@ pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), Serve
 pub async fn fetch_sections() -> Result<Vec<Section>, ServerFnError> {
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    db::fetch_sections(&mut state.db).await.srv()
+    db::fetch_sections(&mut state.db)
+        .await
+        .srv_ctx("fetch sections")
 }
 
 #[server]
@@ -41,8 +50,8 @@ pub async fn fetch_section_by_slug(slug: String) -> Result<Section, ServerFnErro
     let mut state: AppState = expect_context();
     db::fetch_section_by_slug(&mut state.db, &slug)
         .await
-        .srv()?
-        .ok_or_else(|| ServerFnError::new(messages::SECTION_NOT_FOUND))
+        .srv_ctx("fetch section by slug")?
+        .ok_or_else(|| AppError::not_found("section").into())
 }
 
 #[server]
@@ -80,10 +89,10 @@ pub async fn create_section(
 
     let title = title.trim().to_string();
     if title.is_empty() {
-        return Err(ServerFnError::new(messages::NAME_REQUIRED));
+        return Err(AppError::validation(messages::NAME_REQUIRED).into());
     }
 
-    let kind = MediaKind::try_from(media_kind.as_str()).map_err(ServerFnError::new)?;
+    let kind = MediaKind::try_from(media_kind.as_str()).map_err(|e| AppError::public(e))?;
     let prefix = prefix_for(kind, nested);
 
     for attempt in 0..4 {
@@ -91,13 +100,15 @@ pub async fn create_section(
 
         if db::fetch_section_by_slug(&mut state.db, &slug)
             .await
-            .srv()?
+            .srv_ctx("check slug uniqueness")?
             .is_some()
         {
             if attempt < 3 {
                 continue;
             }
-            return Err(ServerFnError::new(messages::UNIQUE_SECTION_ID_FAILED));
+            return Err(
+                AppError::internal("create section", messages::UNIQUE_SECTION_ID_FAILED).into(),
+            );
         }
 
         match db::insert_section(&mut state.db, &slug, &title, media_kind.as_str(), nested).await {
@@ -107,11 +118,11 @@ pub async fn create_section(
                 if attempt < 3 {
                     continue;
                 }
-                return Err(ServerFnError::new(messages::CREATE_SECTION_FAILED));
+                return Err(AppError::internal("create section", e).into());
             }
         }
     }
-    Err(ServerFnError::new(messages::UNIQUE_SECTION_ID_FAILED))
+    Err(AppError::internal("create section", messages::UNIQUE_SECTION_ID_FAILED).into())
 }
 
 #[server]
@@ -124,10 +135,10 @@ pub async fn update_section(
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     let mut state: AppState = expect_context();
-    MediaKind::try_from(media_kind.as_str()).map_err(ServerFnError::new)?;
+    MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
     db::update_section(&mut state.db, id, &title, &media_kind, nested)
         .await
-        .srv()?;
+        .srv_ctx("update section")?;
     Ok(())
 }
 
@@ -137,13 +148,17 @@ pub async fn delete_section(id: Uuid) -> Result<(), ServerFnError> {
     use crate::app::server::db::DeleteSectionOutcome;
 
     let mut state: AppState = expect_context();
-    match db::delete_section(&mut state.db, id).await.srv()? {
+    match db::delete_section(&mut state.db, id)
+        .await
+        .srv_ctx("delete section")?
+    {
         DeleteSectionOutcome::Deleted => Ok(()),
-        DeleteSectionOutcome::NotEmpty { collection_count } => Err(ServerFnError::new(format!(
+        DeleteSectionOutcome::NotEmpty { collection_count } => Err(AppError::public(format!(
             "{} ({} collection{})",
             messages::SECTION_NOT_EMPTY,
             collection_count,
             if collection_count == 1 { "" } else { "s" },
-        ))),
+        ))
+        .into()),
     }
 }

@@ -7,23 +7,19 @@ use server_fn::codec::MultipartData;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+use crate::app::error::AppError;
+
 use super::naming::extension_of;
 use super::types::{UploadFile, UploadPayload};
 
-// ─── Multipart form field names (server-side) ─────────────────────────────
-
 mod fields;
-
-// ─── Temp dir management ──────────────────────────────────────────────────
 
 fn fresh_temp_dir() -> Result<tempfile::TempDir, ServerFnError> {
     tempfile::Builder::new()
         .prefix("homex-upload-")
         .tempdir()
-        .map_err(|e| ServerFnError::new(format!("mkdir temp: {e}")))
+        .map_err(|e| AppError::internal("create upload temp dir", e).into())
 }
-
-// ─── Accumulator ──────────────────────────────────────────────────────────
 
 struct StagedTempFile {
     filename: String,
@@ -42,8 +38,6 @@ struct Accumulator {
     file_titles: BTreeMap<usize, String>,
     poster: Option<(String, Vec<u8>)>,
 }
-
-// ─── Field classification ─────────────────────────────────────────────────
 
 enum FieldKind {
     Poster,
@@ -83,8 +77,6 @@ fn classify_field(name: &str) -> FieldKind {
     }
 }
 
-// ─── Per-kind handlers ────────────────────────────────────────────────────
-
 async fn handle_poster_field(
     acc: &mut Accumulator,
     field: multer::Field<'_>,
@@ -106,8 +98,9 @@ async fn handle_text_field(
 }
 
 async fn handle_uuid_field(dest: &mut Uuid, field: multer::Field<'_>) -> Result<(), ServerFnError> {
-    *dest = Uuid::parse_str(&field.text().await?)
-        .map_err(|e| ServerFnError::new(format!("collection_id: {e}")))?;
+    let raw = field.text().await?;
+    *dest = Uuid::parse_str(&raw)
+        .map_err(|e| AppError::hidden("Invalid request", "collection_id parse", e))?;
     Ok(())
 }
 
@@ -154,12 +147,12 @@ async fn stream_field_to_file(
 ) -> Result<u64, ServerFnError> {
     let mut out = tokio::fs::File::create(dest)
         .await
-        .map_err(|e| ServerFnError::new(format!("create temp: {e}")))?;
+        .map_err(|e| AppError::internal("create upload temp file", e))?;
     let mut size: u64 = 0;
     while let Some(chunk) = field.chunk().await? {
         out.write_all(&chunk)
             .await
-            .map_err(|e| ServerFnError::new(format!("write temp: {e}")))?;
+            .map_err(|e| AppError::internal("write upload temp file", e))?;
         size += chunk.len() as u64;
     }
     out.flush().await.ok();
@@ -170,8 +163,6 @@ async fn drain_field(mut field: multer::Field<'_>) -> Result<(), ServerFnError> 
     while field.chunk().await?.is_some() {}
     Ok(())
 }
-
-// ─── Dispatcher ───────────────────────────────────────────────────────────
 
 async fn handle_field(
     acc: &mut Accumulator,
@@ -192,8 +183,6 @@ async fn handle_field(
     }
 }
 
-// ─── Parse loop ───────────────────────────────────────────────────────────
-
 async fn run_parse_loop(
     multipart: &mut multer::Multipart<'static>,
     temp_dir: &Path,
@@ -204,8 +193,6 @@ async fn run_parse_loop(
     }
     Ok(acc)
 }
-
-// ─── Finalization ─────────────────────────────────────────────────────────
 
 fn build_upload_files(
     files: BTreeMap<usize, StagedTempFile>,
@@ -227,10 +214,10 @@ fn build_upload_files(
 
 fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPayload, ServerFnError> {
     if acc.files.is_empty() {
-        return Err(ServerFnError::new(messages::NO_FILES_RECEIVED));
+        return Err(AppError::public(messages::NO_FILES_RECEIVED).into());
     }
     if acc.section_slug.is_empty() {
-        return Err(ServerFnError::new(messages::SECTION_SLUG_MISSING));
+        return Err(AppError::public(messages::SECTION_SLUG_MISSING).into());
     }
     let files = build_upload_files(acc.files, acc.file_titles);
     Ok(UploadPayload {
@@ -245,10 +232,10 @@ fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPaylo
     })
 }
 
-// ─── Public entry point ───────────────────────────────────────────────────
-
 pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload, ServerFnError> {
-    let mut multipart = data.into_inner().unwrap();
+    let mut multipart = data
+        .into_inner()
+        .ok_or_else(|| AppError::internal("multipart", "missing multipart body"))?;
     let temp_dir = fresh_temp_dir()?;
 
     let acc = run_parse_loop(&mut multipart, temp_dir.path()).await?;

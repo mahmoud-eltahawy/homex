@@ -13,6 +13,7 @@ use leptos_router::{
 
 mod collection_detail;
 mod collections;
+pub mod error;
 mod home;
 mod layout;
 mod login;

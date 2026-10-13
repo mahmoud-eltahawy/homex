@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use leptos::prelude::ServerFnError;
 use uuid::Uuid;
 
+use crate::app::error::AppError;
 use crate::app::model::MediaKind;
 use crate::app::server::AppState;
 use crate::app::server::convert::{
@@ -86,10 +87,8 @@ async fn ensure_plan_dir(plan: &StagingPlan, media_root: &Path) -> Result<(), Se
     let dir = plan.base_dir(media_root);
     tokio::fs::create_dir_all(&dir)
         .await
-        .map_err(|e| ServerFnError::new(format!("mkdir: {e}")))
+        .map_err(|e| AppError::internal("mkdir media staging dir", e).into())
 }
-
-// ─── Moving a temp file into place ────────────────────────────────────────
 
 async fn move_temp_to_final(temp_path: &Path, dest: &Path) -> Result<(), ServerFnError> {
     if tokio::fs::rename(temp_path, dest).await.is_ok() {
@@ -97,12 +96,10 @@ async fn move_temp_to_final(temp_path: &Path, dest: &Path) -> Result<(), ServerF
     }
     tokio::fs::copy(temp_path, dest)
         .await
-        .map_err(|e| ServerFnError::new(format!("copy {}: {e}", dest.display())))?;
+        .map_err(|e| AppError::internal(format!("copy to {}", dest.display()), e))?;
     let _ = tokio::fs::remove_file(temp_path).await;
     Ok(())
 }
-
-// ─── Placing a raw file ───────────────────────────────────────────────────
 
 struct PlacedRaw {
     token: Uuid,
@@ -140,8 +137,6 @@ fn final_path_for(
     let abs = media_root.join(&rel);
     (rel, abs)
 }
-
-// ─── Building the StagedFile ──────────────────────────────────────────────
 
 async fn duration_secs_rounded(path: &Path) -> i64 {
     ffprobe_duration(path).await.round() as i64
@@ -181,7 +176,7 @@ async fn stage_converted_file(
         &ctx.state.cancel,
     )
     .await
-    .map_err(ServerFnError::new)?;
+    .map_err(|e| AppError::internal("convert file", e))?;
 
     let _ = tokio::fs::remove_file(&placed.abs).await;
     let size = tokio::fs::metadata(&out_abs)
@@ -196,8 +191,6 @@ async fn stage_converted_file(
         title: file.title.clone(),
     })
 }
-
-// ─── Rollback tracking ────────────────────────────────────────────────────
 
 #[derive(Default)]
 struct WrittenTracker {
@@ -223,8 +216,6 @@ impl WrittenTracker {
         }
     }
 }
-
-// ─── Context for one staging run ──────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 struct StagingContext<'a> {
@@ -292,8 +283,6 @@ async fn stage_all(
     }
     Ok(staged)
 }
-
-// ─── Public entry point ───────────────────────────────────────────────────
 
 pub async fn stage_files(
     payload: &UploadPayload,

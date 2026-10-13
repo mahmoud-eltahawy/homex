@@ -4,6 +4,9 @@ use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
 #[cfg(feature = "ssr")]
 use crate::app::constants::{auth as auth_consts, messages};
 
+#[cfg(feature = "ssr")]
+use crate::app::error::AppError;
+
 #[server(endpoint = "login")]
 pub async fn login(token: String) -> Result<(), ServerFnError> {
     use crate::app::server::auth::expected_token;
@@ -11,10 +14,10 @@ pub async fn login(token: String) -> Result<(), ServerFnError> {
     use leptos_axum::ResponseOptions;
 
     let Some(expected) = expected_token() else {
-        return Err(ServerFnError::new("auth disabled"));
+        return Err(AppError::public("Authentication is disabled").into());
     };
     if token != expected {
-        return Err(ServerFnError::new(messages::INVALID_TOKEN));
+        return Err(AppError::public(messages::INVALID_TOKEN).into());
     }
 
     let cookie = format!(
@@ -24,7 +27,7 @@ pub async fn login(token: String) -> Result<(), ServerFnError> {
     );
     let value = cookie
         .parse()
-        .map_err(|_| ServerFnError::new("invalid cookie"))?;
+        .map_err(|e| AppError::internal("build Set-Cookie header", e))?;
 
     let response = expect_context::<ResponseOptions>();
     response.insert_header(header::SET_COOKIE, value);
@@ -52,7 +55,7 @@ impl LazyRoute for LoginPage {
         });
 
         let error = move || match submit.value().get() {
-            Some(Err(e)) => Some(e.to_string()),
+            Some(Err(e)) => Some(crate::app::error::user_message(&e)),
             _ => None,
         };
 

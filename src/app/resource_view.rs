@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::app::error::{self, Disposition};
 use crate::app::icons::{ErrorIcon, LoadingIcon, RetryIcon};
 
 #[component]
@@ -20,36 +21,37 @@ where
     Props: Send + 'static,
     Adapter: Fn(ResourceValue) -> Props + Send + Sync + 'static,
 {
-    // `Arc` lets the closures be re-invoked on every resource transition
-    // and across re-renders that Suspense triggers.
     let view_fn = Arc::new(view_fn);
     let adapter = Arc::new(adapter);
 
-    // Returns `None` while the resource is pending. `Suspense` owns the
-    // pending state and renders `fallback` for us — no double fallback.
     let core = move || {
         let res = resource.get()?;
 
         Some(match res {
             Ok(val) => view_fn(adapter(val)).into_any(),
-            Err(e) => view! {
-                <div class="py-8 text-center">
-                    <div class="text-red-400 text-sm font-bold mb-2"><ErrorIcon/></div>
-                    <p class="text-gray-500 text-xs mb-3">{e.to_string()}</p>
-                    <button
-                        on:click=move |_| resource.refetch()
-                        class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs transition"
-                    >
-                        <RetryIcon/>
-                    </button>
-                </div>
+            Err(e) => {
+                let retryable = matches!(error::disposition(&e), Disposition::Transient);
+                let msg = error::user_message(&e);
+                view! {
+                    <div class="py-8 text-center">
+                        <div class="text-red-400 text-sm font-bold mb-2"><ErrorIcon/></div>
+                        <p class="text-gray-500 text-xs mb-3">{msg}</p>
+                        <Show when=move || retryable>
+                            <button
+                                on:click=move |_| resource.refetch()
+                                class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 \
+                                       text-white text-xs transition"
+                            >
+                                <RetryIcon/>
+                            </button>
+                        </Show>
+                    </div>
+                }
+                .into_any()
             }
-            .into_any(),
         })
     };
 
-    // A `Fn() -> AnyView` closure. `Suspense` will coerce it into the
-    // one-shot `ViewFnOnce` it expects.
     let fallback_closure = {
         let fallback = fallback.clone();
         move || match fallback.clone() {
