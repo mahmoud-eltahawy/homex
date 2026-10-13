@@ -7,8 +7,10 @@ mod validate;
 
 use std::time::Duration;
 
+pub use files::stage_files;
 pub use multipart::parse_upload_multipart;
 pub use naming::{extension_of, sanitize_filename, slugify};
+pub use persist::{insert_files, insert_items_and_poster};
 use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};

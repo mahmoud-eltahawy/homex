@@ -54,6 +54,31 @@ pub async fn fetch_section_by_slug(slug: String) -> Result<Section, AppError> {
         .ok_or_else(|| AppError::not_found("section"))
 }
 
+#[cfg(feature = "ssr")]
+pub fn prefix_for(kind: crate::app::model::MediaKind, nested: bool) -> &'static str {
+    use crate::app::model::MediaKind;
+    match (kind, nested) {
+        (MediaKind::Video, false) => "video",
+        (MediaKind::Video, true) => "video-group",
+        (MediaKind::Audio, false) => "audio",
+        (MediaKind::Audio, true) => "audio-group",
+    }
+}
+
+#[cfg(feature = "ssr")]
+pub fn short_hash() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let hash = (ns ^ c.wrapping_mul(0x9E37_79B9_7F4A_7C15)) as u32;
+    format!("{hash:08x}")
+}
+
 #[server]
 pub async fn create_section(
     title: String,
