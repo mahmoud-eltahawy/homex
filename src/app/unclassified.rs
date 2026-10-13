@@ -5,15 +5,14 @@
 //! classified into the library.
 //!
 //! Folder rules:
-//!   * A folder that contains subfolders may go into an existing *nested*
-//!     section (series / audio group), or into a brand-new nested section.
+//!   * A folder with subfolders → nested section (series / audio group).
 //!     Each immediate subfolder becomes its own collection.
-//!   * A folder that contains only files may go into any existing section
-//!     (of the matching kind) as a new collection, or into a brand-new
-//!     non-nested section.
+//!   * A folder with only files → any matching-kind section. A new
+//!     collection is created and every file becomes an item in it.
+//!   * Destination can be an existing section or a brand-new one.
 //!
-//! The current folder is encoded in the URL as `?path=<relative>`, so browser
-//! back/forward navigates the tree naturally. The URL is the single source of
+//! The current folder is encoded in the URL as `?path=<relative>`, so the
+//! browser back/forward navigates the tree. The URL is the single source of
 //! truth: `rel_path` is a `Signal` derived from the query map.
 //!
 //! Progress is reported through the shared `state.jobs` map, exactly like the
@@ -39,10 +38,23 @@ use crate::app::upload_job::UploadProgress;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  Constants
+// ══════════════════════════════════════════════════════════════════════════════
+
 const POLL_INTERVAL_MS: u32 = 700;
 const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
-// ─── Wire types ───────────────────────────────────────────────────────────────
+const VIDEO_EXTS: &[&str] = &[
+    "mp4", "mkv", "mov", "webm", "avi", "m4v", "wmv", "flv", "ts", "mpg", "mpeg", "3gp", "ogv",
+];
+const AUDIO_EXTS: &[&str] = &[
+    "mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "wma", "aiff", "aif", "alac", "ape",
+];
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Wire types
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnclassifiedEntry {
@@ -79,26 +91,22 @@ pub struct FolderInspection {
     pub dominant_kind: Option<MediaKind>,
 }
 
-/// Where the folder should go.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FolderDestination {
-    /// Add to an existing section. For files-only folders, a fresh collection
-    /// is created; for folders with subfolders, the section must be nested
-    /// and each subfolder becomes a collection.
     Existing { section_slug: String },
-    /// Create a brand-new section named `section_title`. Non-nested for
-    /// files-only folders; nested for folders with subfolders.
     New { section_title: String },
 }
 
-// ─── Client-side media-kind inference ─────────────────────────────────────────
+/// UI-only: which side of the folder modal's destination toggle is active.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DestinationMode {
+    Existing,
+    New,
+}
 
-const VIDEO_EXTS: &[&str] = &[
-    "mp4", "mkv", "mov", "webm", "avi", "m4v", "wmv", "flv", "ts", "mpg", "mpeg", "3gp", "ogv",
-];
-const AUDIO_EXTS: &[&str] = &[
-    "mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "wma", "aiff", "aif", "alac", "ape",
-];
+// ══════════════════════════════════════════════════════════════════════════════
+//  Pure helpers
+// ══════════════════════════════════════════════════════════════════════════════
 
 fn kind_for_ext(ext: Option<&str>) -> Option<MediaKind> {
     let ext = ext?;
@@ -109,6 +117,11 @@ fn kind_for_ext(ext: Option<&str>) -> Option<MediaKind> {
     } else {
         None
     }
+}
+
+#[cfg(feature = "ssr")]
+fn kind_for_name(name: &str) -> Option<MediaKind> {
+    kind_for_ext(name.rsplit_once('.').map(|(_, e)| e))
 }
 
 fn format_size(bytes: u64) -> String {
@@ -132,11 +145,8 @@ fn file_stem(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
-#[cfg(feature = "ssr")]
-fn extension_of(name: &str) -> Option<String> {
-    name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase())
-}
-
+/// Percent-encode a path for a query-string value. Leaves `/` and unreserved
+/// characters alone so URLs stay readable (`?path=movies/action`).
 fn encode_query_path(s: &str) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(s.len());
@@ -153,8 +163,8 @@ fn encode_query_path(s: &str) -> String {
     out
 }
 
-// ─── Selection helpers ────────────────────────────────────────────────────────
-
+/// Select every supported file matching the current selection's kind (or
+/// the first supported file's kind, when the selection is empty).
 fn select_all(selection: RwSignal<Vec<UnclassifiedEntry>>, entries: Vec<UnclassifiedEntry>) {
     selection.update(|v| {
         let target_kind = v
@@ -164,12 +174,7 @@ fn select_all(selection: RwSignal<Vec<UnclassifiedEntry>>, entries: Vec<Unclassi
         v.clear();
         for e in entries {
             let k = kind_for_ext(e.ext.as_deref());
-            if k.is_none() {
-                continue;
-            }
-            if let Some(tk) = target_kind
-                && k != Some(tk)
-            {
+            if k.is_none() || (target_kind.is_some() && k != target_kind) {
                 continue;
             }
             v.push(e);
@@ -177,7 +182,35 @@ fn select_all(selection: RwSignal<Vec<UnclassifiedEntry>>, entries: Vec<Unclassi
     });
 }
 
-// ─── Path safety (server-only) ────────────────────────────────────────────────
+/// Add `entry` to the selection, replacing the whole selection when it would
+/// create a mixed-kind batch. Removes it if already present.
+fn toggle_selection(selection: RwSignal<Vec<UnclassifiedEntry>>, entry: UnclassifiedEntry) {
+    selection.update(|v| {
+        if let Some(pos) = v.iter().position(|e| e.rel_path == entry.rel_path) {
+            v.remove(pos);
+            return;
+        }
+        let new_kind = kind_for_ext(entry.ext.as_deref());
+        let existing_kind = v.first().and_then(|e| kind_for_ext(e.ext.as_deref()));
+        if existing_kind.is_some() && existing_kind != new_kind {
+            v.clear();
+        }
+        v.push(entry);
+    });
+}
+
+fn parse_season(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() { None } else { s.parse().ok() }
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Server-only filesystem helpers
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(feature = "ssr")]
 fn sanitize_rel(rel: &str) -> Result<String, AppError> {
@@ -192,8 +225,6 @@ fn sanitize_rel(rel: &str) -> Result<String, AppError> {
     }
     Ok(trimmed.to_string())
 }
-
-// ─── Server-side folder scanning helpers ──────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone)]
@@ -222,14 +253,7 @@ async fn read_immediate_subdirs(abs: &std::path::Path) -> Result<Vec<String>, Ap
         if name.starts_with('.') {
             continue;
         }
-        let ft = match entry.file_type().await {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        if ft.is_symlink() {
-            continue;
-        }
-        if ft.is_dir() {
+        if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
             names.push(name);
         }
     }
@@ -238,36 +262,7 @@ async fn read_immediate_subdirs(abs: &std::path::Path) -> Result<Vec<String>, Ap
 }
 
 #[cfg(feature = "ssr")]
-async fn collect_files_immediate(abs: &std::path::Path) -> Result<Vec<RawFile>, AppError> {
-    let mut rd = tokio::fs::read_dir(abs)
-        .await
-        .map_err(|e| AppError::public(format!("Cannot read folder: {e}")))?;
-    let mut out = Vec::new();
-    while let Some(entry) = rd.next_entry().await.context("read dir entry")? {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
-        let ft = match entry.file_type().await {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        if ft.is_symlink() || !ft.is_file() {
-            continue;
-        }
-        let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
-        out.push(RawFile {
-            abs: entry.path(),
-            filename: name,
-            size,
-        });
-    }
-    out.sort_by_key(|f| f.filename.to_lowercase());
-    Ok(out)
-}
-
-#[cfg(feature = "ssr")]
-async fn collect_files_recursive(abs: &std::path::Path) -> Result<Vec<RawFile>, AppError> {
+async fn collect_files(abs: &std::path::Path, recursive: bool) -> Result<Vec<RawFile>, AppError> {
     let mut stack = vec![abs.to_path_buf()];
     let mut out = Vec::new();
     while let Some(dir) = stack.pop() {
@@ -288,7 +283,9 @@ async fn collect_files_recursive(abs: &std::path::Path) -> Result<Vec<RawFile>, 
                 continue;
             }
             if ft.is_dir() {
-                stack.push(entry.path());
+                if recursive {
+                    stack.push(entry.path());
+                }
             } else if ft.is_file() {
                 let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
                 out.push(RawFile {
@@ -307,18 +304,99 @@ async fn collect_files_recursive(abs: &std::path::Path) -> Result<Vec<RawFile>, 
 /// none or the set mixes video and audio.
 #[cfg(feature = "ssr")]
 fn dominant_kind(files: &[RawFile]) -> Option<MediaKind> {
-    let first = files
-        .first()
-        .and_then(|f| kind_for_ext(extension_of(&f.filename).as_deref()))?;
+    let first = files.first().and_then(|f| kind_for_name(&f.filename))?;
     for f in &files[1..] {
-        if kind_for_ext(extension_of(&f.filename).as_deref()) != Some(first) {
+        if kind_for_name(&f.filename) != Some(first) {
             return None;
         }
     }
     Some(first)
 }
 
-// ─── Server functions ─────────────────────────────────────────────────────────
+#[cfg(feature = "ssr")]
+fn ensure_kind_matches(files: &[RawFile], kind: MediaKind) -> Result<(), AppError> {
+    for f in files {
+        if kind_for_name(&f.filename) != Some(kind) {
+            return Err(AppError::public(format!(
+                "File '{}' is not {} media",
+                f.filename,
+                kind.as_str()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Build one `WorkItem` per collection we will create. `has_subdirs` decides
+/// whether the folder goes in as a batch of collections or as a single one.
+#[cfg(feature = "ssr")]
+async fn build_work_items(
+    abs: &std::path::Path,
+    has_subdirs: bool,
+    subdirs: &[String],
+    kind: MediaKind,
+    nested: bool,
+    destination: &FolderDestination,
+) -> Result<(Vec<WorkItem>, Vec<std::path::PathBuf>), AppError> {
+    let mut work = Vec::new();
+    let mut cleanup = Vec::new();
+
+    if has_subdirs {
+        for sub in subdirs {
+            let sub_abs = abs.join(sub);
+            let files = collect_files(&sub_abs, true).await?;
+            if files.is_empty() {
+                continue;
+            }
+            ensure_kind_matches(&files, kind)?;
+            cleanup.push(sub_abs);
+            work.push(WorkItem {
+                title: sub.clone(),
+                season: (kind == MediaKind::Video).then_some(1),
+                files,
+            });
+        }
+        if work.is_empty() {
+            return Err(AppError::public("No media files found in any subfolder"));
+        }
+        return Ok((work, cleanup));
+    }
+
+    let files = collect_files(abs, false).await?;
+    if files.is_empty() {
+        return Err(AppError::public("Folder is empty"));
+    }
+    ensure_kind_matches(&files, kind)?;
+
+    let folder_name = abs
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Folder".to_string());
+    let title = match destination {
+        FolderDestination::New { section_title } => {
+            let t = section_title.trim();
+            if t.is_empty() {
+                folder_name
+            } else {
+                t.to_string()
+            }
+        }
+        FolderDestination::Existing { .. } => folder_name,
+    };
+    cleanup.push(abs.to_path_buf());
+    Ok((
+        vec![WorkItem {
+            title,
+            season: (nested && kind == MediaKind::Video).then_some(1),
+            files,
+        }],
+        cleanup,
+    ))
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Server functions
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[server]
 pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry>, AppError> {
@@ -345,7 +423,6 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
     let abs_canon = tokio::fs::canonicalize(&abs)
         .await
         .map_err(|e| AppError::public(format!("Cannot open folder: {e}")))?;
-
     if !abs_canon.starts_with(&root_canon) {
         return Err(AppError::public("Invalid path"));
     }
@@ -354,7 +431,7 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
         .await
         .map_err(|e| AppError::public(format!("Cannot read folder: {e}")))?;
 
-    let mut entries: Vec<UnclassifiedEntry> = Vec::new();
+    let mut entries = Vec::new();
     while let Some(entry) = rd.next_entry().await.context("read dir entry")? {
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
@@ -365,19 +442,16 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
             Err(_) => continue,
         };
         let is_dir = meta.is_dir();
-        let size = if is_dir { 0 } else { meta.len() };
-        let ext = if is_dir { None } else { extension_of(&name) };
-        let child_rel = if clean.is_empty() {
-            name.clone()
-        } else {
-            format!("{clean}/{name}")
-        };
         entries.push(UnclassifiedEntry {
+            size: if is_dir { 0 } else { meta.len() },
+            ext: if is_dir { None } else { ext_of(&name) },
+            rel_path: if clean.is_empty() {
+                name.clone()
+            } else {
+                format!("{clean}/{name}")
+            },
             name,
-            rel_path: child_rel,
             is_dir,
-            size,
-            ext,
         });
     }
 
@@ -386,8 +460,12 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
             .cmp(&a.is_dir)
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
-
     Ok(entries)
+}
+
+#[cfg(feature = "ssr")]
+fn ext_of(name: &str) -> Option<String> {
+    name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase())
 }
 
 #[server]
@@ -405,11 +483,8 @@ pub async fn fetch_sections_with_collections(
         .await
         .context("fetch sections")?;
 
-    let mut out: Vec<SectionWithCollections> = Vec::with_capacity(sections.len());
+    let mut out = Vec::with_capacity(sections.len());
     for s in sections {
-        let section_title = s.title.clone();
-        let section_nested = s.nested;
-
         let collections =
             CollectionRow::filter(CollectionRow::fields().section_slug().eq(s.slug.clone()))
                 .order_by(CollectionRow::fields().title().asc())
@@ -419,8 +494,8 @@ pub async fn fetch_sections_with_collections(
 
         out.push(SectionWithCollections {
             id: s.id,
-            slug: s.slug,
-            title: s.title,
+            slug: s.slug.clone(),
+            title: s.title.clone(),
             nested: s.nested,
             collections: collections
                 .into_iter()
@@ -428,13 +503,12 @@ pub async fn fetch_sections_with_collections(
                     id: c.id,
                     title: c.title,
                     section_slug: c.section_slug,
-                    section_title: section_title.clone(),
-                    nested: section_nested,
+                    section_title: s.title.clone(),
+                    nested: s.nested,
                 })
                 .collect(),
         });
     }
-
     Ok(out)
 }
 
@@ -479,23 +553,15 @@ pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspe
 
     let subdir_names = read_immediate_subdirs(&abs_canon).await?;
     let has_subdirs = !subdir_names.is_empty();
-
-    let files = if has_subdirs {
-        collect_files_recursive(&abs_canon).await?
-    } else {
-        collect_files_immediate(&abs_canon).await?
-    };
-
-    let file_count = files.len();
-    let total_size = files.iter().map(|f| f.size).sum();
+    let files = collect_files(&abs_canon, has_subdirs).await?;
 
     Ok(FolderInspection {
         rel_path: clean,
         name,
         has_subdirs,
         subdir_names,
-        file_count,
-        total_size,
+        file_count: files.len(),
+        total_size: files.iter().map(|f| f.size).sum(),
         dominant_kind: dominant_kind(&files),
     })
 }
@@ -508,10 +574,7 @@ pub async fn classify_unclassified_files(
 ) -> Result<String, AppError> {
     use crate::app::model::{CollectionRow, MediaKind, SectionRow};
     use crate::app::server::AppState;
-    use crate::app::server::convert::{Job, JobPhase};
-    use crate::app::server::upload::{
-        UploadFile, UploadPayload, process_upload, schedule_job_eviction,
-    };
+    use crate::app::server::upload::UploadPayload;
 
     if files.is_empty() {
         return Err(AppError::public("No files selected"));
@@ -524,56 +587,19 @@ pub async fn classify_unclassified_files(
         .unclassified_dir
         .clone()
         .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
-
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
 
-    let mut upload_files: Vec<UploadFile> = Vec::with_capacity(files.len());
+    let mut upload_files = Vec::with_capacity(files.len());
     for input in &files {
-        let clean = sanitize_rel(&input.rel_path)?;
-        if clean.is_empty() {
-            return Err(AppError::public("Empty file path"));
-        }
-        let source_abs = root.join(&clean);
-        let source_canon = tokio::fs::canonicalize(&source_abs)
-            .await
-            .map_err(|e| AppError::public(format!("File not found: {e}")))?;
-        if !source_canon.starts_with(&root_canon) {
-            return Err(AppError::public("Invalid path"));
-        }
-        let meta = tokio::fs::metadata(&source_canon)
-            .await
-            .context("stat source file")?;
-        if !meta.is_file() {
-            return Err(AppError::public("Not a file"));
-        }
-        let filename = source_canon
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "file".to_string());
-        let fallback_title = file_stem(&filename);
-        let display_title = {
-            let t = input.title.trim();
-            if t.is_empty() {
-                fallback_title
-            } else {
-                t.to_string()
-            }
-        };
-        upload_files.push(UploadFile {
-            filename,
-            title: display_title,
-            temp_path: source_canon,
-            size: meta.len(),
-        });
+        upload_files.push(resolve_upload_file(&root, &root_canon, input).await?);
     }
 
     let mut db = state.db.clone();
     let collection = CollectionRow::get_by_id(&mut db, &collection_id)
         .await
         .context("load collection")?;
-
     let section = SectionRow::filter(
         SectionRow::fields()
             .slug()
@@ -584,30 +610,89 @@ pub async fn classify_unclassified_files(
     .await
     .context("load section")?
     .ok_or_else(|| AppError::not_found("section"))?;
-
     let kind = MediaKind::try_from(section.media_kind.as_str())
         .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
 
-    let is_video_series = section.nested && kind == MediaKind::Video;
-    let season_number = if is_video_series && season_number.is_none() {
+    let season_number = if section.nested && kind == MediaKind::Video && season_number.is_none() {
         Some(1)
     } else {
         season_number
     };
 
-    let temp_dir =
-        tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))?;
+    spawn_upload_job(
+        state,
+        UploadPayload {
+            section_slug: collection.section_slug.clone(),
+            collection_id,
+            title: collection.title.clone(),
+            description: String::new(),
+            season_number,
+            files: upload_files,
+            poster: None,
+            temp_dir: make_dummy_tempdir()?,
+        },
+        kind,
+    )
+    .await
+}
 
-    let payload = UploadPayload {
-        section_slug: collection.section_slug.clone(),
-        collection_id,
-        title: collection.title.clone(),
-        description: String::new(),
-        season_number,
-        files: upload_files,
-        poster: None,
-        temp_dir,
+#[cfg(feature = "ssr")]
+async fn resolve_upload_file(
+    root: &std::path::Path,
+    root_canon: &std::path::Path,
+    input: &ClassifyInput,
+) -> Result<crate::app::server::upload::UploadFile, AppError> {
+    use crate::app::server::upload::UploadFile;
+
+    let clean = sanitize_rel(&input.rel_path)?;
+    if clean.is_empty() {
+        return Err(AppError::public("Empty file path"));
+    }
+    let source_canon = tokio::fs::canonicalize(root.join(&clean))
+        .await
+        .map_err(|e| AppError::public(format!("File not found: {e}")))?;
+    if !source_canon.starts_with(root_canon) {
+        return Err(AppError::public("Invalid path"));
+    }
+    let meta = tokio::fs::metadata(&source_canon)
+        .await
+        .context("stat source file")?;
+    if !meta.is_file() {
+        return Err(AppError::public("Not a file"));
+    }
+    let filename = source_canon
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+    let title = {
+        let t = input.title.trim();
+        if t.is_empty() {
+            file_stem(&filename)
+        } else {
+            t.to_string()
+        }
     };
+    Ok(UploadFile {
+        filename,
+        title,
+        temp_path: source_canon,
+        size: meta.len(),
+    })
+}
+
+#[cfg(feature = "ssr")]
+fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
+    tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))
+}
+
+#[cfg(feature = "ssr")]
+async fn spawn_upload_job(
+    state: crate::app::server::AppState,
+    payload: crate::app::server::upload::UploadPayload,
+    kind: MediaKind,
+) -> Result<String, AppError> {
+    use crate::app::server::convert::{Job, JobPhase};
+    use crate::app::server::upload::{process_upload, schedule_job_eviction};
 
     let job_id = Uuid::new_v4().to_string();
     {
@@ -623,7 +708,6 @@ pub async fn classify_unclassified_files(
 
     let state_bg = state.clone();
     let job_id_bg = job_id.clone();
-
     tokio::spawn(async move {
         if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id_bg)).await {
             crate::app::server::convert::job_set_phase(
@@ -635,11 +719,9 @@ pub async fn classify_unclassified_files(
             schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
         }
     });
-
     Ok(job_id)
 }
 
-/// Kick off a folder classification job. Returns the job id for polling.
 #[server]
 pub async fn classify_unclassified_folder(
     rel_path: String,
@@ -657,7 +739,6 @@ pub async fn classify_unclassified_folder(
         .unclassified_dir
         .clone()
         .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
-
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
@@ -665,8 +746,7 @@ pub async fn classify_unclassified_folder(
     if clean.is_empty() {
         return Err(AppError::public("Invalid folder"));
     }
-    let abs = root.join(&clean);
-    let abs_canon = tokio::fs::canonicalize(&abs)
+    let abs_canon = tokio::fs::canonicalize(root.join(&clean))
         .await
         .map_err(|e| AppError::public(format!("Folder not found: {e}")))?;
     if !abs_canon.starts_with(&root_canon) {
@@ -681,13 +761,11 @@ pub async fn classify_unclassified_folder(
     }
 
     let mut db = state.db.clone();
+    let subdirs = read_immediate_subdirs(&abs_canon).await?;
+    let has_subdirs = !subdirs.is_empty();
 
-    let subdir_names = read_immediate_subdirs(&abs_canon).await?;
-    let has_subdirs = !subdir_names.is_empty();
-
-    // Resolve / create the destination section.
-    let (section_slug, section_kind, section_nested) = match destination {
-        FolderDestination::Existing { ref section_slug } => {
+    let (section_slug, section_kind, section_nested) = match destination.clone() {
+        FolderDestination::Existing { section_slug } => {
             let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
                 .first()
                 .exec(&mut db)
@@ -701,48 +779,22 @@ pub async fn classify_unclassified_folder(
                     "This folder contains subfolders — choose a nested section.",
                 ));
             }
-            (section_slug.to_string(), kind, section.nested)
+            (section_slug, kind, section.nested)
         }
-        FolderDestination::New { ref section_title } => {
+        FolderDestination::New { section_title } => {
             let title = section_title.trim().to_string();
             if title.is_empty() {
                 return Err(AppError::validation("Section title is required"));
             }
-
-            // Determine kind from the folder's files.
-            let files_for_kind = if has_subdirs {
-                collect_files_recursive(&abs_canon).await?
-            } else {
-                collect_files_immediate(&abs_canon).await?
-            };
-            if files_for_kind.is_empty() {
+            let files = collect_files(&abs_canon, has_subdirs).await?;
+            if files.is_empty() {
                 return Err(AppError::public("Folder contains no media files"));
             }
-            let kind = dominant_kind(&files_for_kind).ok_or_else(|| {
+            let kind = dominant_kind(&files).ok_or_else(|| {
                 AppError::public("Folder mixes video and audio — split it up before classifying.")
             })?;
             let nested = has_subdirs;
-
-            let prefix = crate::app::sections::prefix_for(kind, nested);
-            let mut slug: Option<String> = None;
-            for attempt in 0..4 {
-                let candidate = format!("{prefix}-{}", crate::app::sections::short_hash());
-                if db::fetch_section_by_slug(&mut db, &candidate)
-                    .await
-                    .context("check slug uniqueness")?
-                    .is_none()
-                {
-                    slug = Some(candidate);
-                    break;
-                }
-                if attempt == 3 {
-                    return Err(AppError::internal(
-                        "create section",
-                        "could not generate a unique section identifier",
-                    ));
-                }
-            }
-            let slug = slug.unwrap();
+            let slug = generate_unique_slug(&mut db, kind, nested).await?;
             db::insert_section(&mut db, &slug, &title, kind.as_str(), nested)
                 .await
                 .context("insert section")?;
@@ -750,84 +802,16 @@ pub async fn classify_unclassified_folder(
         }
     };
 
-    // Build the work items.
-    let mut work: Vec<WorkItem> = Vec::new();
-    let mut cleanup_dirs: Vec<std::path::PathBuf> = Vec::new();
+    let (work, cleanup) = build_work_items(
+        &abs_canon,
+        has_subdirs,
+        &subdirs,
+        section_kind,
+        section_nested,
+        &destination,
+    )
+    .await?;
 
-    if has_subdirs {
-        for sub in &subdir_names {
-            let sub_abs = abs_canon.join(sub);
-            let files = collect_files_recursive(&sub_abs).await?;
-            if files.is_empty() {
-                continue;
-            }
-            for f in &files {
-                if kind_for_ext(extension_of(&f.filename).as_deref()) != Some(section_kind) {
-                    return Err(AppError::public(format!(
-                        "File '{}' is not {} media",
-                        f.filename,
-                        section_kind.as_str()
-                    )));
-                }
-            }
-            let season = if section_kind == MediaKind::Video {
-                Some(1)
-            } else {
-                None
-            };
-            cleanup_dirs.push(sub_abs);
-            work.push(WorkItem {
-                title: sub.clone(),
-                season,
-                files,
-            });
-        }
-        if work.is_empty() {
-            return Err(AppError::public("No media files found in any subfolder"));
-        }
-    } else {
-        let files = collect_files_immediate(&abs_canon).await?;
-        if files.is_empty() {
-            return Err(AppError::public("Folder is empty"));
-        }
-        for f in &files {
-            if kind_for_ext(extension_of(&f.filename).as_deref()) != Some(section_kind) {
-                return Err(AppError::public(format!(
-                    "File '{}' is not {} media",
-                    f.filename,
-                    section_kind.as_str()
-                )));
-            }
-        }
-        let folder_name = abs_canon
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "Folder".to_string());
-        let title = match &destination {
-            FolderDestination::New { section_title } => {
-                let t = section_title.trim();
-                if t.is_empty() {
-                    folder_name.clone()
-                } else {
-                    t.to_string()
-                }
-            }
-            FolderDestination::Existing { .. } => folder_name,
-        };
-        let season = if section_nested && section_kind == MediaKind::Video {
-            Some(1)
-        } else {
-            None
-        };
-        cleanup_dirs.push(abs_canon.clone());
-        work.push(WorkItem {
-            title,
-            season,
-            files,
-        });
-    }
-
-    // Create the job and spawn the worker.
     let job_id = Uuid::new_v4().to_string();
     {
         let mut jobs = state.jobs.write().await;
@@ -842,37 +826,22 @@ pub async fn classify_unclassified_folder(
 
     let state_bg = state.clone();
     let job_id_bg = job_id.clone();
-    let section_slug_bg = section_slug.clone();
-
     tokio::spawn(async move {
         let outcome = run_folder_classify(
             work,
-            cleanup_dirs,
-            section_slug_bg,
+            cleanup,
+            section_slug,
             section_kind,
             state_bg.clone(),
             job_id_bg.clone(),
         )
         .await;
 
-        match outcome {
-            Ok(()) => {
-                crate::app::server::convert::job_set_phase(
-                    &state_bg.jobs,
-                    Some(&job_id_bg),
-                    JobPhase::Done,
-                )
-                .await;
-            }
-            Err(e) => {
-                crate::app::server::convert::job_set_phase(
-                    &state_bg.jobs,
-                    Some(&job_id_bg),
-                    JobPhase::Failed(e),
-                )
-                .await;
-            }
-        }
+        let phase = match outcome {
+            Ok(()) => JobPhase::Done,
+            Err(e) => JobPhase::Failed(e),
+        };
+        crate::app::server::convert::job_set_phase(&state_bg.jobs, Some(&job_id_bg), phase).await;
         schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
     });
 
@@ -880,9 +849,34 @@ pub async fn classify_unclassified_folder(
 }
 
 #[cfg(feature = "ssr")]
+async fn generate_unique_slug(
+    db: &mut toasty::Db,
+    kind: MediaKind,
+    nested: bool,
+) -> Result<String, AppError> {
+    use crate::app::server::db;
+
+    let prefix = crate::app::sections::prefix_for(kind, nested);
+    for _ in 0..4 {
+        let candidate = format!("{prefix}-{}", crate::app::sections::short_hash());
+        if db::fetch_section_by_slug(db, &candidate)
+            .await
+            .context("check slug uniqueness")?
+            .is_none()
+        {
+            return Ok(candidate);
+        }
+    }
+    Err(AppError::internal(
+        "create section",
+        "could not generate a unique section identifier",
+    ))
+}
+
+#[cfg(feature = "ssr")]
 async fn run_folder_classify(
     work: Vec<WorkItem>,
-    cleanup_dirs: Vec<std::path::PathBuf>,
+    cleanup: Vec<std::path::PathBuf>,
     section_slug: String,
     section_kind: MediaKind,
     state: crate::app::server::AppState,
@@ -897,17 +891,12 @@ async fn run_folder_classify(
     let mut db = state.db.clone();
 
     for item in work {
-        let WorkItem {
-            title,
-            season,
-            files,
-        } = item;
-
-        let collection_id = db::insert_collection(&mut db, &section_slug, &title)
+        let collection_id = db::insert_collection(&mut db, &section_slug, &item.title)
             .await
             .context("create collection")?;
 
-        let upload_files: Vec<UploadFile> = files
+        let upload_files = item
+            .files
             .into_iter()
             .map(|f| UploadFile {
                 title: file_stem(&f.filename),
@@ -917,18 +906,15 @@ async fn run_folder_classify(
             })
             .collect();
 
-        let temp_dir =
-            tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))?;
-
         let payload = UploadPayload {
             section_slug: section_slug.clone(),
             collection_id,
-            title,
+            title: item.title,
             description: String::new(),
-            season_number: season,
+            season_number: item.season,
             files: upload_files,
             poster: None,
-            temp_dir,
+            temp_dir: make_dummy_tempdir()?,
         };
 
         crate::app::server::convert::job_set_phase(&state.jobs, Some(&job_id), JobPhase::Writing)
@@ -945,241 +931,246 @@ async fn run_folder_classify(
         .await?;
     }
 
-    // Best-effort cleanup. `remove_dir` fails on a non-empty dir; that's fine.
-    for dir in cleanup_dirs {
+    for dir in cleanup {
         let _ = tokio::fs::remove_dir(&dir).await;
     }
-
     Ok(())
 }
 
-// ─── Client-side job trackers ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Job state — shared between the two classify flows
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Copy)]
-pub struct ClassifyJob {
-    action: Action<(Vec<ClassifyInput>, Uuid, Option<i64>), Result<String, AppError>>,
+pub struct JobState {
     pub status: RwSignal<Option<ConversionStatus>>,
     pub result: RwSignal<Option<Result<(), AppError>>>,
-    active_job: RwSignal<Option<String>>,
+    active: RwSignal<Option<String>>,
 }
 
-impl ClassifyJob {
-    pub fn new() -> Self {
-        let action = Action::new_local(
-            |(files, col, season): &(Vec<ClassifyInput>, Uuid, Option<i64>)| {
-                classify_unclassified_files(files.clone(), *col, *season)
-            },
-        );
-        let status = RwSignal::new(None);
-        let result = RwSignal::new(None);
-        let active_job = RwSignal::new(None);
+impl JobState {
+    fn new() -> Self {
+        Self {
+            status: RwSignal::new(None),
+            result: RwSignal::new(None),
+            active: RwSignal::new(None),
+        }
+    }
 
+    /// Install the two effects that drive a job: one watches the action's
+    /// returned id, the other starts a poll loop when the id changes.
+    fn wire<A: Send + Sync + 'static>(self, action: Action<A, Result<String, AppError>>) {
         Effect::new(move |_| {
             let Some(val) = action.value().get() else {
                 return;
             };
             match val {
-                Ok(id) => active_job.set(Some(id)),
+                Ok(id) => self.active.set(Some(id)),
                 Err(e) => {
-                    status.set(Some(ConversionStatus::Failed(e.clone())));
-                    result.set(Some(Err(e)));
+                    self.status.set(Some(ConversionStatus::Failed(e.clone())));
+                    self.result.set(Some(Err(e)));
                 }
             }
         });
-
         Effect::new(move |_| {
-            let Some(id) = active_job.get() else { return };
-            leptos::task::spawn_local(poll_until_terminal(id, active_job, status, result));
+            let Some(id) = self.active.get() else { return };
+            leptos::task::spawn_local(poll_until_terminal(id, self));
         });
-
-        Self {
-            action,
-            status,
-            result,
-            active_job,
-        }
     }
 
-    pub fn dispatch(&self, files: Vec<ClassifyInput>, col: Uuid, season: Option<i64>) {
+    fn start(&self) {
         self.status.set(Some(ConversionStatus::Writing));
         self.result.set(None);
-        self.action.dispatch((files, col, season));
     }
 
-    pub fn reset(&self) {
+    fn reset(&self) {
         self.status.set(None);
         self.result.set(None);
-        self.active_job.set(None);
+        self.active.set(None);
     }
 
+    fn error(self) -> Signal<Option<AppError>> {
+        Signal::derive(move || self.result.get().and_then(|r| r.err()))
+    }
+
+    fn is_busy(self) -> Signal<bool> {
+        Signal::derive(move || self.status.get().is_some() && self.result.get().is_none())
+    }
+
+    fn status_signal(self) -> Signal<Option<ConversionStatus>> {
+        Signal::derive(move || self.status.get())
+    }
+}
+
+type ClassifyJobAction = Action<(Vec<ClassifyInput>, Uuid, Option<i64>), Result<String, AppError>>;
+
+#[derive(Clone, Copy)]
+pub struct ClassifyJob {
+    action: ClassifyJobAction,
+    state: JobState,
+}
+
+impl ClassifyJob {
+    pub fn new() -> Self {
+        let state = JobState::new();
+        let action = Action::new_local(
+            |(files, col, season): &(Vec<ClassifyInput>, Uuid, Option<i64>)| {
+                classify_unclassified_files(files.clone(), *col, *season)
+            },
+        );
+        state.wire(action);
+        Self { action, state }
+    }
+    pub fn dispatch(&self, files: Vec<ClassifyInput>, col: Uuid, season: Option<i64>) {
+        self.state.start();
+        self.action.dispatch((files, col, season));
+    }
+    pub fn reset(&self) {
+        self.state.reset();
+    }
     pub fn error(&self) -> Signal<Option<AppError>> {
-        let result = self.result;
-        Signal::derive(move || result.get().and_then(|r| r.err()))
+        self.state.error()
+    }
+    pub fn is_busy(&self) -> Signal<bool> {
+        self.state.is_busy()
+    }
+    pub fn status(&self) -> Signal<Option<ConversionStatus>> {
+        self.state.status_signal()
+    }
+    pub fn result_rw(&self) -> RwSignal<Option<Result<(), AppError>>> {
+        self.state.result
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct FolderClassifyJob {
     action: Action<(String, FolderDestination), Result<String, AppError>>,
-    pub status: RwSignal<Option<ConversionStatus>>,
-    pub result: RwSignal<Option<Result<(), AppError>>>,
-    active_job: RwSignal<Option<String>>,
+    state: JobState,
 }
 
 impl FolderClassifyJob {
     pub fn new() -> Self {
+        let state = JobState::new();
         let action = Action::new_local(|(path, dest): &(String, FolderDestination)| {
             classify_unclassified_folder(path.clone(), dest.clone())
         });
-        let status = RwSignal::new(None);
-        let result = RwSignal::new(None);
-        let active_job = RwSignal::new(None);
-
-        Effect::new(move |_| {
-            let Some(val) = action.value().get() else {
-                return;
-            };
-            match val {
-                Ok(id) => active_job.set(Some(id)),
-                Err(e) => {
-                    status.set(Some(ConversionStatus::Failed(e.clone())));
-                    result.set(Some(Err(e)));
-                }
-            }
-        });
-
-        Effect::new(move |_| {
-            let Some(id) = active_job.get() else { return };
-            leptos::task::spawn_local(poll_until_terminal(id, active_job, status, result));
-        });
-
-        Self {
-            action,
-            status,
-            result,
-            active_job,
-        }
+        state.wire(action);
+        Self { action, state }
     }
-
     pub fn dispatch(&self, path: String, dest: FolderDestination) {
-        self.status.set(Some(ConversionStatus::Writing));
-        self.result.set(None);
+        self.state.start();
         self.action.dispatch((path, dest));
     }
-
     pub fn reset(&self) {
-        self.status.set(None);
-        self.result.set(None);
-        self.active_job.set(None);
+        self.state.reset();
     }
-
     pub fn error(&self) -> Signal<Option<AppError>> {
-        let result = self.result;
-        Signal::derive(move || result.get().and_then(|r| r.err()))
+        self.state.error()
+    }
+    pub fn is_busy(&self) -> Signal<bool> {
+        self.state.is_busy()
+    }
+    pub fn status(&self) -> Signal<Option<ConversionStatus>> {
+        self.state.status_signal()
+    }
+    pub fn result_rw(&self) -> RwSignal<Option<Result<(), AppError>>> {
+        self.state.result
     }
 }
 
-async fn poll_until_terminal(
-    job_id: String,
-    active: RwSignal<Option<String>>,
-    status: RwSignal<Option<ConversionStatus>>,
-    result: RwSignal<Option<Result<(), AppError>>>,
-) {
+async fn poll_until_terminal(job_id: String, state: JobState) {
     let mut consecutive_errors = 0u32;
-
     loop {
-        if active.get_untracked().as_deref() != Some(job_id.as_str()) {
+        if state.active.get_untracked().as_deref() != Some(job_id.as_str()) {
             return;
         }
-
         let polled = poll_conversion(job_id.clone()).await;
-
-        if active.get_untracked().as_deref() != Some(job_id.as_str()) {
+        if state.active.get_untracked().as_deref() != Some(job_id.as_str()) {
             return;
         }
-
         match polled {
+            Ok(s) if matches!(s, ConversionStatus::Done | ConversionStatus::Failed(_)) => {
+                let outcome = match &s {
+                    ConversionStatus::Done => Ok(()),
+                    ConversionStatus::Failed(e) => Err(e.clone()),
+                    _ => unreachable!(),
+                };
+                state.status.set(Some(s));
+                state.result.set(Some(outcome));
+                state.active.set(None);
+                return;
+            }
             Ok(s) => {
                 consecutive_errors = 0;
-                let terminal = matches!(s, ConversionStatus::Done | ConversionStatus::Failed(_));
-                if terminal {
-                    let outcome: Result<(), AppError> = match &s {
-                        ConversionStatus::Done => Ok(()),
-                        ConversionStatus::Failed(e) => Err(e.clone()),
-                        _ => unreachable!(),
-                    };
-                    status.set(Some(s));
-                    result.set(Some(outcome));
-                    active.set(None);
-                    return;
-                }
-                status.set(Some(s));
+                state.status.set(Some(s));
             }
             Err(_) => {
                 consecutive_errors += 1;
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                     let e = AppError::public("Lost contact with the server").transient();
-                    status.set(Some(ConversionStatus::Failed(e.clone())));
-                    result.set(Some(Err(e)));
-                    active.set(None);
+                    state.status.set(Some(ConversionStatus::Failed(e.clone())));
+                    state.result.set(Some(Err(e)));
+                    state.active.set(None);
                     return;
                 }
             }
         }
-
         TimeoutFuture::new(POLL_INTERVAL_MS).await;
     }
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Page
+// ══════════════════════════════════════════════════════════════════════════════
 
-pub struct UnclassifiedPage;
+pub struct UnclassifiedPage {
+    rel_path: Signal<String>,
+    refresh: RwSignal<u32>,
+    entries: Resource<Result<Vec<UnclassifiedEntry>, AppError>>,
+}
 
 #[lazy_route]
 impl LazyRoute for UnclassifiedPage {
     fn data() -> Self {
-        Self
-    }
-
-    fn view(_this: Self) -> AnyView {
         let query = use_query_map();
-        let navigate = use_navigate();
-
         let rel_path: Signal<String> =
             Signal::derive(move || query.with(|q| q.get("path")).unwrap_or_default());
+        let refresh = RwSignal::new(0u32);
+        let entries: Resource<Result<Vec<UnclassifiedEntry>, AppError>> = Resource::new(
+            move || (rel_path.get(), refresh.get()),
+            |(p, _)| list_unclassified(p),
+        );
+        Self {
+            entries,
+            rel_path,
+            refresh,
+        }
+    }
 
-        let on_navigate = Callback::new(move |new_path: String| {
-            let url = if new_path.is_empty() {
+    fn view(this: Self) -> AnyView {
+        let navigate = use_navigate();
+
+        let on_navigate = Callback::new(move |path: String| {
+            let url = if path.is_empty() {
                 routes::UNCLASSIFIED.to_string()
             } else {
-                format!(
-                    "{}?path={}",
-                    routes::UNCLASSIFIED,
-                    encode_query_path(&new_path)
-                )
+                format!("{}?path={}", routes::UNCLASSIFIED, encode_query_path(&path))
             };
             navigate(&url, Default::default());
         });
 
-        let refresh = RwSignal::new(0u32);
-        let selection: RwSignal<Vec<UnclassifiedEntry>> = RwSignal::new(Vec::new());
+        let selection = RwSignal::new(Vec::<UnclassifiedEntry>::new());
         let modal_open = RwSignal::new(false);
-        let folder_target: RwSignal<Option<UnclassifiedEntry>> = RwSignal::new(None);
-
-        let entries: Resource<Result<Vec<UnclassifiedEntry>, AppError>> = Resource::new(
-            move || (rel_path.get(), refresh.get()),
-            |(path, _)| list_unclassified(path),
-        );
+        let folder_target = RwSignal::new(None::<UnclassifiedEntry>);
 
         let classify = ClassifyJob::new();
         let folder_classify = FolderClassifyJob::new();
 
         Effect::new(move |_| {
-            let _ = rel_path.get();
+            let _ = this.rel_path.get();
             selection.set(Vec::new());
             folder_target.set(None);
         });
-
         Effect::new(move |_| {
             if selection.get().is_empty() && modal_open.get() {
                 modal_open.set(false);
@@ -1188,12 +1179,11 @@ impl LazyRoute for UnclassifiedPage {
 
         let on_modal_close = Callback::new(move |_: ()| {
             selection.set(Vec::new());
-            refresh.update(|n| *n = n.wrapping_add(1));
+            this.refresh.update(|n| *n = n.wrapping_add(1));
         });
-
         let on_folder_modal_close = Callback::new(move |_: ()| {
             folder_target.set(None);
-            refresh.update(|n| *n = n.wrapping_add(1));
+            this.refresh.update(|n| *n = n.wrapping_add(1));
         });
 
         let adapter = move |list: Vec<UnclassifiedEntry>| EntryListProps {
@@ -1216,27 +1206,23 @@ impl LazyRoute for UnclassifiedPage {
                         "Browse the incoming folder and classify files or whole folders."
                     </p>
                 </div>
-
-                <Breadcrumb rel_path=rel_path on_navigate=on_navigate/>
-
-                <ResourceView
-                    resource=entries
-                    view_fn=render_entry_list
-                    adapter=adapter
-                />
+                <Breadcrumb rel_path=this.rel_path on_navigate=on_navigate/>
+                <ResourceView resource=this.entries view_fn=render_entry_list adapter=adapter/>
             </div>
         }
         .into_any()
     }
 }
 
-// ─── Breadcrumb ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Breadcrumb
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[component]
 fn Breadcrumb(rel_path: Signal<String>, on_navigate: Callback<String>) -> impl IntoView {
     let segments = Memo::new(move |_| {
         let path = rel_path.get();
-        let mut out: Vec<(String, String)> = vec![("Incoming".to_string(), String::new())];
+        let mut out: Vec<(String, String)> = vec![("Incoming".into(), String::new())];
         if !path.is_empty() {
             let mut acc = String::new();
             for part in path.split('/') {
@@ -1255,38 +1241,31 @@ fn Breadcrumb(rel_path: Signal<String>, on_navigate: Callback<String>) -> impl I
             {move || {
                 let segs = segments.get();
                 let count = segs.len();
-                segs.into_iter()
-                    .enumerate()
-                    .map(|(i, (label, path))| {
-                        let target = path.clone();
-                        let is_last = i + 1 == count;
-                        let class = if is_last {
-                            "px-2 py-1 rounded transition text-cyan-300 font-medium"
-                        } else {
-                            "px-2 py-1 rounded transition text-gray-300 hover:bg-white/10 hover:text-white"
-                        };
-                        view! {
-                            <div class="flex items-center gap-1">
-                                <button
-                                    type="button"
-                                    on:click=move |_| on_navigate.run(target.clone())
-                                    class=class
-                                >
-                                    {label}
-                                </button>
-                                {(!is_last).then(|| view! {
-                                    <span class="text-gray-600">"/"</span>
-                                })}
-                            </div>
-                        }
-                    })
-                    .collect_view()
+                segs.into_iter().enumerate().map(|(i, (label, path))| {
+                    let target = path.clone();
+                    let is_last = i + 1 == count;
+                    let class = if is_last {
+                        "px-2 py-1 rounded transition text-cyan-300 font-medium"
+                    } else {
+                        "px-2 py-1 rounded transition text-gray-300 hover:bg-white/10 hover:text-white"
+                    };
+                    view! {
+                        <div class="flex items-center gap-1">
+                            <button type="button"
+                                on:click=move |_| on_navigate.run(target.clone())
+                                class=class>{label}</button>
+                            {(!is_last).then(|| view! { <span class="text-gray-600">"/"</span> })}
+                        </div>
+                    }
+                }).collect_view()
             }}
         </nav>
     }
 }
 
-// ─── Entry list ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Entry list
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone)]
 pub struct EntryListProps {
@@ -1325,57 +1304,33 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
     }
 
     let entries_for_bar = entries.clone();
-
     let rows = entries
         .into_iter()
         .map(|entry| {
             if entry.is_dir {
-                Either::Left(view! {
-                    <DirRow
-                        entry=entry
-                        on_navigate=on_navigate
-                        folder_target=folder_target
-                    />
-                })
+                Either::Left(view! { <DirRow entry on_navigate folder_target/> })
             } else {
-                Either::Right(view! {
-                    <FileRow
-                        entry=entry
-                        selection=selection
-                        modal_open=modal_open
-                    />
-                })
+                Either::Right(view! { <FileRow entry selection modal_open/> })
             }
         })
         .collect_view();
 
     view! {
         <div>
-            <SelectionBar
-                entries=entries_for_bar
-                selection=selection
-                modal_open=modal_open
-            />
+            <SelectionBar entries=entries_for_bar selection modal_open/>
             <div class="border border-white/10 rounded-xl overflow-hidden bg-white/[0.02]">
                 <div class="divide-y divide-white/5">{rows}</div>
             </div>
-            <ClassifyModal
-                selection=selection
-                open=modal_open
-                classify=classify
-                on_close=on_modal_close
-            />
-            <FolderClassifyModal
-                folder_target=folder_target
-                job=folder_classify
-                on_close=on_folder_modal_close
-            />
+            <ClassifyModal selection open=modal_open job=classify on_close=on_modal_close/>
+            <FolderClassifyModal target=folder_target job=folder_classify on_close=on_folder_modal_close/>
         </div>
     }
     .into_any()
 }
 
-// ─── Selection bar ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Selection bar
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[component]
 fn SelectionBar(
@@ -1388,12 +1343,9 @@ fn SelectionBar(
         .filter(|e| !e.is_dir && kind_for_ext(e.ext.as_deref()).is_some())
         .count();
 
-    let all_selected = {
-        let total = total_supported;
-        move || {
-            let n = selection.get().len();
-            total > 0 && n == total
-        }
+    let all_selected = move || {
+        let n = selection.get().len();
+        total_supported > 0 && n == total_supported
     };
 
     let on_select_all = {
@@ -1407,78 +1359,52 @@ fn SelectionBar(
         })
     };
 
-    let on_clear = Callback::new(move |_: ()| selection.set(Vec::new()));
-
-    let on_classify = Callback::new(move |_: ()| {
-        if !selection.get_untracked().is_empty() {
-            modal_open.set(true);
-        }
-    });
+    let count = move || selection.get().len();
 
     view! {
         <div class="flex items-center justify-between gap-3 mb-3 px-1 min-h-9">
             <div class="flex items-center gap-3 min-w-0">
                 <Show when=move || { total_supported > 0 }>
                     <label class="flex items-center gap-2 cursor-pointer select-none">
-                        <input
-                            type="checkbox"
-                            prop:checked=move || all_selected()
+                        <input type="checkbox"
+                            prop:checked=all_selected
                             on:change=move |ev| on_select_all.run(ev)
-                            class="accent-cyan-400 w-4 h-4"
-                        />
+                            class="accent-cyan-400 w-4 h-4"/>
                         <span class="text-xs text-gray-400">"Select all"</span>
                     </label>
                 </Show>
-                {move || {
-                    let n = selection.get().len();
-                    if n == 0 {
-                        None
-                    } else {
-                        Some(view! {
-                            <span class="text-xs text-cyan-300 font-medium">
-                                {format!("{n} selected")}
-                            </span>
-                        })
-                    }
-                }}
+                {move || (count() > 0).then(|| view! {
+                    <span class="text-xs text-cyan-300 font-medium">
+                        {format!("{} selected", count())}
+                    </span>
+                })}
             </div>
-
             <div class="flex items-center gap-2 shrink-0">
-                {move || {
-                    let n = selection.get().len();
-                    if n == 0 {
-                        None
-                    } else {
-                        Some(view! {
-                            <>
-                                <button
-                                    type="button"
-                                    on:click=move |_| on_clear.run(())
-                                    class="text-xs px-2 py-1 rounded-lg text-gray-300 \
-                                           hover:bg-white/10 transition"
-                                >
-                                    "Clear"
-                                </button>
-                                <button
-                                    type="button"
-                                    on:click=move |_| on_classify.run(())
-                                    class="text-xs px-3 py-1.5 rounded-lg \
-                                           bg-gradient-to-r from-cyan-500 to-blue-500 \
-                                           hover:from-cyan-400 hover:to-blue-400 \
-                                           text-white font-bold transition"
-                                >
-                                    {move || format!("Classify {n}")}
-                                </button>
-                            </>
-                        })
-                    }
-                }}
+                {move || (count() > 0).then(|| view! {
+                    <>
+                        <button type="button"
+                            on:click=move |_| selection.set(Vec::new())
+                            class="text-xs px-2 py-1 rounded-lg text-gray-300 hover:bg-white/10 transition">
+                            "Clear"
+                        </button>
+                        <button type="button"
+                            on:click=move |_| modal_open.set(true)
+                            class="text-xs px-3 py-1.5 rounded-lg \
+                                   bg-gradient-to-r from-cyan-500 to-blue-500 \
+                                   hover:from-cyan-400 hover:to-blue-400 \
+                                   text-white font-bold transition">
+                            {move || format!("Classify {}", count())}
+                        </button>
+                    </>
+                })}
             </div>
         </div>
     }
 }
 
-// ─── Row icons ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Icons
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[component]
 fn FolderIcon() -> impl IntoView {
@@ -1503,7 +1429,9 @@ fn FileIcon() -> impl IntoView {
     }
 }
 
-// ─── Rows ─────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Rows
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[component]
 fn DirRow(
@@ -1513,39 +1441,30 @@ fn DirRow(
 ) -> impl IntoView {
     let target = entry.rel_path.clone();
     let name = entry.name.clone();
-    let entry_for_classify = entry.clone();
-
+    let entry_for_classify = entry;
     let on_open = Callback::new(move |_: ()| on_navigate.run(target.clone()));
-    let on_classify = Callback::new(move |_: ()| {
-        folder_target.set(Some(entry_for_classify.clone()));
-    });
+    let on_classify =
+        Callback::new(move |_: ()| folder_target.set(Some(entry_for_classify.clone())));
 
     view! {
         <div class="flex items-center gap-2 pr-3 hover:bg-white/5 transition">
-            <button
-                type="button"
+            <button type="button"
                 on:click=move |_| on_open.run(())
-                class="flex-1 text-left flex items-center gap-3 px-4 py-2.5 min-w-0"
-            >
+                class="flex-1 text-left flex items-center gap-3 px-4 py-2.5 min-w-0">
                 <span class="w-4 shrink-0"></span>
                 <span class="text-cyan-400 shrink-0"><FolderIcon/></span>
                 <span class="text-white text-sm truncate flex-1">{name}</span>
             </button>
-            <button
-                type="button"
+            <button type="button"
                 on:click=move |_| on_classify.run(())
-                class="text-xs shrink-0 px-2 py-1 rounded-md \
-                       text-cyan-300 hover:text-white \
-                       bg-cyan-500/10 hover:bg-cyan-500/25 \
-                       border border-cyan-400/30 transition whitespace-nowrap"
-            >
+                class="text-xs shrink-0 px-2 py-1 rounded-md text-cyan-300 hover:text-white \
+                       bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/30 \
+                       transition whitespace-nowrap">
                 "Classify"
             </button>
-            <button
-                type="button"
+            <button type="button"
                 on:click=move |_| on_open.run(())
-                class="text-gray-500 text-xs shrink-0 hover:text-white transition"
-            >
+                class="text-gray-500 text-xs shrink-0 hover:text-white transition">
                 "Open →"
             </button>
         </div>
@@ -1561,36 +1480,23 @@ fn FileRow(
     let is_supported = kind_for_ext(entry.ext.as_deref()).is_some();
     let name = entry.name.clone();
     let size = entry.size;
-    let rel_path_key = entry.rel_path.clone();
+    let key = entry.rel_path.clone();
 
-    let entry_for_change = entry.clone();
-    let entry_for_classify = entry.clone();
+    let is_selected = Signal::derive(move || selection.get().iter().any(|e| e.rel_path == key));
 
-    let is_selected =
-        Signal::derive(move || selection.get().iter().any(|e| e.rel_path == rel_path_key));
-
-    let on_change = Callback::new(move |ev: web_sys::Event| {
-        let checked = event_target_checked(&ev);
-        let entry = entry_for_change.clone();
-        selection.update(|v| {
-            if checked {
-                if v.iter().any(|e| e.rel_path == entry.rel_path) {
-                    return;
-                }
-                let new_kind = kind_for_ext(entry.ext.as_deref());
-                let existing_kind = v.first().and_then(|e| kind_for_ext(e.ext.as_deref()));
-                if existing_kind.is_some() && existing_kind != new_kind {
-                    v.clear();
-                }
-                v.push(entry);
+    let on_change = {
+        let entry = entry.clone();
+        Callback::new(move |ev: web_sys::Event| {
+            if event_target_checked(&ev) {
+                toggle_selection(selection, entry.clone());
             } else {
-                v.retain(|e| e.rel_path != entry.rel_path);
+                selection.update(|v| v.retain(|e| e.rel_path != entry.rel_path));
             }
-        });
-    });
+        })
+    };
 
     let on_single_classify = Callback::new(move |_: ()| {
-        selection.set(vec![entry_for_classify.clone()]);
+        selection.set(vec![entry.clone()]);
         modal_open.set(true);
     });
 
@@ -1602,27 +1508,19 @@ fn FileRow(
 
     view! {
         <div class=row_class>
-            <input
-                type="checkbox"
+            <input type="checkbox"
                 disabled=!is_supported
                 prop:checked=move || is_selected.get()
                 on:change=move |ev| on_change.run(ev)
-                class="accent-cyan-400 w-4 h-4 shrink-0 cursor-pointer \
-                       disabled:cursor-not-allowed"
-            />
+                class="accent-cyan-400 w-4 h-4 shrink-0 cursor-pointer disabled:cursor-not-allowed"/>
             <span class="text-gray-400 shrink-0"><FileIcon/></span>
             <span class="text-white text-sm truncate flex-1">{name}</span>
-            <span class="text-gray-500 text-xs font-mono shrink-0">
-                {format_size(size)}
-            </span>
+            <span class="text-gray-500 text-xs font-mono shrink-0">{format_size(size)}</span>
             {if is_supported {
                 Either::Left(view! {
-                    <button
-                        type="button"
+                    <button type="button"
                         on:click=move |_| on_single_classify.run(())
-                        class="text-xs shrink-0 text-cyan-400 hover:text-cyan-300 \
-                               transition"
-                    >
+                        class="text-xs shrink-0 text-cyan-400 hover:text-cyan-300 transition">
                         "Classify →"
                     </button>
                 })
@@ -1635,16 +1533,228 @@ fn FileRow(
     }
 }
 
-// ─── File classify modal (unchanged) ──────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Shared modal primitives
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[component]
+fn ModalShell(
+    #[prop(into)] title: String,
+    subtitle: Signal<String>,
+    busy: Signal<bool>,
+    on_close: Callback<()>,
+    children: Children,
+) -> impl IntoView {
+    let try_close = Callback::new(move |_: ()| {
+        if !busy.get_untracked() {
+            on_close.run(());
+        }
+    });
+
+    view! {
+        <div class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm \
+                    flex items-center justify-center p-4"
+            on:click=move |_| try_close.run(())>
+            <div class="bg-[#12121a] border border-white/10 rounded-2xl p-6 w-full max-w-lg \
+                        shadow-2xl max-h-[90vh] overflow-auto"
+                on:click=|ev| ev.stop_propagation()>
+                <div class="flex items-start justify-between gap-3 mb-4">
+                    <div class="min-w-0">
+                        <h3 class="text-white font-bold text-lg">{title}</h3>
+                        <p class="text-gray-400 text-sm truncate mt-0.5">
+                            {move || subtitle.get()}
+                        </p>
+                    </div>
+                    <button type="button"
+                        on:click=move |_| try_close.run(())
+                        disabled=move || busy.get()
+                        class="text-gray-400 hover:text-white transition shrink-0 \
+                               disabled:opacity-30 disabled:cursor-not-allowed"
+                        aria-label="Close">"×"</button>
+                </div>
+                {children()}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn TitleField(
+    #[prop(default = "Title".to_string(), into)] label: String,
+    value: RwSignal<String>,
+    #[prop(into)] placeholder: String,
+) -> impl IntoView {
+    view! {
+        <div>
+            <label class="text-xs text-gray-500 uppercase tracking-wider">{label}</label>
+            <input type="text"
+                prop:value=move || value.get()
+                on:input=move |e| value.set(event_target_value(&e))
+                placeholder=placeholder
+                class="mt-1 w-full bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
+                       focus:outline-none focus:ring-1 focus:ring-cyan-400"/>
+        </div>
+    }
+}
+
+#[component]
+fn SectionSelect(
+    options: Signal<Vec<SectionWithCollections>>,
+    value: RwSignal<String>,
+) -> impl IntoView {
+    view! {
+        <div>
+            <label class="text-xs text-gray-500 uppercase tracking-wider">"Section"</label>
+            <select
+                prop:value=move || value.get()
+                on:change=move |e| value.set(event_target_value(&e))
+                class="mt-1 w-full bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
+                       focus:outline-none focus:ring-1 focus:ring-cyan-400">
+                <option value="">"Choose a section…"</option>
+                {move || options.get().into_iter().map(|s| view! {
+                    <option value=s.slug.clone()>{s.title.clone()}</option>
+                }).collect_view()}
+            </select>
+        </div>
+    }
+}
+
+#[component]
+fn SeasonField(value: RwSignal<String>) -> impl IntoView {
+    view! {
+        <div>
+            <label class="text-xs text-gray-500 uppercase tracking-wider">"Season"</label>
+            <input type="number" min="1" placeholder="1"
+                prop:value=move || value.get()
+                on:input=move |e| value.set(event_target_value(&e))
+                class="mt-1 w-full bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
+                       focus:outline-none focus:ring-1 focus:ring-cyan-400"/>
+        </div>
+    }
+}
+
+#[component]
+fn FormActions(
+    on_cancel: Callback<()>,
+    on_confirm: Callback<()>,
+    confirm_label: Signal<String>,
+    disabled: Signal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="flex justify-end gap-2 pt-2">
+            <button type="button"
+                on:click=move |_| on_cancel.run(())
+                class="px-4 py-2 rounded-lg text-gray-300 hover:bg-white/10 transition text-sm">
+                "Cancel"
+            </button>
+            <button type="button"
+                on:click=move |_| on_confirm.run(())
+                disabled=move || disabled.get()
+                class="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 \
+                       hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
+                       disabled:opacity-50 transition">
+                {move || confirm_label.get()}
+            </button>
+        </div>
+    }
+}
+
+#[component]
+fn PhaseProgress(
+    status: Signal<Option<ConversionStatus>>,
+    #[prop(into)] message: String,
+) -> impl IntoView {
+    view! {
+        <div class="space-y-3">
+            <UploadProgress status/>
+            <div class="text-xs text-gray-500 text-center pt-2">{message}</div>
+        </div>
+    }
+}
+
+#[component]
+fn PhaseFinal(
+    result: RwSignal<Option<Result<(), AppError>>>,
+    error: Signal<Option<AppError>>,
+    success_heading: Signal<String>,
+    success_detail: Signal<String>,
+    on_close: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <div class="space-y-4">
+            <Show when=move || matches!(result.get(), Some(Ok(())))>
+                <div class="bg-green-500/15 border border-green-500/30 rounded-xl p-4 \
+                            flex items-start gap-3">
+                    <span class="text-green-400 text-xl leading-none shrink-0">"✓"</span>
+                    <div class="min-w-0">
+                        <div class="text-green-300 font-bold">
+                            {move || success_heading.get()}
+                        </div>
+                        <div class="text-green-300/70 text-xs mt-1">
+                            {move || success_detail.get()}
+                        </div>
+                    </div>
+                </div>
+            </Show>
+            <Show when=move || matches!(result.get(), Some(Err(_)))>
+                <ErrorView error=error style=ErrorStyle::Banner heading="Move failed"/>
+            </Show>
+            <div class="flex justify-end">
+                <button type="button"
+                    on:click=move |_| on_close.run(())
+                    class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 \
+                           text-white text-sm transition">
+                    "Close"
+                </button>
+            </div>
+        </div>
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  File classify modal
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[derive(Clone, Copy)]
+struct FileFormState {
+    title: RwSignal<String>,
+    section_slug: RwSignal<String>,
+    collection_id: RwSignal<Option<Uuid>>,
+    season: RwSignal<String>,
+    creating_new: RwSignal<bool>,
+    new_title: RwSignal<String>,
+}
+
+impl FileFormState {
+    fn new() -> Self {
+        Self {
+            title: RwSignal::new(String::new()),
+            section_slug: RwSignal::new(String::new()),
+            collection_id: RwSignal::new(None),
+            season: RwSignal::new(String::new()),
+            creating_new: RwSignal::new(false),
+            new_title: RwSignal::new(String::new()),
+        }
+    }
+
+    fn reset(&self) {
+        self.title.set(String::new());
+        self.section_slug.set(String::new());
+        self.collection_id.set(None);
+        self.season.set(String::new());
+        self.creating_new.set(false);
+        self.new_title.set(String::new());
+    }
+}
 
 #[component]
 fn ClassifyModal(
     selection: RwSignal<Vec<UnclassifiedEntry>>,
     open: RwSignal<bool>,
-    classify: ClassifyJob,
+    job: ClassifyJob,
     on_close: Callback<()>,
 ) -> impl IntoView {
-    let file_kind: Memo<Option<MediaKind>> = Memo::new(move |_| {
+    let file_kind = Memo::new(move |_| {
         selection
             .get()
             .first()
@@ -1653,10 +1763,9 @@ fn ClassifyModal(
 
     let sections: Resource<Result<Vec<SectionWithCollections>, AppError>> = Resource::new(
         move || {
-            if !open.get() {
-                return None;
-            }
-            file_kind.get().map(|k| k.as_str().to_string())
+            open.get()
+                .then(|| file_kind.get().map(|k| k.as_str().to_string()))
+                .flatten()
         },
         |k| async move {
             match k {
@@ -1666,61 +1775,63 @@ fn ClassifyModal(
         },
     );
 
+    let form = FileFormState::new();
     let is_single = Signal::derive(move || selection.get().len() == 1);
-
-    let single_title = RwSignal::new(String::new());
-    let chosen_section_slug = RwSignal::new(String::new());
-    let chosen_collection_id = RwSignal::new(None::<Uuid>);
-    let season = RwSignal::new(String::new());
-
-    let creating_new = RwSignal::new(false);
-    let new_collection_title = RwSignal::new(String::new());
 
     let create_action: Action<(String, String), Result<Uuid, AppError>> =
         Action::new_local(|(slug, t): &(String, String)| {
             create_collection_named(slug.clone(), t.clone())
         });
 
+    // Reset when opened. Pre-fill the single-file title.
+    Effect::new(move |_| {
+        if !open.get() {
+            return;
+        }
+        let sel = selection.get_untracked();
+        form.reset();
+        if let [single] = sel.as_slice() {
+            form.title.set(file_stem(&single.name));
+        }
+    });
+
+    // Reset the running job when the modal closes.
+    Effect::new(move |_| {
+        if !open.get() {
+            job.reset();
+        }
+    });
+
+    // Section change clears the collection + any in-flight "create new".
+    Effect::new(move |_| {
+        let _ = form.section_slug.get();
+        form.collection_id.set(None);
+        form.creating_new.set(false);
+        form.new_title.set(String::new());
+    });
+
+    // A successful inline create: refetch, select the new collection.
     Effect::new(move |_| {
         if let Some(Ok(id)) = create_action.value().get() {
             sections.refetch();
-            chosen_collection_id.set(Some(id));
-            creating_new.set(false);
-            new_collection_title.set(String::new());
+            form.collection_id.set(Some(id));
+            form.creating_new.set(false);
+            form.new_title.set(String::new());
         }
     });
 
+    // Pre-fill the "new collection" input with the first file's stem.
     Effect::new(move |_| {
-        if open.get() {
-            let sel = selection.get_untracked();
-            if sel.len() == 1 {
-                single_title.set(file_stem(&sel[0].name));
-            } else {
-                single_title.set(String::new());
-            }
-            chosen_section_slug.set(String::new());
-            chosen_collection_id.set(None);
-            season.set(String::new());
-            creating_new.set(false);
-            new_collection_title.set(String::new());
+        if form.creating_new.get()
+            && form.new_title.get_untracked().is_empty()
+            && let Some(first) = selection.get_untracked().first()
+        {
+            form.new_title.set(file_stem(&first.name));
         }
-    });
-
-    Effect::new(move |_| {
-        if !open.get() {
-            classify.reset();
-        }
-    });
-
-    Effect::new(move |_| {
-        let _ = chosen_section_slug.get();
-        chosen_collection_id.set(None);
-        creating_new.set(false);
-        new_collection_title.set(String::new());
     });
 
     let chosen_section: Signal<Option<SectionWithCollections>> = Signal::derive(move || {
-        let slug = chosen_section_slug.get();
+        let slug = form.section_slug.get();
         if slug.is_empty() {
             return None;
         }
@@ -1731,25 +1842,57 @@ fn ClassifyModal(
     });
 
     let chosen_is_series = Signal::derive(move || {
-        if file_kind.get() != Some(MediaKind::Video) {
-            return false;
-        }
-        chosen_section.get().map(|s| s.nested).unwrap_or(false)
+        file_kind.get() == Some(MediaKind::Video)
+            && chosen_section.get().map(|s| s.nested).unwrap_or(false)
     });
 
     Effect::new(move |_| {
-        if chosen_is_series.get() && season.get_untracked().trim().is_empty() {
-            season.set("1".to_string());
+        if chosen_is_series.get() && form.season.get_untracked().trim().is_empty() {
+            form.season.set("1".to_string());
         }
     });
 
+    let show_setup = Signal::derive(move || job.status().get().is_none());
+    let show_progress =
+        Signal::derive(move || job.status().get().is_some() && job.result_rw().get().is_none());
+    let show_final = Signal::derive(move || job.result_rw().get().is_some());
+    let is_busy = job.is_busy();
+
+    let can_move = Signal::derive(move || form.collection_id.get().is_some());
+
+    let confirm_label = Signal::derive(move || {
+        let n = selection.get().len();
+        if n <= 1 {
+            "Move".to_string()
+        } else {
+            format!("Move {n} files")
+        }
+    });
+
+    let subtitle = Signal::derive(move || {
+        let sel = selection.get();
+        match sel.len() {
+            0 => String::new(),
+            1 => sel[0].name.clone(),
+            n => format!("{n} files"),
+        }
+    });
+
+    let success_heading = Signal::derive(move || {
+        let n = selection.get().len();
+        if n <= 1 {
+            "Moved successfully".to_string()
+        } else {
+            format!("Moved {n} files")
+        }
+    });
+    let success_detail = Signal::derive(|| "The items are now in the collection.".to_string());
+
     let try_close = Callback::new(move |_: ()| {
-        let busy =
-            classify.status.get_untracked().is_some() && classify.result.get_untracked().is_none();
-        if busy {
+        if is_busy.get_untracked() {
             return;
         }
-        let success = matches!(classify.result.get_untracked(), Some(Ok(())));
+        let success = matches!(job.result_rw().get_untracked(), Some(Ok(())));
         open.set(false);
         if success {
             on_close.run(());
@@ -1757,21 +1900,18 @@ fn ClassifyModal(
     });
 
     let confirm = Callback::new(move |_: ()| {
+        let Some(col) = form.collection_id.get_untracked() else {
+            return;
+        };
         let sel = selection.get_untracked();
         if sel.is_empty() {
             return;
         }
-        let Some(col) = chosen_collection_id.get_untracked() else {
-            return;
-        };
-        let s = season.get_untracked();
-        let s = s.trim();
-        let season_num: Option<i64> = if s.is_empty() { None } else { s.parse().ok() };
-
-        let files: Vec<ClassifyInput> = if sel.len() == 1 {
+        let season = parse_season(&form.season.get_untracked());
+        let files = if sel.len() == 1 {
             vec![ClassifyInput {
                 rel_path: sel[0].rel_path.clone(),
-                title: single_title.get_untracked(),
+                title: form.title.get_untracked(),
             }]
         } else {
             sel.into_iter()
@@ -1781,471 +1921,236 @@ fn ClassifyModal(
                 })
                 .collect()
         };
-
-        classify.dispatch(files, col, season_num);
+        job.dispatch(files, col, season);
     });
 
     let submit_create = Callback::new(move |_: ()| {
-        let slug = chosen_section_slug.get_untracked();
-        if slug.is_empty() {
+        let slug = form.section_slug.get_untracked();
+        let title = form.new_title.get_untracked();
+        let title = title.trim();
+        if slug.is_empty() || title.is_empty() {
             return;
         }
-        let t = new_collection_title.get_untracked();
-        let t = t.trim();
-        if t.is_empty() {
-            return;
-        }
-        create_action.dispatch((slug, t.to_string()));
+        create_action.dispatch((slug, title.to_string()));
     });
 
     let cancel_create = Callback::new(move |_: ()| {
-        creating_new.set(false);
-        new_collection_title.set(String::new());
+        form.creating_new.set(false);
+        form.new_title.set(String::new());
     });
-
-    Effect::new(move |_| {
-        if creating_new.get() && new_collection_title.get_untracked().is_empty() {
-            if let Some(first) = selection.get_untracked().first() {
-                new_collection_title.set(file_stem(&first.name));
-            }
-        }
-    });
-
-    let show_setup = Signal::derive(move || classify.status.get().is_none());
-    let show_progress =
-        Signal::derive(move || classify.status.get().is_some() && classify.result.get().is_none());
-    let show_final = Signal::derive(move || classify.result.get().is_some());
-    let is_busy =
-        Signal::derive(move || classify.status.get().is_some() && classify.result.get().is_none());
-
-    let status_signal = Signal::derive(move || classify.status.get());
-    let error_signal = classify.error();
-    let create_error = action_error(create_action);
-    let create_pending = create_action.pending();
-
-    let can_move = Signal::derive(move || chosen_collection_id.get().is_some());
 
     view! {
         {move || {
-            if !open.get() {
+            if !open.get() || selection.get().is_empty() {
                 return ().into_any();
             }
-            let sel = selection.get();
-            if sel.is_empty() {
-                return ().into_any();
-            }
-
-            let count = sel.len();
-            let header_line = if count == 1 {
-                sel[0].name.clone()
+            let modal_title = if selection.get().len() == 1 {
+                "Classify file"
             } else {
-                format!("{count} files")
+                "Classify files"
             };
-
             view! {
-                <div
-                    class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm \
-                           flex items-center justify-center p-4"
-                    on:click=move |_| try_close.run(())
+                <ModalShell
+                    title=modal_title
+                    subtitle=subtitle
+                    busy=is_busy
+                    on_close=try_close
                 >
-                    <div
-                        class="bg-[#12121a] border border-white/10 rounded-2xl p-6 \
-                               w-full max-w-lg shadow-2xl max-h-[90vh] overflow-auto"
-                        on:click=|ev| ev.stop_propagation()
-                    >
-                        <div class="flex items-start justify-between gap-3 mb-4">
-                            <div class="min-w-0">
-                                <h3 class="text-white font-bold text-lg">
-                                    {if count == 1 { "Classify file" } else { "Classify files" }}
-                                </h3>
-                                <p class="text-gray-400 text-sm truncate mt-0.5">
-                                    {header_line}
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                on:click=move |_| try_close.run(())
-                                disabled=move || is_busy.get()
-                                class="text-gray-400 hover:text-white transition shrink-0 \
-                                       disabled:opacity-30 disabled:cursor-not-allowed"
-                                aria-label="Close"
-                            >
-                                "×"
-                            </button>
+                    <Show when=move || show_setup.get()>
+                        <div class="space-y-4">
+                            <Show when=move || is_single.get()>
+                                <TitleField value=form.title placeholder="Item title"/>
+                            </Show>
+                            <Show when=move || !is_single.get()>
+                                <div class="text-xs text-gray-500 bg-white/5 \
+                                            border border-white/10 rounded-lg px-3 py-2">
+                                    "Each file keeps its own name as the item title."
+                                </div>
+                            </Show>
+                            <SectionSelect
+                                options={Signal::derive(move || sections.get().and_then(|r| r.ok()).unwrap_or_default())}
+                                value=form.section_slug
+                            />
+                            <Show when=move || !form.section_slug.get().is_empty()>
+                                <CollectionPicker
+                                    section=chosen_section
+                                    collection_id=form.collection_id
+                                    creating_new=form.creating_new
+                                    new_title=form.new_title
+                                    create_pending=create_action.pending().into()
+                                    create_error=action_error(create_action)
+                                    on_submit_create=submit_create
+                                    on_cancel_create=cancel_create
+                                />
+                            </Show>
+                            <Show when=move || chosen_is_series.get()>
+                                <SeasonField value=form.season/>
+                            </Show>
+                            <FormActions
+                                on_cancel=try_close
+                                on_confirm=confirm
+                                confirm_label=confirm_label
+                                disabled=Signal::derive(move || !can_move.get())
+                            />
                         </div>
-
-                        <Show when=move || show_setup.get()>
-                            <div class="space-y-4">
-                                <Show when=move || is_single.get()>
-                                    <div>
-                                        <label class="text-xs text-gray-500 \
-                                                      uppercase tracking-wider">
-                                            "Title"
-                                        </label>
-                                        <input
-                                            type="text"
-                                            prop:value=move || single_title.get()
-                                            on:input=move |e| single_title.set(event_target_value(&e))
-                                            placeholder="Item title"
-                                            class="mt-1 w-full bg-white/10 text-white \
-                                                   rounded-lg px-3 py-1.5 text-sm \
-                                                   focus:outline-none focus:ring-1 \
-                                                   focus:ring-cyan-400"
-                                        />
-                                    </div>
-                                </Show>
-
-                                <Show when=move || !is_single.get()>
-                                    <div class="text-xs text-gray-500 bg-white/5 \
-                                                border border-white/10 rounded-lg \
-                                                px-3 py-2">
-                                        "Each file keeps its own name as the item title."
-                                    </div>
-                                </Show>
-
-                                <div>
-                                    <label class="text-xs text-gray-500 \
-                                                  uppercase tracking-wider">
-                                        "Section"
-                                    </label>
-                                    <select
-                                        prop:value=move || chosen_section_slug.get()
-                                        on:change=move |e| {
-                                            chosen_section_slug.set(event_target_value(&e))
-                                        }
-                                        class="mt-1 w-full bg-white/10 text-white \
-                                               rounded-lg px-3 py-1.5 text-sm \
-                                               focus:outline-none focus:ring-1 \
-                                               focus:ring-cyan-400"
-                                    >
-                                        <option value="">"Choose a section…"</option>
-                                        {move || {
-                                            sections
-                                                .get()
-                                                .and_then(|r| r.ok())
-                                                .unwrap_or_default()
-                                                .into_iter()
-                                                .map(|s| view! {
-                                                    <option value=s.slug.clone()>
-                                                        {s.title.clone()}
-                                                    </option>
-                                                })
-                                                .collect_view()
-                                        }}
-                                    </select>
-                                </div>
-
-                                <Show when=move || !chosen_section_slug.get().is_empty()>
-                                    <div>
-                                        <div class="flex items-center justify-between mb-1">
-                                            <label class="text-xs text-gray-500 \
-                                                          uppercase tracking-wider">
-                                                "Collection"
-                                            </label>
-                                            <Show when=move || !creating_new.get()>
-                                                <button
-                                                    type="button"
-                                                    on:click=move |_| creating_new.set(true)
-                                                    class="text-xs px-2 py-0.5 rounded-md \
-                                                           text-cyan-300 hover:text-white \
-                                                           bg-cyan-500/10 hover:bg-cyan-500/25 \
-                                                           border border-cyan-400/30 \
-                                                           transition whitespace-nowrap"
-                                                >
-                                                    "+ New collection"
-                                                </button>
-                                            </Show>
-                                        </div>
-
-                                        <Show when=move || !creating_new.get()>
-                                            {move || {
-                                                let Some(s) = chosen_section.get() else {
-                                                    return ().into_any();
-                                                };
-                                                if s.collections.is_empty() {
-                                                    return view! {
-                                                        <div class="text-sm text-gray-500 \
-                                                                    bg-white/5 border border-white/10 \
-                                                                    rounded-lg px-3 py-2">
-                                                            "No collections yet — click “+ New collection” above."
-                                                        </div>
-                                                    }
-                                                    .into_any();
-                                                }
-                                                view! {
-                                                    <select
-                                                        prop:value=move || {
-                                                            chosen_collection_id
-                                                                .get()
-                                                                .map(|u| u.to_string())
-                                                                .unwrap_or_default()
-                                                        }
-                                                        on:change=move |e| {
-                                                            let v = event_target_value(&e);
-                                                            chosen_collection_id.set(
-                                                                Uuid::parse_str(&v).ok(),
-                                                            );
-                                                        }
-                                                        class="w-full bg-white/10 text-white \
-                                                               rounded-lg px-3 py-1.5 text-sm \
-                                                               focus:outline-none focus:ring-1 \
-                                                               focus:ring-cyan-400"
-                                                    >
-                                                        <option value="">
-                                                            "Choose a collection…"
-                                                        </option>
-                                                        {s.collections
-                                                            .into_iter()
-                                                            .map(|c| view! {
-                                                                <option value=c.id.to_string()>
-                                                                    {c.title.clone()}
-                                                                </option>
-                                                            })
-                                                            .collect_view()}
-                                                    </select>
-                                                }
-                                                .into_any()
-                                            }}
-                                        </Show>
-
-                                        <Show when=move || creating_new.get()>
-                                            <div class="space-y-2">
-                                                <div class="flex items-stretch gap-2">
-                                                    <input
-                                                        type="text"
-                                                        prop:value=move || new_collection_title.get()
-                                                        on:input=move |e| {
-                                                            new_collection_title.set(event_target_value(&e))
-                                                        }
-                                                        on:keydown=move |e| {
-                                                            if e.key() == "Enter" {
-                                                                e.prevent_default();
-                                                                submit_create.run(());
-                                                            } else if e.key() == "Escape" {
-                                                                cancel_create.run(());
-                                                            }
-                                                        }
-                                                        autofocus=true
-                                                        placeholder="New collection title"
-                                                        class="flex-1 bg-white/10 text-white \
-                                                               rounded-lg px-3 py-1.5 text-sm \
-                                                               focus:outline-none focus:ring-1 \
-                                                               focus:ring-cyan-400"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        on:click=move |_| submit_create.run(())
-                                                        disabled=move || {
-                                                            create_pending.get()
-                                                                || new_collection_title
-                                                                    .get()
-                                                                    .trim()
-                                                                    .is_empty()
-                                                        }
-                                                        class="shrink-0 px-3 rounded-lg \
-                                                               bg-cyan-500/30 hover:bg-cyan-500/40 \
-                                                               text-white text-sm font-medium \
-                                                               transition disabled:opacity-50"
-                                                    >
-                                                        {move || if create_pending.get() {
-                                                            "Creating…"
-                                                        } else {
-                                                            "Create"
-                                                        }}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        on:click=move |_| cancel_create.run(())
-                                                        disabled=move || create_pending.get()
-                                                        class="shrink-0 px-3 rounded-lg \
-                                                               bg-white/5 hover:bg-white/15 \
-                                                               text-gray-300 text-sm \
-                                                               transition disabled:opacity-50"
-                                                    >
-                                                        "Cancel"
-                                                    </button>
-                                                </div>
-                                                <ErrorView error=create_error/>
-                                            </div>
-                                        </Show>
-                                    </div>
-                                </Show>
-
-                                <Show when=move || chosen_is_series.get()>
-                                    <div>
-                                        <label class="text-xs text-gray-500 \
-                                                      uppercase tracking-wider">
-                                            "Season"
-                                        </label>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            placeholder="1"
-                                            prop:value=move || season.get()
-                                            on:input=move |e| season.set(event_target_value(&e))
-                                            class="mt-1 w-full bg-white/10 text-white \
-                                                   rounded-lg px-3 py-1.5 text-sm \
-                                                   focus:outline-none focus:ring-1 \
-                                                   focus:ring-cyan-400"
-                                        />
-                                    </div>
-                                </Show>
-
-                                <div class="flex justify-end gap-2 pt-2">
-                                    <button
-                                        type="button"
-                                        on:click=move |_| try_close.run(())
-                                        class="px-4 py-2 rounded-lg text-gray-300 \
-                                               hover:bg-white/10 transition text-sm"
-                                    >
-                                        "Cancel"
-                                    </button>
-                                    <button
-                                        type="button"
-                                        on:click=move |_| confirm.run(())
-                                        disabled=move || !can_move.get()
-                                        class="px-4 py-2 rounded-lg \
-                                               bg-gradient-to-r from-cyan-500 to-blue-500 \
-                                               hover:from-cyan-400 hover:to-blue-400 \
-                                               text-white font-bold text-sm \
-                                               disabled:opacity-50 transition"
-                                    >
-                                        {move || {
-                                            let n = selection.get().len();
-                                            if n <= 1 {
-                                                "Move".to_string()
-                                            } else {
-                                                format!("Move {n} files")
-                                            }
-                                        }}
-                                    </button>
-                                </div>
-                            </div>
-                        </Show>
-
-                        <Show when=move || show_progress.get()>
-                            <div class="space-y-3">
-                                <UploadProgress status=status_signal/>
-                                <div class="text-xs text-gray-500 text-center pt-2">
-                                    "Please wait — files are being moved."
-                                </div>
-                            </div>
-                        </Show>
-
-                        <Show when=move || show_final.get()>
-                            <div class="space-y-4">
-                                <Show when=move || {
-                                    matches!(classify.result.get(), Some(Ok(())))
-                                }>
-                                    <div class="bg-green-500/15 border border-green-500/30 \
-                                                rounded-xl p-4 flex items-start gap-3">
-                                        <span class="text-green-400 text-xl \
-                                                     leading-none shrink-0">
-                                            "✓"
-                                        </span>
-                                        <div class="min-w-0">
-                                            <div class="text-green-300 font-bold">
-                                                {move || {
-                                                    let n = selection.get().len();
-                                                    if n <= 1 { "Moved successfully".to_string() }
-                                                    else { format!("Moved {n} files") }
-                                                }}
-                                            </div>
-                                            <div class="text-green-300/70 text-xs mt-1">
-                                                "The items are now in the collection."
-                                            </div>
-                                        </div>
-                                    </div>
-                                </Show>
-
-                                <Show when=move || {
-                                    matches!(classify.result.get(), Some(Err(_)))
-                                }>
-                                    <ErrorView
-                                        error=error_signal
-                                        style=ErrorStyle::Banner
-                                        heading="Move failed"
-                                    />
-                                </Show>
-
-                                <div class="flex justify-end">
-                                    <button
-                                        type="button"
-                                        on:click=move |_| try_close.run(())
-                                        class="px-4 py-2 rounded-lg bg-white/10 \
-                                               hover:bg-white/20 text-white text-sm \
-                                               transition"
-                                    >
-                                        "Close"
-                                    </button>
-                                </div>
-                            </div>
-                        </Show>
-                    </div>
-                </div>
-            }
-            .into_any()
+                    </Show>
+                    <Show when=move || show_progress.get()>
+                        <PhaseProgress status=job.status() message="Please wait — files are being moved."/>
+                    </Show>
+                    <Show when=move || show_final.get()>
+                        <PhaseFinal
+                            result=job.result_rw()
+                            error=job.error()
+                            success_heading=success_heading
+                            success_detail=success_detail
+                            on_close=try_close
+                        />
+                    </Show>
+                </ModalShell>
+            }.into_any()
         }}
     }
 }
 
-// ─── Folder classify modal ────────────────────────────────────────────────────
+#[component]
+fn CollectionPicker(
+    section: Signal<Option<SectionWithCollections>>,
+    collection_id: RwSignal<Option<Uuid>>,
+    creating_new: RwSignal<bool>,
+    new_title: RwSignal<String>,
+    create_pending: Signal<bool>,
+    create_error: Signal<Option<AppError>>,
+    on_submit_create: Callback<()>,
+    on_cancel_create: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <div>
+            <div class="flex items-center justify-between mb-1">
+                <label class="text-xs text-gray-500 uppercase tracking-wider">"Collection"</label>
+                <Show when=move || !creating_new.get()>
+                    <button type="button"
+                        on:click=move |_| creating_new.set(true)
+                        class="text-xs px-2 py-0.5 rounded-md text-cyan-300 hover:text-white \
+                               bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/30 \
+                               transition whitespace-nowrap">
+                        "+ New collection"
+                    </button>
+                </Show>
+            </div>
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum DestinationMode {
-    Existing,
-    New,
+            <Show when=move || !creating_new.get()>
+                {move || match section.get() {
+                    None => ().into_any(),
+                    Some(s) if s.collections.is_empty() => view! {
+                        <div class="text-sm text-gray-500 bg-white/5 border border-white/10 \
+                                    rounded-lg px-3 py-2">
+                            "No collections yet — click “+ New collection” above."
+                        </div>
+                    }.into_any(),
+                    Some(s) => view! {
+                        <select
+                            prop:value=move || collection_id.get().map(|u| u.to_string()).unwrap_or_default()
+                            on:change=move |e| collection_id.set(Uuid::parse_str(&event_target_value(&e)).ok())
+                            class="w-full bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
+                                   focus:outline-none focus:ring-1 focus:ring-cyan-400">
+                            <option value="">"Choose a collection…"</option>
+                            {s.collections.into_iter().map(|c| view! {
+                                <option value=c.id.to_string()>{c.title.clone()}</option>
+                            }).collect_view()}
+                        </select>
+                    }.into_any(),
+                }}
+            </Show>
+
+            <Show when=move || creating_new.get()>
+                <div class="space-y-2">
+                    <div class="flex items-stretch gap-2">
+                        <input type="text"
+                            prop:value=move || new_title.get()
+                            on:input=move |e| new_title.set(event_target_value(&e))
+                            on:keydown=move |e| {
+                                if e.key() == "Enter" { e.prevent_default(); on_submit_create.run(()); }
+                                else if e.key() == "Escape" { on_cancel_create.run(()); }
+                            }
+                            autofocus=true
+                            placeholder="New collection title"
+                            class="flex-1 bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
+                                   focus:outline-none focus:ring-1 focus:ring-cyan-400"/>
+                        <button type="button"
+                            on:click=move |_| on_submit_create.run(())
+                            disabled=move || create_pending.get() || new_title.get().trim().is_empty()
+                            class="shrink-0 px-3 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/40 \
+                                   text-white text-sm font-medium transition disabled:opacity-50">
+                            {move || if create_pending.get() { "Creating…" } else { "Create" }}
+                        </button>
+                        <button type="button"
+                            on:click=move |_| on_cancel_create.run(())
+                            disabled=move || create_pending.get()
+                            class="shrink-0 px-3 rounded-lg bg-white/5 hover:bg-white/15 \
+                                   text-gray-300 text-sm transition disabled:opacity-50">
+                            "Cancel"
+                        </button>
+                    </div>
+                    <ErrorView error=create_error/>
+                </div>
+            </Show>
+        </div>
+    }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Folder classify modal
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[component]
 fn FolderClassifyModal(
-    folder_target: RwSignal<Option<UnclassifiedEntry>>,
+    target: RwSignal<Option<UnclassifiedEntry>>,
     job: FolderClassifyJob,
     on_close: Callback<()>,
 ) -> impl IntoView {
-    // Inspection resource — runs whenever the target folder changes.
     let inspection: Resource<Result<FolderInspection, AppError>> = Resource::new(
-        move || folder_target.get().map(|e| e.rel_path),
-        |maybe_path| async move {
-            match maybe_path {
+        move || target.get().map(|e| e.rel_path),
+        |p| async move {
+            match p {
                 Some(path) => inspect_unclassified_folder(path).await,
                 None => Err(AppError::public("No folder selected")),
             }
         },
     );
 
-    // Existing sections for the folder's dominant kind.
+    let dominant = Memo::new(move |_| {
+        inspection
+            .get()
+            .and_then(|r| r.ok())
+            .and_then(|i| i.dominant_kind)
+    });
+
     let sections: Resource<Result<Vec<SectionWithCollections>, AppError>> = Resource::new(
         move || {
-            let kind = inspection
-                .get()
-                .and_then(|r| r.ok())
-                .and_then(|i| i.dominant_kind)
-                .map(|k| k.as_str().to_string());
-            (folder_target.get().map(|e| e.rel_path), kind)
+            let kind = dominant.get().map(|k| k.as_str().to_string())?;
+            Some((target.get()?.rel_path, kind))
         },
-        |(_path, kind)| async move {
-            match kind {
-                Some(s) => fetch_sections_with_collections(s).await,
+        |input| async move {
+            match input {
+                Some((_, kind)) => fetch_sections_with_collections(kind).await,
                 None => Ok(Vec::new()),
             }
         },
     );
 
-    let mode: RwSignal<DestinationMode> = RwSignal::new(DestinationMode::New);
-    let chosen_section_slug = RwSignal::new(String::new());
+    let mode = RwSignal::new(DestinationMode::New);
+    let section_slug = RwSignal::new(String::new());
     let section_title = RwSignal::new(String::new());
 
-    // Reset the picker whenever the target folder changes.
+    // Reset picker per folder.
     Effect::new(move |_| {
-        let _ = folder_target.get();
-        // Default to New section — that's the primary flow for folder classify.
+        let _ = target.get();
         mode.set(DestinationMode::New);
-        chosen_section_slug.set(String::new());
+        section_slug.set(String::new());
         section_title.set(String::new());
     });
 
-    // Prefill the section title with the folder name once inspection resolves.
+    // Prefill the "new section title" with the folder name.
     Effect::new(move |_| {
         if let Some(Ok(insp)) = inspection.get()
             && section_title.get_untracked().trim().is_empty()
@@ -2254,44 +2159,88 @@ fn FolderClassifyModal(
         }
     });
 
-    // If inspection succeeds and there are no usable existing sections, force
-    // New mode so the user isn't stuck on an empty dropdown.
+    // Reset the running job when the modal closes.
     Effect::new(move |_| {
-        if let Some(Ok(insp)) = inspection.get()
-            && let Some(Ok(list)) = sections.get()
-        {
-            let usable = list.iter().any(|s| !insp.has_subdirs || s.nested);
-            if !usable {
-                mode.set(DestinationMode::New);
-            }
-        }
-    });
-
-    Effect::new(move |_| {
-        if folder_target.get().is_none() {
+        if target.get().is_none() {
             job.reset();
         }
     });
 
+    let existing_options: Signal<Vec<SectionWithCollections>> = Signal::derive(move || {
+        let nested_only = inspection
+            .get()
+            .and_then(|r| r.ok())
+            .map(|i| i.has_subdirs)
+            .unwrap_or(false);
+        sections
+            .get()
+            .and_then(|r| r.ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| !nested_only || s.nested)
+            .collect()
+    });
+
+    let has_existing = Signal::derive(move || !existing_options.get().is_empty());
+
+    // If no existing section is usable, force New mode.
+    Effect::new(move |_| {
+        if inspection.get().is_some() && !has_existing.get() {
+            mode.set(DestinationMode::New);
+        }
+    });
+
+    let is_busy = job.is_busy();
+    let show_setup = Signal::derive(move || job.status().get().is_none());
+    let show_progress =
+        Signal::derive(move || job.status().get().is_some() && job.result_rw().get().is_none());
+    let show_final = Signal::derive(move || job.result_rw().get().is_some());
+
+    let subtitle = Signal::derive(move || target.get().map(|e| e.name).unwrap_or_default());
+
+    let can_confirm = Signal::derive(move || {
+        if !matches!(inspection.get(), Some(Ok(ref i)) if i.dominant_kind.is_some()) {
+            return false;
+        }
+        match mode.get() {
+            DestinationMode::Existing => !section_slug.get().is_empty(),
+            DestinationMode::New => !section_title.get().trim().is_empty(),
+        }
+    });
+
+    let confirm_label = Signal::derive(move || match inspection.get().and_then(|r| r.ok()) {
+        Some(i) if i.has_subdirs => format!("Classify folder ({})", i.subdir_names.len()),
+        _ => "Classify folder".to_string(),
+    });
+
+    let success_heading = Signal::derive(|| "Folder classified".to_string());
+    let success_detail = Signal::derive(move || match inspection.get().and_then(|r| r.ok()) {
+        Some(i) if i.has_subdirs => format!(
+            "{} collection{} created.",
+            i.subdir_names.len(),
+            if i.subdir_names.len() == 1 { "" } else { "s" },
+        ),
+        _ => "Files added to the collection.".to_string(),
+    });
+
     let try_close = Callback::new(move |_: ()| {
-        let busy = job.status.get_untracked().is_some() && job.result.get_untracked().is_none();
-        if busy {
+        if is_busy.get_untracked() {
             return;
         }
-        let success = matches!(job.result.get_untracked(), Some(Ok(())));
-        folder_target.set(None);
+        let success = matches!(job.result_rw().get_untracked(), Some(Ok(())));
+        target.set(None);
         if success {
             on_close.run(());
         }
     });
 
     let confirm = Callback::new(move |_: ()| {
-        let Some(entry) = folder_target.get_untracked() else {
+        let Some(entry) = target.get_untracked() else {
             return;
         };
         let dest = match mode.get_untracked() {
             DestinationMode::Existing => {
-                let slug = chosen_section_slug.get_untracked();
+                let slug = section_slug.get_untracked();
                 if slug.is_empty() {
                     return;
                 }
@@ -2311,402 +2260,191 @@ fn FolderClassifyModal(
         job.dispatch(entry.rel_path.clone(), dest);
     });
 
-    let show_setup = Signal::derive(move || job.status.get().is_none());
-    let show_progress =
-        Signal::derive(move || job.status.get().is_some() && job.result.get().is_none());
-    let show_final = Signal::derive(move || job.result.get().is_some());
-    let is_busy = Signal::derive(move || job.status.get().is_some() && job.result.get().is_none());
-
-    let status_signal = Signal::derive(move || job.status.get());
-    let error_signal = job.error();
-
-    let can_move = Signal::derive(move || {
-        if !matches!(inspection.get(), Some(Ok(i)) if i.dominant_kind.is_some()) {
-            return false;
-        }
-        match mode.get() {
-            DestinationMode::Existing => !chosen_section_slug.get().is_empty(),
-            DestinationMode::New => !section_title.get().trim().is_empty(),
-        }
-    });
-
     view! {
         {move || {
-            let Some(entry) = folder_target.get() else {
+            if target.get().is_none() {
                 return ().into_any();
-            };
-            let folder_name = entry.name.clone();
-
+            }
             view! {
-                <div
-                    class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm \
-                           flex items-center justify-center p-4"
-                    on:click=move |_| try_close.run(())
+                <ModalShell
+                    title="Classify folder"
+                    subtitle=subtitle
+                    busy=is_busy
+                    on_close=try_close
                 >
-                    <div
-                        class="bg-[#12121a] border border-white/10 rounded-2xl p-6 \
-                               w-full max-w-lg shadow-2xl max-h-[90vh] overflow-auto"
-                        on:click=|ev| ev.stop_propagation()
-                    >
-                        <div class="flex items-start justify-between gap-3 mb-4">
-                            <div class="min-w-0">
-                                <h3 class="text-white font-bold text-lg">
-                                    "Classify folder"
-                                </h3>
-                                <p class="text-gray-400 text-sm truncate mt-0.5">
-                                    {folder_name}
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                on:click=move |_| try_close.run(())
-                                disabled=move || is_busy.get()
-                                class="text-gray-400 hover:text-white transition shrink-0 \
-                                       disabled:opacity-30 disabled:cursor-not-allowed"
-                                aria-label="Close"
-                            >
-                                "×"
-                            </button>
-                        </div>
+                    <Show when=move || show_setup.get()>
+                        <FolderSetup
+                            inspection=inspection
+                            existing_options=existing_options
+                            has_existing=has_existing
+                            mode
+                            section_slug
+                            section_title
+                            can_confirm=can_confirm
+                            confirm_label=confirm_label
+                            on_cancel=try_close
+                            on_confirm=confirm
+                        />
+                    </Show>
+                    <Show when=move || show_progress.get()>
+                        <PhaseProgress status=job.status() message="Please wait — files are being moved."/>
+                    </Show>
+                    <Show when=move || show_final.get()>
+                        <PhaseFinal
+                            result=job.result_rw()
+                            error=job.error()
+                            success_heading=success_heading
+                            success_detail=success_detail
+                            on_close=try_close
+                        />
+                    </Show>
+                </ModalShell>
+            }.into_any()
+        }}
+    }
+}
 
-                        <Show when=move || show_setup.get()>
-                            {move || match inspection.get() {
-                                None => view! {
-                                    <div class="py-8 text-center text-gray-500 text-sm">
-                                        "Inspecting folder…"
-                                    </div>
-                                }
-                                .into_any(),
-                                Some(Err(e)) => view! {
-                                    <div class="py-4">
-                                        <ErrorView
-                                            error=Signal::derive(move || Some(e.clone()))
-                                            style=ErrorStyle::Banner
-                                            heading="Cannot classify folder"
-                                        />
-                                    </div>
-                                }
-                                .into_any(),
-                                Some(Ok(insp)) => {
-                                    if insp.dominant_kind.is_none() {
-                                        return view! {
-                                            <div class="py-4 space-y-3">
-                                                <ErrorView
-                                                    error=Signal::derive(move || Some(AppError::public(
-                                                        "This folder has no media files, or mixes video and audio. Split it up or move it manually."
-                                                    )))
-                                                    style=ErrorStyle::Banner
-                                                    heading="Cannot classify folder"
-                                                />
-                                                <div class="flex justify-end">
-                                                    <button
-                                                        type="button"
-                                                        on:click=move |_| try_close.run(())
-                                                        class="px-4 py-2 rounded-lg bg-white/10 \
-                                                               hover:bg-white/20 text-white text-sm transition"
-                                                    >
-                                                        "Close"
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        }
-                                        .into_any();
-                                    }
-
-                                    let has_subdirs = insp.has_subdirs;
-                                    let file_count = insp.file_count;
-                                    let total_size = insp.total_size;
-                                    let subdir_names = insp.subdir_names.clone();
-                                    let n_subdirs = subdir_names.len();
-                                    let subdir_names = StoredValue::new(subdir_names);
-                                    let kind = insp.dominant_kind.unwrap();
-                                    let kind_str = kind.label().to_string();
-                                    let nested_hint = if has_subdirs {
-                                        "nested"
-                                    } else {
-                                        "non-nested"
-                                    };
-
-                                    let summary_line = if has_subdirs {
-                                        format!(
-                                            "{n_subdirs} subfolder{} · {file_count} file{} · {} · {} {}",
-                                            if n_subdirs == 1 { "" } else { "s" },
-                                            if file_count == 1 { "" } else { "s" },
-                                            format_size(total_size),
-                                            kind_str,
-                                            nested_hint,
-                                        )
-                                    } else {
-                                        format!(
-                                            "{file_count} file{} · {} · {} {}",
-                                            if file_count == 1 { "" } else { "s" },
-                                            format_size(total_size),
-                                            kind_str,
-                                            nested_hint,
-                                        )
-                                    };
-
-                                    let explanation = if has_subdirs {
-                                        "Each subfolder becomes its own collection. Only series / group sections are valid destinations."
-                                    } else {
-                                        "A new collection is created and every file here becomes an item in it."
-                                    };
-
-                                    // Sections the user may pick in Existing mode.
-                                    let available_sections: Signal<Vec<SectionWithCollections>> =
-                                        Signal::derive(move || {
-                                            sections
-                                                .get()
-                                                .and_then(|r| r.ok())
-                                                .unwrap_or_default()
-                                                .into_iter()
-                                                .filter(|s| !has_subdirs || s.nested)
-                                                .collect()
-                                        });
-
-                                    let has_usable_existing = {
-                                        let list_signal = available_sections;
-                                        Signal::derive(move || !list_signal.get().is_empty())
-                                    };
-
-                                    view! {
-                                        <div class="space-y-4">
-                                            <div class="text-xs text-gray-400 bg-white/5 \
-                                                        border border-white/10 rounded-lg \
-                                                        px-3 py-2">
-                                                <div class="text-white text-sm font-medium mb-0.5">
-                                                    {summary_line}
-                                                </div>
-                                                <div>{explanation}</div>
-                                            </div>
-
-                                            // ── Destination mode toggle ──
-                                            <div>
-                                                <div class="text-xs text-gray-500 \
-                                                            uppercase tracking-wider mb-1">
-                                                    "Destination"
-                                                </div>
-                                                <div class="inline-flex rounded-lg \
-                                                            bg-white/5 border border-white/10 p-0.5">
-                                                    <button
-                                                        type="button"
-                                                        on:click=move |_| mode.set(DestinationMode::New)
-                                                        class=move || {
-                                                            let active = mode.get() == DestinationMode::New;
-                                                            format!(
-                                                                "text-xs px-3 py-1.5 rounded-md transition {}",
-                                                                if active {
-                                                                    "bg-cyan-500/25 text-white"
-                                                                } else {
-                                                                    "text-gray-400 hover:text-white"
-                                                                },
-                                                            )
-                                                        }
-                                                    >
-                                                        "New section"
-                                                    </button>
-                                                    <Show when=move || has_usable_existing.get()>
-                                                        <button
-                                                            type="button"
-                                                            on:click=move |_| mode.set(DestinationMode::Existing)
-                                                            class=move || {
-                                                                let active = mode.get() == DestinationMode::Existing;
-                                                                format!(
-                                                                    "text-xs px-3 py-1.5 rounded-md transition {}",
-                                                                    if active {
-                                                                        "bg-cyan-500/25 text-white"
-                                                                    } else {
-                                                                        "text-gray-400 hover:text-white"
-                                                                    },
-                                                                )
-                                                            }
-                                                        >
-                                                            "Existing section"
-                                                        </button>
-                                                    </Show>
-                                                </div>
-                                            </div>
-
-                                            // ── New section ──
-                                            <Show when=move || mode.get() == DestinationMode::New>
-                                                <div>
-                                                    <label class="text-xs text-gray-500 \
-                                                                  uppercase tracking-wider">
-                                                        "Section title"
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        prop:value=move || section_title.get()
-                                                        on:input=move |e| {
-                                                            section_title.set(event_target_value(&e))
-                                                        }
-                                                        placeholder="Section title"
-                                                        class="mt-1 w-full bg-white/10 text-white \
-                                                               rounded-lg px-3 py-1.5 text-sm \
-                                                               focus:outline-none focus:ring-1 \
-                                                               focus:ring-cyan-400"
-                                                    />
-                                                </div>
-                                                <div class="text-xs text-gray-500 \
-                                                            bg-white/5 border border-white/10 \
-                                                            rounded-lg px-3 py-2">
-                                                    {if has_subdirs {
-                                                        format!(
-                                                            "A new nested section is created. Each subfolder becomes a collection:",
-                                                        )
-                                                    } else {
-                                                        "A new non-nested section is created, containing one collection with all files.".to_string()
-                                                    }}
-                                                </div>
-                                                <Show when=move || has_subdirs>
-                                                    <div class="text-xs text-gray-400 bg-white/5 border border-white/10 \
-                                                                rounded-lg px-3 py-2 max-h-40 overflow-auto">
-                                                        <ul class="space-y-0.5">
-                                                    {move || subdir_names
-                                                        .read_value()
-                                                        .iter()
-                                                        .map(|name| {
-                                                            let name = name.clone();
-                                                            view! { <li class="truncate text-white">"• " {name}</li> }
-                                                        })
-                                                        .collect_view()}
-
-                                                        </ul>
-                                                    </div>
-                                                </Show>
-                                            </Show>
-
-                                            // ── Existing section ──
-                                            <Show when=move || mode.get() == DestinationMode::Existing>
-                                                <div>
-                                                    <label class="text-xs text-gray-500 \
-                                                                  uppercase tracking-wider">
-                                                        "Section"
-                                                    </label>
-                                                    <select
-                                                        prop:value=move || chosen_section_slug.get()
-                                                        on:change=move |e| {
-                                                            chosen_section_slug.set(event_target_value(&e))
-                                                        }
-                                                        class="mt-1 w-full bg-white/10 text-white \
-                                                               rounded-lg px-3 py-1.5 text-sm \
-                                                               focus:outline-none focus:ring-1 \
-                                                               focus:ring-cyan-400"
-                                                    >
-                                                        <option value="">"Choose a section…"</option>
-                                                        {move || {
-                                                            available_sections
-                                                                .get()
-                                                                .into_iter()
-                                                                .map(|s| view! {
-                                                                    <option value=s.slug.clone()>
-                                                                        {s.title.clone()}
-                                                                    </option>
-                                                                })
-                                                                .collect_view()
-                                                        }}
-                                                    </select>
-                                                </div>
-                                            </Show>
-
-                                            <div class="flex justify-end gap-2 pt-2">
-                                                <button
-                                                    type="button"
-                                                    on:click=move |_| try_close.run(())
-                                                    class="px-4 py-2 rounded-lg text-gray-300 \
-                                                           hover:bg-white/10 transition text-sm"
-                                                >
-                                                    "Cancel"
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    on:click=move |_| confirm.run(())
-                                                    disabled=move || !can_move.get()
-                                                    class="px-4 py-2 rounded-lg \
-                                                           bg-gradient-to-r from-cyan-500 to-blue-500 \
-                                                           hover:from-cyan-400 hover:to-blue-400 \
-                                                           text-white font-bold text-sm \
-                                                           disabled:opacity-50 transition"
-                                                >
-                                                    {if has_subdirs {
-                                                        format!("Classify folder ({n_subdirs})")
-                                                    } else {
-                                                        "Classify folder".to_string()
-                                                    }}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    }
-                                    .into_any()
-                                }
-                            }}
-                        </Show>
-
-                        <Show when=move || show_progress.get()>
-                            <div class="space-y-3">
-                                <UploadProgress status=status_signal/>
-                                <div class="text-xs text-gray-500 text-center pt-2">
-                                    "Please wait — files are being moved."
-                                </div>
-                            </div>
-                        </Show>
-
-                        <Show when=move || show_final.get()>
-                            <div class="space-y-4">
-                                <Show when=move || {
-                                    matches!(job.result.get(), Some(Ok(())))
-                                }>
-                                    <div class="bg-green-500/15 border border-green-500/30 \
-                                                rounded-xl p-4 flex items-start gap-3">
-                                        <span class="text-green-400 text-xl \
-                                                     leading-none shrink-0">
-                                            "✓"
-                                        </span>
-                                        <div class="min-w-0">
-                                            <div class="text-green-300 font-bold">
-                                                "Folder classified"
-                                            </div>
-                                            <div class="text-green-300/70 text-xs mt-1">
-                                                {move || match inspection.get() {
-                                                    Some(Ok(i)) if i.has_subdirs => format!(
-                                                        "{} collection{} created.",
-                                                        i.subdir_names.len(),
-                                                        if i.subdir_names.len() == 1 { "" } else { "s" },
-                                                    ),
-                                                    _ => "Files added to the collection.".to_string(),
-                                                }}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </Show>
-
-                                <Show when=move || {
-                                    matches!(job.result.get(), Some(Err(_)))
-                                }>
-                                    <ErrorView
-                                        error=error_signal
-                                        style=ErrorStyle::Banner
-                                        heading="Classify failed"
-                                    />
-                                </Show>
-
-                                <div class="flex justify-end">
-                                    <button
-                                        type="button"
-                                        on:click=move |_| try_close.run(())
-                                        class="px-4 py-2 rounded-lg bg-white/10 \
-                                               hover:bg-white/20 text-white text-sm \
-                                               transition"
-                                    >
-                                        "Close"
-                                    </button>
-                                </div>
-                            </div>
-                        </Show>
+#[component]
+fn FolderSetup(
+    inspection: Resource<Result<FolderInspection, AppError>>,
+    existing_options: Signal<Vec<SectionWithCollections>>,
+    has_existing: Signal<bool>,
+    mode: RwSignal<DestinationMode>,
+    section_slug: RwSignal<String>,
+    section_title: RwSignal<String>,
+    can_confirm: Signal<bool>,
+    confirm_label: Signal<String>,
+    on_cancel: Callback<()>,
+    on_confirm: Callback<()>,
+) -> impl IntoView {
+    view! {
+        {move || match inspection.get() {
+            None => view! {
+                <div class="py-8 text-center text-gray-500 text-sm">"Inspecting folder…"</div>
+            }.into_any(),
+            Some(Err(e)) => view! {
+                <div class="py-4">
+                    <ErrorView
+                        error=Signal::derive(move || Some(e.clone()))
+                        style=ErrorStyle::Banner
+                        heading="Cannot classify folder"/>
+                </div>
+            }.into_any(),
+            Some(Ok(insp)) if insp.dominant_kind.is_none() => view! {
+                <div class="py-4 space-y-3">
+                    <ErrorView
+                        error=Signal::derive(|| Some(AppError::public(
+                            "This folder has no media files, or mixes video and audio. \
+                             Split it up or move it manually."
+                        )))
+                        style=ErrorStyle::Banner
+                        heading="Cannot classify folder"/>
+                    <div class="flex justify-end">
+                        <button type="button"
+                            on:click=move |_| on_cancel.run(())
+                            class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 \
+                                   text-white text-sm transition">
+                            "Close"
+                        </button>
                     </div>
                 </div>
+            }.into_any(),
+            Some(Ok(insp)) => {
+                let has_subdirs = insp.has_subdirs;
+                let subdirs_sv = StoredValue::new(insp.subdir_names.clone());
+                let n_subdirs = insp.subdir_names.len();
+                let kind_label = insp.dominant_kind.unwrap().label().to_string();
+
+                let summary = format!(
+                    "{} · {} · {} · {}",
+                    if has_subdirs {
+                        format!("{n_subdirs} subfolder{}", plural(n_subdirs))
+                    } else {
+                        format!("{} file{}", insp.file_count, plural(insp.file_count))
+                    },
+                    format_size(insp.total_size),
+                    kind_label,
+                    if has_subdirs { "nested" } else { "non-nested" },
+                );
+
+                view! {
+                    <div class="space-y-4">
+                        <div class="text-xs text-gray-400 bg-white/5 border border-white/10 \
+                                    rounded-lg px-3 py-2">
+                            <div class="text-white text-sm font-medium mb-0.5">{summary}</div>
+                            <div>{if has_subdirs {
+                                "Each subfolder becomes its own collection. Only series / group sections are valid destinations."
+                            } else {
+                                "A new collection is created and every file here becomes an item in it."
+                            }}</div>
+                        </div>
+
+                        <DestinationToggle mode has_existing/>
+
+                        <Show when=move || mode.get() == DestinationMode::New>
+                            <div class="space-y-3">
+                                <TitleField label="Section title" value=section_title placeholder="Section title"/>
+                                <Show when=move || has_subdirs>
+                                    <div class="text-xs text-gray-400 bg-white/5 \
+                                                border border-white/10 rounded-lg px-3 py-2 \
+                                                max-h-40 overflow-auto">
+                                        <div class="text-gray-500 uppercase tracking-wider mb-1">
+                                            "New collections"
+                                        </div>
+                                        <ul class="space-y-0.5">
+                                            {move || subdirs_sv.with_value(|v| {
+                                                v.iter().map(|name| view! {
+                                                    <li class="truncate text-white">"• " {name.clone()}</li>
+                                                }).collect_view()
+                                            })}
+                                        </ul>
+                                    </div>
+                                </Show>
+                            </div>
+                        </Show>
+
+                        <Show when=move || mode.get() == DestinationMode::Existing>
+                            <SectionSelect options=existing_options value=section_slug/>
+                        </Show>
+
+                        <FormActions
+                            on_cancel=on_cancel
+                            on_confirm=on_confirm
+                            confirm_label=confirm_label
+                            disabled=Signal::derive(move || !can_confirm.get())
+                        />
+                    </div>
+                }.into_any()
             }
-            .into_any()
         }}
+    }
+}
+
+#[component]
+fn DestinationToggle(mode: RwSignal<DestinationMode>, has_existing: Signal<bool>) -> impl IntoView {
+    let btn = move |this: DestinationMode, label: &'static str| {
+        let class = move || {
+            let active = mode.get() == this;
+            if active {
+                "text-xs px-3 py-1.5 rounded-md transition bg-cyan-500/25 text-white"
+            } else {
+                "text-xs px-3 py-1.5 rounded-md transition text-gray-400 hover:text-white"
+            }
+        };
+        view! {
+            <button type="button" on:click=move |_| mode.set(this) class=class>{label}</button>
+        }
+    };
+
+    view! {
+        <div>
+            <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">"Destination"</div>
+            <div class="inline-flex rounded-lg bg-white/5 border border-white/10 p-0.5">
+                {btn(DestinationMode::New, "New section")}
+                <Show when=move || has_existing.get()>
+                    {btn(DestinationMode::Existing, "Existing section")}
+                </Show>
+            </div>
+        </div>
     }
 }
