@@ -17,6 +17,16 @@
 //!
 //! Progress is reported through the shared `state.jobs` map, exactly like the
 //! normal upload flow.
+//!
+//! ## Safety guards
+//!
+//! * `ensure_roots_disjoint` refuses to operate if `unclassified_dir` and
+//!   `media_root` overlap — a rename-onto-itself would otherwise silently
+//!   delete files.
+//! * `acquire_classify_lock` serialises classifications of the same folder
+//!   so two concurrent requests can't race each other's file moves.
+//! * `existing_collection_titles` prevents a retry after partial failure from
+//!   producing duplicate collections.
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::either::Either;
@@ -240,6 +250,8 @@ struct WorkItem {
     title: String,
     season: Option<i64>,
     files: Vec<RawFile>,
+    /// Source directory to try removing after this item's files have moved.
+    cleanup_dir: std::path::PathBuf,
 }
 
 #[cfg(feature = "ssr")]
@@ -337,9 +349,8 @@ async fn build_work_items(
     kind: MediaKind,
     nested: bool,
     destination: &FolderDestination,
-) -> Result<(Vec<WorkItem>, Vec<std::path::PathBuf>), AppError> {
+) -> Result<Vec<WorkItem>, AppError> {
     let mut work = Vec::new();
-    let mut cleanup = Vec::new();
 
     if has_subdirs {
         for sub in subdirs {
@@ -349,17 +360,17 @@ async fn build_work_items(
                 continue;
             }
             ensure_kind_matches(&files, kind)?;
-            cleanup.push(sub_abs);
             work.push(WorkItem {
                 title: sub.clone(),
                 season: (kind == MediaKind::Video).then_some(1),
                 files,
+                cleanup_dir: sub_abs,
             });
         }
         if work.is_empty() {
             return Err(AppError::public("No media files found in any subfolder"));
         }
-        return Ok((work, cleanup));
+        return Ok(work);
     }
 
     let files = collect_files(abs, false).await?;
@@ -383,15 +394,104 @@ async fn build_work_items(
         }
         FolderDestination::Existing { .. } => folder_name,
     };
-    cleanup.push(abs.to_path_buf());
-    Ok((
-        vec![WorkItem {
-            title,
-            season: (nested && kind == MediaKind::Video).then_some(1),
-            files,
-        }],
-        cleanup,
-    ))
+    Ok(vec![WorkItem {
+        title,
+        season: (nested && kind == MediaKind::Video).then_some(1),
+        files,
+        cleanup_dir: abs.to_path_buf(),
+    }])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Concurrency & config guards (SSR only)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// Set of canonical source paths that currently have a classification job
+/// running against them. Prevents two requests from racing the same tree.
+#[cfg(feature = "ssr")]
+fn active_classifications()
+-> &'static std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>> {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+
+    static SET: OnceLock<Mutex<HashSet<std::path::PathBuf>>> = OnceLock::new();
+    SET.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+#[cfg(feature = "ssr")]
+struct ClassifyLock(std::path::PathBuf);
+
+#[cfg(feature = "ssr")]
+impl Drop for ClassifyLock {
+    fn drop(&mut self) {
+        let mut set = active_classifications()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set.remove(&self.0);
+    }
+}
+
+#[cfg(feature = "ssr")]
+fn acquire_classify_lock(path: std::path::PathBuf) -> Result<ClassifyLock, AppError> {
+    let mut set = active_classifications()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if !set.insert(path.clone()) {
+        return Err(AppError::public(
+            "A classification is already running for this folder",
+        ));
+    }
+    Ok(ClassifyLock(path))
+}
+
+/// Refuse to operate if the unclassified root and the media root overlap.
+/// A file "moved" from A to B where A == B (or one is inside the other) can
+/// delete data via rename-onto-itself or copy-then-unlink onto the source.
+#[cfg(feature = "ssr")]
+async fn ensure_roots_disjoint(
+    unclassified_canon: &std::path::Path,
+    media_root: &std::path::Path,
+) -> Result<(), AppError> {
+    let media_canon = tokio::fs::canonicalize(media_root)
+        .await
+        .map_err(|e| AppError::internal("canonicalize media_root", e))?;
+    if unclassified_canon == media_canon
+        || unclassified_canon.starts_with(&media_canon)
+        || media_canon.starts_with(unclassified_canon)
+    {
+        leptos::logging::error!(
+            "[config] unclassified_dir ({}) overlaps media_root ({})",
+            unclassified_canon.display(),
+            media_canon.display(),
+        );
+        return Err(AppError::internal(
+            "config",
+            "unclassified_dir and media_root must not overlap",
+        ));
+    }
+    Ok(())
+}
+
+/// Titles of every collection currently in `section_slug`. Used to detect
+/// the "retry after partial failure" case where some collections already
+/// exist and shouldn't be recreated.
+#[cfg(feature = "ssr")]
+async fn existing_collection_titles(
+    db: &mut toasty::Db,
+    section_slug: &str,
+) -> Result<std::collections::HashSet<String>, AppError> {
+    use crate::app::model::CollectionRow;
+    use std::collections::HashSet;
+
+    let rows = CollectionRow::filter(
+        CollectionRow::fields()
+            .section_slug()
+            .eq(section_slug.to_string()),
+    )
+    .exec(db)
+    .await
+    .context("load existing collections")?;
+    Ok(rows.into_iter().map(|r| r.title).collect::<HashSet<_>>())
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -410,6 +510,11 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
         .clone()
         .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
 
+    let root_canon = tokio::fs::canonicalize(&root)
+        .await
+        .context("canonicalize unclassified root")?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
+
     let clean = sanitize_rel(&rel_path)?;
     let abs = if clean.is_empty() {
         root.clone()
@@ -417,9 +522,6 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
         root.join(&clean)
     };
 
-    let root_canon = tokio::fs::canonicalize(&root)
-        .await
-        .context("canonicalize unclassified root")?;
     let abs_canon = tokio::fs::canonicalize(&abs)
         .await
         .map_err(|e| AppError::public(format!("Cannot open folder: {e}")))?;
@@ -524,14 +626,16 @@ pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspe
         .clone()
         .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
 
+    let root_canon = tokio::fs::canonicalize(&root)
+        .await
+        .context("canonicalize unclassified root")?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
+
     let clean = sanitize_rel(&rel_path)?;
     if clean.is_empty() {
         return Err(AppError::public("Invalid folder"));
     }
     let abs = root.join(&clean);
-    let root_canon = tokio::fs::canonicalize(&root)
-        .await
-        .context("canonicalize unclassified root")?;
     let abs_canon = tokio::fs::canonicalize(&abs)
         .await
         .map_err(|e| AppError::public(format!("Folder not found: {e}")))?;
@@ -590,6 +694,7 @@ pub async fn classify_unclassified_files(
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
 
     let mut upload_files = Vec::with_capacity(files.len());
     for input in &files {
@@ -722,6 +827,14 @@ async fn spawn_upload_job(
     Ok(job_id)
 }
 
+/// Partial failure descriptor for a folder classify job.
+#[cfg(feature = "ssr")]
+struct PartialFailure {
+    succeeded: usize,
+    total: usize,
+    error: AppError,
+}
+
 #[server]
 pub async fn classify_unclassified_folder(
     rel_path: String,
@@ -742,6 +855,8 @@ pub async fn classify_unclassified_folder(
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .context("canonicalize unclassified root")?;
+    ensure_roots_disjoint(&root_canon, &state.config.storage.media_root).await?;
+
     let clean = sanitize_rel(&rel_path)?;
     if clean.is_empty() {
         return Err(AppError::public("Invalid folder"));
@@ -760,11 +875,28 @@ pub async fn classify_unclassified_folder(
         return Err(AppError::public("Not a folder"));
     }
 
+    // Serialise against other classifications of the same folder.
+    let lock = acquire_classify_lock(abs_canon.clone())?;
+
     let mut db = state.db.clone();
     let subdirs = read_immediate_subdirs(&abs_canon).await?;
     let has_subdirs = !subdirs.is_empty();
 
-    let (section_slug, section_kind, section_nested) = match destination.clone() {
+    // ── Phase 1: resolve (kind, nested) without mutating the DB yet ──────────
+    enum Dest {
+        Existing {
+            slug: String,
+            kind: MediaKind,
+            nested: bool,
+        },
+        New {
+            title: String,
+            kind: MediaKind,
+            nested: bool,
+        },
+    }
+
+    let dest = match destination.clone() {
         FolderDestination::Existing { section_slug } => {
             let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
                 .first()
@@ -779,7 +911,11 @@ pub async fn classify_unclassified_folder(
                     "This folder contains subfolders — choose a nested section.",
                 ));
             }
-            (section_slug, kind, section.nested)
+            Dest::Existing {
+                slug: section_slug,
+                kind,
+                nested: section.nested,
+            }
         }
         FolderDestination::New { section_title } => {
             let title = section_title.trim().to_string();
@@ -793,25 +929,81 @@ pub async fn classify_unclassified_folder(
             let kind = dominant_kind(&files).ok_or_else(|| {
                 AppError::public("Folder mixes video and audio — split it up before classifying.")
             })?;
-            let nested = has_subdirs;
-            let slug = generate_unique_slug(&mut db, kind, nested).await?;
-            db::insert_section(&mut db, &slug, &title, kind.as_str(), nested)
-                .await
-                .context("insert section")?;
-            (slug, kind, nested)
+            Dest::New {
+                title,
+                kind,
+                nested: has_subdirs,
+            }
         }
     };
 
-    let (work, cleanup) = build_work_items(
+    let (kind, nested) = match &dest {
+        Dest::Existing { kind, nested, .. } => (*kind, *nested),
+        Dest::New { kind, nested, .. } => (*kind, *nested),
+    };
+
+    // ── Phase 2: build every work item. Any failure here leaves the DB
+    //            untouched — no ghost section, no orphaned collection. ───────
+    let mut work = build_work_items(
         &abs_canon,
         has_subdirs,
         &subdirs,
-        section_kind,
-        section_nested,
+        kind,
+        nested,
         &destination,
     )
     .await?;
 
+    // ── Phase 3: dedup against existing collections. ─────────────────────────
+    let existing = match &dest {
+        Dest::Existing { slug, .. } => existing_collection_titles(&mut db, slug).await?,
+        Dest::New { .. } => Default::default(),
+    };
+
+    if has_subdirs {
+        let before = work.len();
+        work.retain(|w| !existing.contains(&w.title));
+        let skipped = before - work.len();
+        if work.is_empty() {
+            return Err(AppError::public(format!(
+                "All {before} subfolder{} are already classified.",
+                plural(before),
+            )));
+        }
+        if skipped > 0 {
+            leptos::logging::log!(
+                "[classify] skipped {skipped} subfolder{} already classified",
+                plural(skipped),
+            );
+        }
+    } else if !work.is_empty() && existing.contains(&work[0].title) {
+        // Files-only: rename to avoid title collision. The user asked for
+        // a fresh collection, so we honour that but disambiguate the name.
+        let base = work[0].title.clone();
+        let mut n = 2;
+        let mut candidate = format!("{base} ({n})");
+        while existing.contains(&candidate) {
+            n += 1;
+            candidate = format!("{base} ({n})");
+        }
+        work[0].title = candidate;
+    }
+
+    // ── Phase 4: create the section (only in `New` mode, and only now that
+    //            we know every work item is valid). ──────────────────────────
+    let section_slug = match dest {
+        Dest::Existing { slug, .. } => slug,
+        Dest::New { title, .. } => {
+            let slug = generate_unique_slug(&mut db, kind, nested).await?;
+            db::insert_section(&mut db, &slug, &title, kind.as_str(), nested)
+                .await
+                .context("insert section")?;
+            slug
+        }
+    };
+
+    // ── Phase 5: create the job and spawn the worker, holding the lock for
+    //            the whole duration. ─────────────────────────────────────────
     let job_id = Uuid::new_v4().to_string();
     {
         let mut jobs = state.jobs.write().await;
@@ -826,20 +1018,41 @@ pub async fn classify_unclassified_folder(
 
     let state_bg = state.clone();
     let job_id_bg = job_id.clone();
+    let cancel = state.cancel.clone();
+
     tokio::spawn(async move {
+        let _lock = lock; // released when the task ends
+
         let outcome = run_folder_classify(
             work,
-            cleanup,
             section_slug,
-            section_kind,
+            kind,
             state_bg.clone(),
             job_id_bg.clone(),
+            cancel,
         )
         .await;
 
         let phase = match outcome {
             Ok(()) => JobPhase::Done,
-            Err(e) => JobPhase::Failed(e),
+            Err(pf) => {
+                let e = if pf.succeeded == 0 {
+                    pf.error
+                } else {
+                    AppError {
+                        message: format!(
+                            "Moved {} of {} collection{}, then failed: {}",
+                            pf.succeeded,
+                            pf.total,
+                            plural(pf.total),
+                            pf.error.message,
+                        ),
+                        disposition: pf.error.disposition,
+                        diagnostic: pf.error.diagnostic,
+                    }
+                };
+                JobPhase::Failed(e)
+            }
         };
         crate::app::server::convert::job_set_phase(&state_bg.jobs, Some(&job_id_bg), phase).await;
         schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
@@ -876,64 +1089,112 @@ async fn generate_unique_slug(
 #[cfg(feature = "ssr")]
 async fn run_folder_classify(
     work: Vec<WorkItem>,
-    cleanup: Vec<std::path::PathBuf>,
     section_slug: String,
     section_kind: MediaKind,
     state: crate::app::server::AppState,
     job_id: String,
-) -> Result<(), AppError> {
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<(), PartialFailure> {
     use crate::app::server::convert::JobPhase;
     use crate::app::server::db;
     use crate::app::server::upload::{
         UploadFile, UploadPayload, insert_files, insert_items_and_poster, stage_files,
     };
 
+    let total = work.len();
+    let mut succeeded = 0usize;
     let mut db = state.db.clone();
 
     for item in work {
-        let collection_id = db::insert_collection(&mut db, &section_slug, &item.title)
-            .await
-            .context("create collection")?;
+        if cancel.is_cancelled() {
+            return Err(PartialFailure {
+                succeeded,
+                total,
+                error: AppError::public("Cancelled during shutdown").transient(),
+            });
+        }
 
-        let upload_files = item
-            .files
-            .into_iter()
-            .map(|f| UploadFile {
-                title: file_stem(&f.filename),
-                filename: f.filename,
-                temp_path: f.abs,
-                size: f.size,
-            })
-            .collect();
+        let WorkItem {
+            title,
+            season,
+            files,
+            cleanup_dir,
+        } = item;
 
-        let payload = UploadPayload {
-            section_slug: section_slug.clone(),
-            collection_id,
-            title: item.title,
-            description: String::new(),
-            season_number: item.season,
-            files: upload_files,
-            poster: None,
-            temp_dir: make_dummy_tempdir()?,
-        };
+        // Everything for one work item runs through the shared pipeline.
+        let result = async {
+            let collection_id = db::insert_collection(&mut db, &section_slug, &title)
+                .await
+                .context("create collection")?;
 
-        crate::app::server::convert::job_set_phase(&state.jobs, Some(&job_id), JobPhase::Writing)
+            let upload_files: Vec<UploadFile> = files
+                .into_iter()
+                .map(|f| UploadFile {
+                    title: file_stem(&f.filename),
+                    filename: f.filename,
+                    temp_path: f.abs,
+                    size: f.size,
+                })
+                .collect();
+
+            let payload = UploadPayload {
+                section_slug: section_slug.clone(),
+                collection_id,
+                title,
+                description: String::new(),
+                season_number: season,
+                files: upload_files,
+                poster: None,
+                temp_dir: make_dummy_tempdir()?,
+            };
+
+            crate::app::server::convert::job_set_phase(
+                &state.jobs,
+                Some(&job_id),
+                JobPhase::Writing,
+            )
             .await;
 
-        let staged = stage_files(&payload, &state, section_kind, Some(&job_id)).await?;
-        let file_rows = insert_files(&mut db, &staged).await?;
-        insert_items_and_poster(
-            &mut db,
-            &payload,
-            &file_rows,
-            &state.config.storage.data_dir,
-        )
-        .await?;
+            let staged = stage_files(&payload, &state, section_kind, Some(&job_id)).await?;
+            let file_rows = insert_files(&mut db, &staged).await?;
+            insert_items_and_poster(
+                &mut db,
+                &payload,
+                &file_rows,
+                &state.config.storage.data_dir,
+            )
+            .await
+        }
+        .await;
+
+        match result {
+            Ok(()) => {
+                succeeded += 1;
+
+                // Per-item cleanup: once this collection's files have moved,
+                // its source folder may be empty. Best-effort remove; non-
+                // media files left behind cause ENOTEMPTY and are logged.
+                match tokio::fs::remove_dir(&cleanup_dir).await {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        leptos::logging::warn!(
+                            "[classify] could not remove {}: {e}",
+                            cleanup_dir.display(),
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(PartialFailure {
+                    succeeded,
+                    total,
+                    error: e,
+                });
+            }
+        }
     }
 
-    for dir in cleanup {
-        let _ = tokio::fs::remove_dir(&dir).await;
-    }
     Ok(())
 }
 
@@ -943,8 +1204,8 @@ async fn run_folder_classify(
 
 #[derive(Clone, Copy)]
 pub struct JobState {
-    pub status: RwSignal<Option<ConversionStatus>>,
-    pub result: RwSignal<Option<Result<(), AppError>>>,
+    status: RwSignal<Option<ConversionStatus>>,
+    result: RwSignal<Option<Result<(), AppError>>>,
     active: RwSignal<Option<String>>,
 }
 
