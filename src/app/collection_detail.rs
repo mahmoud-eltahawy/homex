@@ -25,6 +25,7 @@ use crate::app::{
     route_params::{use_optional_uuid_param, use_string_param, use_uuid_param},
     sections::fetch_section_by_slug,
     tags::TagEditor,
+    unclassified::move_items_to_incoming,
     upload_job::{UploadJob, UploadProgress},
 };
 
@@ -39,6 +40,7 @@ type PosterUploadAction = Action<web_sys::FormData, Result<String, AppError>>;
 type RenameItemAction = Action<(Uuid, String), Result<(), AppError>>;
 type DeleteItemAction = Action<Uuid, Result<(), AppError>>;
 type TagsAction = Action<(Uuid, Vec<String>), Result<(), AppError>>;
+type MoveToIncomingAction = Action<Vec<Uuid>, Result<(), AppError>>;
 
 // ─── Collection actions bundle ────────────────────────────────────────────
 
@@ -890,6 +892,18 @@ fn OrganizeItemsPanel(
         }
     });
 
+    let to_incoming: MoveToIncomingAction =
+        Action::new_local(|ids: &Vec<Uuid>| move_items_to_incoming(ids.clone()));
+
+    Effect::new(move |_| {
+        if matches!(to_incoming.value().get(), Some(Ok(()))) {
+            items.refetch();
+            selected.set(Vec::new());
+            destination_id.set(None);
+            on_close.run(());
+        }
+    });
+
     let toggle_all = Callback::new(move |_: ()| {
         if !selected.get_untracked().is_empty() {
             selected.set(Vec::new());
@@ -1042,7 +1056,35 @@ fn OrganizeItemsPanel(
                     }}
                 </button>
 
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        let ids = selected.get_untracked();
+                        if !ids.is_empty() {
+                            to_incoming.dispatch(ids);
+                        }
+                    }
+                    disabled=move || {
+                        selected.get().is_empty() || to_incoming.pending().get()
+                    }
+                    class="px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 \
+                           text-white text-sm font-medium transition \
+                           disabled:opacity-50"
+                >
+                    {move || {
+                        let n = selected.get().len();
+                        if to_incoming.pending().get() {
+                            "Returning…".to_string()
+                        } else if n == 0 {
+                            "Move to incoming".to_string()
+                        } else {
+                            format!("Move {n} to incoming")
+                        }
+                    }}
+                </button>
+
                 <ErrorView error=action_error(move_action)/>
+                <ErrorView error=action_error(to_incoming)/>
             </div>
         </div>
     }

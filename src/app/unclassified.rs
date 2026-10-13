@@ -11,11 +11,8 @@
 //! one progress bar per file.
 //!
 //! Concurrency is bounded by a process-wide semaphore. Each job has a hard
-//! timeout and its own `CancellationToken`, so a batch can be cancelled
-//! mid-flight and stalled conversions never hang the UI.
-//!
-//! Item numbering is serialized by a global lock in
-//! `server::upload::persist::insert_items_and_poster`.
+//! timeout and its own `CancellationToken`. The client can retry failed
+//! files without reselecting them.
 //!
 //! ## URL as source of truth
 //!
@@ -27,8 +24,6 @@ use leptos::prelude::*;
 use leptos_router::hooks::{use_navigate, use_query_map};
 use leptos_router::{LazyRoute, lazy_route};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "ssr")]
-use std::time::Duration;
 use uuid::Uuid;
 
 use crate::app::collections::create_collection_named;
@@ -41,6 +36,8 @@ use crate::app::upload_api::ConversionStatus;
 
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
+#[cfg(feature = "ssr")]
+use std::time::Duration;
 #[cfg(feature = "ssr")]
 use tokio_util::sync::CancellationToken;
 
@@ -102,22 +99,36 @@ pub struct FolderInspection {
     pub dominant_kind: Option<MediaKind>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoldersInspection {
+    pub folders: Vec<FolderInspection>,
+    pub total_files: usize,
+    pub total_size: u64,
+    pub any_has_subdirs: bool,
+    /// `Some` when every folder shares one media kind; `None` for a mixed set.
+    pub common_kind: Option<MediaKind>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FolderDestination {
     Existing { section_slug: String },
     New { section_title: String },
 }
 
-/// One file's job. The client polls each `job_id` through `poll_batch` and
-/// uses `section_slug` / `collection_id` to render a post-success link.
+/// One file's job.
+///
+/// `rel_path` / `title` / `season_number` / `collection_id` let the client
+/// reconstruct a retry request for a failed file without asking the user to
+/// reselect anything.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileJobHandle {
     pub name: String,
     pub job_id: String,
     pub section_slug: String,
-    /// `Some` for direct file classify; `None` for folder classify (each
-    /// group has its own collection, so we link to the section instead).
     pub collection_id: Option<Uuid>,
+    pub rel_path: String,
+    pub title: String,
+    pub season_number: Option<i64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -215,6 +226,16 @@ fn toggle_selection(selection: RwSignal<Vec<UnclassifiedEntry>>, entry: Unclassi
     });
 }
 
+fn toggle_folder_selection(selection: RwSignal<Vec<UnclassifiedEntry>>, entry: UnclassifiedEntry) {
+    selection.update(|v| {
+        if let Some(pos) = v.iter().position(|e| e.rel_path == entry.rel_path) {
+            v.remove(pos);
+        } else {
+            v.push(entry);
+        }
+    });
+}
+
 fn parse_season(s: &str) -> Option<i64> {
     let s = s.trim();
     if s.is_empty() { None } else { s.parse().ok() }
@@ -246,6 +267,7 @@ fn sanitize_rel(rel: &str) -> Result<String, AppError> {
 #[derive(Debug, Clone)]
 struct RawFile {
     abs: std::path::PathBuf,
+    rel: String,
     filename: String,
     size: u64,
 }
@@ -270,7 +292,11 @@ async fn read_immediate_subdirs(abs: &std::path::Path) -> Result<Vec<String>, Ap
 }
 
 #[cfg(feature = "ssr")]
-async fn collect_files(abs: &std::path::Path, recursive: bool) -> Result<Vec<RawFile>, AppError> {
+async fn collect_files(
+    root_canon: &std::path::Path,
+    abs: &std::path::Path,
+    recursive: bool,
+) -> Result<Vec<RawFile>, AppError> {
     let mut stack = vec![abs.to_path_buf()];
     let mut out = Vec::new();
     while let Some(dir) = stack.pop() {
@@ -296,15 +322,21 @@ async fn collect_files(abs: &std::path::Path, recursive: bool) -> Result<Vec<Raw
                 }
             } else if ft.is_file() {
                 let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
+                let abs = entry.path();
+                let rel = abs
+                    .strip_prefix(root_canon)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| name.clone());
                 out.push(RawFile {
-                    abs: entry.path(),
+                    abs,
+                    rel,
                     filename: name,
                     size,
                 });
             }
         }
     }
-    out.sort_by_key(|f| f.filename.to_lowercase());
+    out.sort_by_key(|f| f.rel.to_lowercase());
     Ok(out)
 }
 
@@ -459,7 +491,7 @@ async fn existing_collection_titles(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Server functions
+//  Server functions — listing & inspection
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[server]
@@ -579,8 +611,55 @@ pub async fn fetch_sections_with_collections(
 
 #[server]
 pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspection, AppError> {
-    use crate::app::server::AppState;
+    let root = resolve_unclassified_root()?;
+    let root_canon = tokio::fs::canonicalize(&root)
+        .await
+        .context("canonicalize unclassified root")?;
+    inspect_one(&root, &root_canon, &rel_path).await
+}
 
+#[server]
+pub async fn inspect_unclassified_folders(
+    rel_paths: Vec<String>,
+) -> Result<FoldersInspection, AppError> {
+    if rel_paths.is_empty() {
+        return Err(AppError::public("No folders selected"));
+    }
+    let root = resolve_unclassified_root()?;
+    let root_canon = tokio::fs::canonicalize(&root)
+        .await
+        .context("canonicalize unclassified root")?;
+
+    let mut folders = Vec::with_capacity(rel_paths.len());
+    for rp in &rel_paths {
+        folders.push(inspect_one(&root, &root_canon, rp).await?);
+    }
+
+    let total_files = folders.iter().map(|f| f.file_count).sum();
+    let total_size = folders.iter().map(|f| f.total_size).sum();
+    let any_has_subdirs = folders.iter().any(|f| f.has_subdirs);
+
+    let common_kind = {
+        let mut iter = folders.iter().filter_map(|f| f.dominant_kind);
+        let first = iter.next();
+        match first {
+            Some(k) if folders.iter().all(|f| f.dominant_kind == Some(k)) => Some(k),
+            _ => None,
+        }
+    };
+
+    Ok(FoldersInspection {
+        folders,
+        total_files,
+        total_size,
+        any_has_subdirs,
+        common_kind,
+    })
+}
+
+#[cfg(feature = "ssr")]
+fn resolve_unclassified_root() -> Result<std::path::PathBuf, AppError> {
+    use crate::app::server::AppState;
     let state: AppState = expect_context();
     let root = state
         .config
@@ -588,19 +667,27 @@ pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspe
         .unclassified_dir
         .clone()
         .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
-    let root_canon = tokio::fs::canonicalize(&root)
-        .await
-        .context("canonicalize unclassified root")?;
+    // Sync disjointness check (uses cached canonical media root).
+    let root_canon = std::fs::canonicalize(&root)
+        .map_err(|e| AppError::public(format!("Cannot open folder: {e}")))?;
     ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
+    Ok(root)
+}
 
-    let clean = sanitize_rel(&rel_path)?;
+#[cfg(feature = "ssr")]
+async fn inspect_one(
+    root: &std::path::Path,
+    root_canon: &std::path::Path,
+    rel_path: &str,
+) -> Result<FolderInspection, AppError> {
+    let clean = sanitize_rel(rel_path)?;
     if clean.is_empty() {
         return Err(AppError::public("Invalid folder"));
     }
     let abs_canon = tokio::fs::canonicalize(root.join(&clean))
         .await
         .map_err(|e| AppError::public(format!("Folder not found: {e}")))?;
-    if !abs_canon.starts_with(&root_canon) {
+    if !abs_canon.starts_with(root_canon) {
         return Err(AppError::public("Invalid path"));
     }
     if !tokio::fs::metadata(&abs_canon)
@@ -618,7 +705,7 @@ pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspe
 
     let subdir_names = read_immediate_subdirs(&abs_canon).await?;
     let has_subdirs = !subdir_names.is_empty();
-    let files = collect_files(&abs_canon, has_subdirs).await?;
+    let files = collect_files(root_canon, &abs_canon, has_subdirs).await?;
 
     Ok(FolderInspection {
         rel_path: clean,
@@ -631,7 +718,9 @@ pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspe
     })
 }
 
-// ── Poll endpoint for the parallel batch ─────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Poll, cancel
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[server]
 pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, AppError> {
@@ -674,12 +763,9 @@ pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, A
     Ok(out)
 }
 
-// ── Cancel a running batch ───────────────────────────────────────────────────
-
 #[server]
 pub async fn cancel_classify(job_ids: Vec<String>) -> Result<(), AppError> {
     use crate::app::server::AppState;
-
     let state: AppState = expect_context();
     let jobs = state.jobs.read().await;
     for id in &job_ids {
@@ -690,7 +776,9 @@ pub async fn cancel_classify(job_ids: Vec<String>) -> Result<(), AppError> {
     Ok(())
 }
 
-// ── Classify files ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Classify files
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[server]
 pub async fn classify_unclassified_files(
@@ -749,7 +837,7 @@ pub async fn classify_unclassified_files(
     };
 
     let mut prepared = Vec::with_capacity(upload_files.len());
-    for file in upload_files {
+    for (input, file) in files.into_iter().zip(upload_files) {
         prepared.push(prepare_file_job(
             file,
             collection_id,
@@ -757,6 +845,7 @@ pub async fn classify_unclassified_files(
             &collection.title,
             season_number,
             kind,
+            input.rel_path,
         )?);
     }
 
@@ -774,15 +863,29 @@ pub async fn classify_unclassified_files(
     Ok(handles)
 }
 
-// ── Classify folder ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  Classify folders (single and bulk)
+// ══════════════════════════════════════════════════════════════════════════════
 
 #[server]
 pub async fn classify_unclassified_folder(
     rel_path: String,
     destination: FolderDestination,
 ) -> Result<Vec<FileJobHandle>, AppError> {
+    classify_unclassified_folders(vec![rel_path], destination).await
+}
+
+#[server]
+pub async fn classify_unclassified_folders(
+    rel_paths: Vec<String>,
+    destination: FolderDestination,
+) -> Result<Vec<FileJobHandle>, AppError> {
     use crate::app::model::{MediaKind, SectionRow};
     use crate::app::server::{AppState, db};
+
+    if rel_paths.is_empty() {
+        return Err(AppError::public("No folders selected"));
+    }
 
     let state: AppState = expect_context();
     let root = state
@@ -796,30 +899,33 @@ pub async fn classify_unclassified_folder(
         .context("canonicalize unclassified root")?;
     ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
-    let clean = sanitize_rel(&rel_path)?;
-    if clean.is_empty() {
-        return Err(AppError::public("Invalid folder"));
+    // Canonicalize every folder and lock the whole set at once.
+    let mut abs_canons: Vec<std::path::PathBuf> = Vec::with_capacity(rel_paths.len());
+    for rp in &rel_paths {
+        let clean = sanitize_rel(rp)?;
+        if clean.is_empty() {
+            return Err(AppError::public("Invalid folder"));
+        }
+        let abs_canon = tokio::fs::canonicalize(root.join(&clean))
+            .await
+            .map_err(|e| AppError::public(format!("Folder not found: {e}")))?;
+        if !abs_canon.starts_with(&root_canon) {
+            return Err(AppError::public("Invalid path"));
+        }
+        if !tokio::fs::metadata(&abs_canon)
+            .await
+            .context("stat folder")?
+            .is_dir()
+        {
+            return Err(AppError::public("Not a folder"));
+        }
+        abs_canons.push(abs_canon);
     }
-    let abs_canon = tokio::fs::canonicalize(root.join(&clean))
-        .await
-        .map_err(|e| AppError::public(format!("Folder not found: {e}")))?;
-    if !abs_canon.starts_with(&root_canon) {
-        return Err(AppError::public("Invalid path"));
-    }
-    if !tokio::fs::metadata(&abs_canon)
-        .await
-        .context("stat folder")?
-        .is_dir()
-    {
-        return Err(AppError::public("Not a folder"));
-    }
-
-    let _lock = acquire_classify_locks(vec![abs_canon.clone()])?;
+    let _lock = acquire_classify_locks(abs_canons.clone())?;
 
     let mut db = state.db.clone();
-    let subdirs = read_immediate_subdirs(&abs_canon).await?;
-    let has_subdirs = !subdirs.is_empty();
 
+    // ── Resolve destination kind / nested against all folders ────────────────
     enum Dest {
         Existing {
             slug: String,
@@ -833,6 +939,17 @@ pub async fn classify_unclassified_folder(
         },
     }
 
+    let any_has_subdirs = {
+        let mut any = false;
+        for abs in &abs_canons {
+            if !read_immediate_subdirs(abs).await?.is_empty() {
+                any = true;
+                break;
+            }
+        }
+        any
+    };
+
     let dest = match destination.clone() {
         FolderDestination::Existing { section_slug } => {
             let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
@@ -843,9 +960,9 @@ pub async fn classify_unclassified_folder(
                 .ok_or_else(|| AppError::not_found("section"))?;
             let kind = MediaKind::try_from(section.media_kind.as_str())
                 .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
-            if has_subdirs && !section.nested {
+            if any_has_subdirs && !section.nested {
                 return Err(AppError::public(
-                    "This folder contains subfolders — choose a nested section.",
+                    "At least one folder contains subfolders — choose a nested section.",
                 ));
             }
             Dest::Existing {
@@ -859,17 +976,34 @@ pub async fn classify_unclassified_folder(
             if title.is_empty() {
                 return Err(AppError::validation("Section title is required"));
             }
-            let files = collect_files(&abs_canon, has_subdirs).await?;
-            if files.is_empty() {
-                return Err(AppError::public("Folder contains no media files"));
+            // Determine a common kind from every folder's files.
+            let mut common: Option<MediaKind> = None;
+            let mut total_files = 0usize;
+            for abs in &abs_canons {
+                let files = collect_files(&root_canon, abs, any_has_subdirs).await?;
+                total_files += files.len();
+                let k = dominant_kind(&files).ok_or_else(|| {
+                    AppError::public(
+                        "At least one folder is empty or mixes video and audio — split it up before classifying.",
+                    )
+                })?;
+                match common {
+                    None => common = Some(k),
+                    Some(prev) if prev == k => {}
+                    _ => {
+                        return Err(AppError::public(
+                            "Selected folders mix video and audio — classify them separately.",
+                        ));
+                    }
+                }
             }
-            let kind = dominant_kind(&files).ok_or_else(|| {
-                AppError::public("Folder mixes video and audio — split it up before classifying.")
-            })?;
+            if total_files == 0 {
+                return Err(AppError::public("Folders contain no media files"));
+            }
             Dest::New {
                 title,
-                kind,
-                nested: has_subdirs,
+                kind: common.unwrap(),
+                nested: any_has_subdirs,
             }
         }
     };
@@ -879,6 +1013,7 @@ pub async fn classify_unclassified_folder(
         Dest::New { kind, nested, .. } => (*kind, *nested),
     };
 
+    // ── Build groups (one collection per subfolder, or one per folder) ───────
     struct Group {
         title: String,
         season: Option<i64>,
@@ -887,89 +1022,83 @@ pub async fn classify_unclassified_folder(
     }
 
     let mut groups: Vec<Group> = Vec::new();
-    if has_subdirs {
-        for sub in &subdirs {
-            let sub_abs = abs_canon.join(sub);
-            let files = collect_files(&sub_abs, true).await?;
+
+    for abs in &abs_canons {
+        let subdirs = read_immediate_subdirs(abs).await?;
+        if !subdirs.is_empty() {
+            for sub in &subdirs {
+                let sub_abs = abs.join(sub);
+                let files = collect_files(&root_canon, &sub_abs, true).await?;
+                if files.is_empty() {
+                    continue;
+                }
+                ensure_kind_matches(&files, kind)?;
+                groups.push(Group {
+                    title: sub.clone(),
+                    season: (kind == MediaKind::Video).then_some(1),
+                    files,
+                    cleanup_dir: sub_abs,
+                });
+            }
+        } else {
+            let files = collect_files(&root_canon, abs, false).await?;
             if files.is_empty() {
                 continue;
             }
             ensure_kind_matches(&files, kind)?;
+            let folder_name = abs
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Folder".to_string());
             groups.push(Group {
-                title: sub.clone(),
-                season: (kind == MediaKind::Video).then_some(1),
+                title: folder_name,
+                season: (nested && kind == MediaKind::Video).then_some(1),
                 files,
-                cleanup_dir: sub_abs,
+                cleanup_dir: abs.clone(),
             });
         }
-        if groups.is_empty() {
-            return Err(AppError::public("No media files found in any subfolder"));
-        }
-    } else {
-        let files = collect_files(&abs_canon, false).await?;
-        if files.is_empty() {
-            return Err(AppError::public("Folder is empty"));
-        }
-        ensure_kind_matches(&files, kind)?;
-
-        let folder_name = abs_canon
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "Folder".to_string());
-        let title = match &destination {
-            FolderDestination::New { section_title } => {
-                let t = section_title.trim();
-                if t.is_empty() {
-                    folder_name
-                } else {
-                    t.to_string()
-                }
-            }
-            FolderDestination::Existing { .. } => folder_name,
-        };
-        groups.push(Group {
-            title,
-            season: (nested && kind == MediaKind::Video).then_some(1),
-            files,
-            cleanup_dir: abs_canon.clone(),
-        });
     }
 
+    if groups.is_empty() {
+        return Err(AppError::public(
+            "No media files found in the selected folders",
+        ));
+    }
+
+    // ── Dedup / resume against existing collection titles ────────────────────
     let existing = match &dest {
         Dest::Existing { slug, .. } => existing_collection_titles(&mut db, slug).await?,
         Dest::New { .. } => Default::default(),
     };
 
     let mut group_collection_ids: Vec<Option<Uuid>> = vec![None; groups.len()];
-
-    if has_subdirs {
-        let before = groups.len();
-        let mut kept: Vec<Group> = Vec::new();
-        for g in groups {
-            if existing.contains_key(&g.title) {
-                continue;
-            }
-            kept.push(g);
+    let before = groups.len();
+    let mut kept: Vec<Group> = Vec::with_capacity(before);
+    let mut kept_ids: Vec<Option<Uuid>> = Vec::with_capacity(before);
+    for g in groups {
+        if existing.contains_key(&g.title) {
+            continue;
         }
-        let skipped = before - kept.len();
-        if kept.is_empty() {
-            return Err(AppError::public(format!(
-                "All {before} subfolder{} are already classified.",
-                plural(before),
-            )));
-        }
-        if skipped > 0 {
-            leptos::logging::log!(
-                "[classify] skipped {skipped} subfolder{} already classified",
-                plural(skipped),
-            );
-        }
-        groups = kept;
-        group_collection_ids = vec![None; groups.len()];
-    } else if let Some(&id) = existing.get(&groups[0].title) {
-        group_collection_ids[0] = Some(id);
+        kept.push(g);
+        kept_ids.push(None);
     }
+    let skipped = before - kept.len();
+    if kept.is_empty() {
+        return Err(AppError::public(format!(
+            "All {before} collection{} already exist in the destination section.",
+            plural(before),
+        )));
+    }
+    if skipped > 0 {
+        leptos::logging::log!(
+            "[classify] skipped {skipped} collection{} already classified",
+            plural(skipped),
+        );
+    }
+    groups = kept;
+    group_collection_ids = kept_ids;
 
+    // ── Create section (New mode) + collections + prepare per-file jobs ──────
     let section_slug = match &dest {
         Dest::Existing { slug, .. } => slug.clone(),
         Dest::New { title, .. } => {
@@ -1007,6 +1136,7 @@ pub async fn classify_unclassified_folder(
                 &group.title,
                 group.season,
                 kind,
+                raw.rel,
             )?;
             group_job_ids.push(p.job_id.clone());
             prepared.push(p);
@@ -1015,8 +1145,6 @@ pub async fn classify_unclassified_folder(
         cleanup_watchers.push((group_job_ids, group.cleanup_dir));
     }
 
-    // For folder classify, every file's handle points at the section, not a
-    // specific collection (each group has its own).
     let handles = register_and_spawn(&state, prepared, &section_slug, None).await;
 
     let all_job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
@@ -1030,7 +1158,131 @@ pub async fn classify_unclassified_folder(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Server-only helpers used by both classify paths
+//  Move items back to incoming
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[server]
+pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError> {
+    use crate::app::model::{CollectionRow, File, Item};
+    use crate::app::server::AppState;
+
+    if item_ids.is_empty() {
+        return Ok(());
+    }
+
+    let state: AppState = expect_context();
+    let incoming = state
+        .config
+        .storage
+        .unclassified_dir
+        .clone()
+        .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
+    tokio::fs::create_dir_all(&incoming)
+        .await
+        .context("mkdir incoming")?;
+    let incoming_canon = tokio::fs::canonicalize(&incoming)
+        .await
+        .context("canonicalize incoming")?;
+    let media_canon = canonical_media_root(&state.config.storage.media_root)?;
+
+    let mut db = state.db.clone();
+
+    // Track collection count deltas so we update each collection once.
+    let mut deltas: std::collections::HashMap<Uuid, i64> = std::collections::HashMap::new();
+
+    for item_id in item_ids {
+        let item = match Item::get_by_id(&mut db, &item_id).await {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let file = match File::get_by_id(&mut db, &item.file_id).await {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+
+        // Only move files that live under media_root (skip http:// entries).
+        let rel = file.relative_path.clone();
+        if rel.starts_with("http://") || rel.starts_with("https://") {
+            continue;
+        }
+        let abs = media_canon.join(&rel);
+        if !abs.starts_with(media_canon) {
+            continue;
+        }
+        let abs_canon = match tokio::fs::canonicalize(&abs).await {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if !abs_canon.starts_with(media_canon) {
+            continue;
+        }
+
+        let original_name = abs_canon
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+        let dest = unique_incoming_path(&incoming_canon, &original_name).await;
+
+        // Try rename; fall back to copy + unlink across filesystems.
+        if tokio::fs::rename(&abs_canon, &dest).await.is_err() {
+            if tokio::fs::copy(&abs_canon, &dest).await.is_err() {
+                continue;
+            }
+            let _ = tokio::fs::remove_file(&abs_canon).await;
+        }
+
+        let collection_id = item.collection_id;
+        // Delete item, then file if it's no longer referenced.
+        let _ = item.delete().exec(&mut db).await;
+        let still_used = !Item::filter(Item::fields().file_id().eq(file.id))
+            .limit(1)
+            .exec(&mut db)
+            .await
+            .map(|r| r.is_empty())
+            .unwrap_or(false);
+        if !still_used {
+            let _ = file.delete().exec(&mut db).await;
+        }
+        *deltas.entry(collection_id).or_insert(0) += 1;
+    }
+
+    // Update collection item counts.
+    for (cid, delta) in deltas {
+        if delta == 0 {
+            continue;
+        }
+        if let Ok(mut c) = CollectionRow::get_by_id(&mut db, &cid).await {
+            let current = c.items_count;
+            let new_count = (current - delta).max(0);
+            let _ = c.update().items_count(new_count).exec(&mut db).await;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+async fn unique_incoming_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let initial = dir.join(name);
+    if tokio::fs::metadata(&initial).await.is_err() {
+        return initial;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (name.to_string(), String::new()),
+    };
+    for n in 2..10_000 {
+        let candidate = dir.join(format!("{stem} ({n}){ext}"));
+        if tokio::fs::metadata(&candidate).await.is_err() {
+            return candidate;
+        }
+    }
+    // Fallback: uuid suffix. Extremely unlikely.
+    dir.join(format!("{stem}-{}{ext}", Uuid::new_v4()))
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Server-only helpers used by classify paths
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(feature = "ssr")]
@@ -1086,6 +1338,9 @@ fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
 struct PreparedJob {
     name: String,
     job_id: String,
+    rel_path: String,
+    title: String,
+    season_number: Option<i64>,
     payload: crate::app::server::upload::UploadPayload,
     kind: MediaKind,
     cancel: CancellationToken,
@@ -1099,12 +1354,18 @@ fn prepare_file_job(
     collection_title: &str,
     season: Option<i64>,
     kind: MediaKind,
+    rel_path: String,
 ) -> Result<PreparedJob, AppError> {
     use crate::app::server::upload::UploadPayload;
 
+    let name = file.filename.clone();
+    let title = file.title.clone();
     Ok(PreparedJob {
-        name: file.filename.clone(),
+        name,
         job_id: Uuid::new_v4().to_string(),
+        rel_path,
+        title,
+        season_number: season,
         payload: UploadPayload {
             section_slug: section_slug.to_string(),
             collection_id,
@@ -1136,6 +1397,9 @@ async fn register_and_spawn(
             job_id: p.job_id.clone(),
             section_slug: section_slug.to_string(),
             collection_id,
+            rel_path: p.rel_path.clone(),
+            title: p.title.clone(),
+            season_number: p.season_number,
         })
         .collect();
 
@@ -1175,8 +1439,6 @@ fn spawn_job_worker(state: crate::app::server::AppState, p: PreparedJob) {
         )
         .await;
 
-        // Decide the final phase. Success leaves `process_upload`'s own
-        // `Done` + scheduled eviction in place.
         match outcome {
             Ok(Ok(_)) => {}
             Ok(Err(_)) if cancel.is_cancelled() => {
@@ -1198,7 +1460,6 @@ fn spawn_job_worker(state: crate::app::server::AppState, p: PreparedJob) {
                 schedule_job_eviction(state.jobs.clone(), p.job_id);
             }
             Err(_) => {
-                // Timeout: kill any running ffmpeg, mark failed.
                 cancel.cancel();
                 let e = AppError::public("Timed out").transient();
                 crate::app::server::convert::job_set_phase(
@@ -1303,21 +1564,34 @@ struct FileSlot {
     job_id: String,
     section_slug: String,
     collection_id: Option<Uuid>,
+    rel_path: String,
+    title: String,
+    season_number: Option<i64>,
     status: RwSignal<Option<ConversionStatus>>,
+}
+
+impl FileSlot {
+    fn from_handle(h: FileJobHandle) -> Self {
+        Self {
+            name: h.name,
+            job_id: h.job_id,
+            section_slug: h.section_slug,
+            collection_id: h.collection_id,
+            rel_path: h.rel_path,
+            title: h.title,
+            season_number: h.season_number,
+            status: RwSignal::new(None),
+        }
+    }
 }
 
 #[derive(Clone)]
 enum BatchPhase {
     Setup,
     Running,
-    /// All slots reached terminal, and every one succeeded.
     Done,
-    /// All slots reached terminal, and every one was cancelled.
     Cancelled,
-    /// All slots reached terminal, and every one failed.
     Failed(AppError),
-    /// Mixed terminal states. `first_error` is `None` when there were no
-    /// failures — e.g. some succeeded, some were cancelled.
     Partial {
         succeeded: usize,
         failed: usize,
@@ -1331,6 +1605,7 @@ pub struct BatchTracker {
     slots: RwSignal<Vec<FileSlot>>,
     running: RwSignal<bool>,
     error: RwSignal<Option<AppError>>,
+    retrying: RwSignal<bool>,
 }
 
 impl BatchTracker {
@@ -1339,30 +1614,22 @@ impl BatchTracker {
             slots: RwSignal::new(Vec::new()),
             running: RwSignal::new(false),
             error: RwSignal::new(None),
+            retrying: RwSignal::new(false),
         }
     }
 
     fn begin(&self, handles: Vec<FileJobHandle>) {
-        let slots: Vec<FileSlot> = handles
-            .into_iter()
-            .map(|h| FileSlot {
-                name: h.name,
-                job_id: h.job_id,
-                section_slug: h.section_slug,
-                collection_id: h.collection_id,
-                status: RwSignal::new(None),
-            })
-            .collect();
-
+        let slots: Vec<FileSlot> = handles.into_iter().map(FileSlot::from_handle).collect();
         self.error.set(None);
+        self.retrying.set(false);
         self.slots.set(slots);
         self.running.set(true);
-
         leptos::task::spawn_local(poll_batch_loop(*self));
     }
 
     fn reset(&self) {
         self.running.set(false);
+        self.retrying.set(false);
         self.slots.set(Vec::new());
         self.error.set(None);
     }
@@ -1370,29 +1637,28 @@ impl BatchTracker {
     fn phase(&self) -> Signal<BatchPhase> {
         let slots_sig = self.slots;
         let error = self.error;
+        let retrying = self.retrying;
         Signal::derive(move || {
+            if retrying.get() {
+                return BatchPhase::Running;
+            }
             if let Some(e) = error.get() {
                 return BatchPhase::Failed(e);
             }
-
             let slots = slots_sig.get();
             if slots.is_empty() {
                 return BatchPhase::Setup;
             }
-
             let statuses: Vec<Option<ConversionStatus>> =
                 slots.iter().map(|s| s.status.get()).collect();
-
             if statuses.iter().any(|s| s.is_none()) {
                 return BatchPhase::Running;
             }
-
             let mut succeeded = 0usize;
             let mut failed = 0usize;
             let mut cancelled = 0usize;
             let mut first_error: Option<AppError> = None;
             let mut all_terminal = true;
-
             for s in &statuses {
                 match s {
                     Some(ConversionStatus::Done) => succeeded += 1,
@@ -1407,11 +1673,9 @@ impl BatchTracker {
                     None => all_terminal = false,
                 }
             }
-
             if !all_terminal {
                 return BatchPhase::Running;
             }
-
             match (succeeded, failed, cancelled) {
                 (_, 0, 0) => BatchPhase::Done,
                 (0, 0, _) => BatchPhase::Cancelled,
@@ -1432,8 +1696,6 @@ impl BatchTracker {
         self.slots
     }
 
-    /// Job ids for slots that haven't reached a terminal state yet. Used by
-    /// the cancel path so we don't waste a server round-trip on finished jobs.
     fn pending_job_ids(&self) -> Vec<String> {
         self.slots
             .get_untracked()
@@ -1448,6 +1710,99 @@ impl BatchTracker {
             })
             .map(|s| s.job_id.clone())
             .collect()
+    }
+
+    fn failed_count(&self) -> usize {
+        self.slots
+            .get_untracked()
+            .iter()
+            .filter(|s| matches!(s.status.get_untracked(), Some(ConversionStatus::Failed(_))))
+            .count()
+    }
+
+    /// Re-dispatch every slot currently in `Failed` state. Groups failures by
+    /// `(collection_id, season_number)` so each group can go through the
+    /// single-destination classify file fn.
+    fn retry_failed(&self) {
+        if self.retrying.get_untracked() {
+            return;
+        }
+
+        // Snapshot failed slots grouped by destination.
+        let slots = self.slots.get_untracked();
+        let mut groups: std::collections::HashMap<(Uuid, Option<i64>, String), Vec<ClassifyInput>> =
+            std::collections::HashMap::new();
+
+        for s in &slots {
+            if !matches!(s.status.get_untracked(), Some(ConversionStatus::Failed(_))) {
+                continue;
+            }
+            let Some(cid) = s.collection_id else { continue };
+            let key = (cid, s.season_number, s.section_slug.clone());
+            groups.entry(key).or_default().push(ClassifyInput {
+                rel_path: s.rel_path.clone(),
+                title: s.title.clone(),
+            });
+        }
+
+        if groups.is_empty() {
+            return;
+        }
+
+        self.retrying.set(true);
+        self.error.set(None);
+
+        let tracker = *self;
+        leptos::task::spawn_local(async move {
+            // For each group, call the classify fn and collect the returned
+            // handles in order.
+            let mut new_handles: Vec<FileJobHandle> = Vec::new();
+            let mut failed_to_start: Option<AppError> = None;
+
+            // Sort keys for deterministic ordering (nice for the UI).
+            let mut keys: Vec<_> = groups.keys().cloned().collect();
+            keys.sort_by_key(|(_, season, _)| season.unwrap_or(-1));
+
+            for key in keys {
+                let (cid, season, _) = key.clone();
+                let files = groups.remove(&key).unwrap();
+                match classify_unclassified_files(files, cid, season).await {
+                    Ok(mut h) => new_handles.append(&mut h),
+                    Err(e) => {
+                        failed_to_start = Some(e);
+                        break;
+                    }
+                }
+            }
+
+            // Merge: replace Failed slots with fresh ones from `new_handles`,
+            // preserving the order of the original batch.
+            tracker.slots.update(|slots| {
+                let mut fresh: std::collections::VecDeque<FileJobHandle> =
+                    new_handles.into_iter().collect();
+                for slot in slots.iter_mut() {
+                    let is_failed = matches!(
+                        slot.status.get_untracked(),
+                        Some(ConversionStatus::Failed(_))
+                    );
+                    if !is_failed {
+                        continue;
+                    }
+                    if let Some(next) = fresh.pop_front() {
+                        *slot = FileSlot::from_handle(next);
+                    }
+                }
+            });
+            tracker.retrying.set(false);
+
+            match failed_to_start {
+                Some(e) => tracker.error.set(Some(e)),
+                None => {
+                    tracker.running.set(true);
+                    leptos::task::spawn_local(poll_batch_loop(tracker));
+                }
+            }
+        });
     }
 }
 
@@ -1506,7 +1861,7 @@ async fn poll_batch_loop(tracker: BatchTracker) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Job wrappers for the two classify flows
+//  Job wrappers
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Copy)]
@@ -1563,15 +1918,15 @@ impl ClassifyJob {
 
 #[derive(Clone, Copy)]
 pub struct FolderClassifyJob {
-    action: Action<(String, FolderDestination), Result<Vec<FileJobHandle>, AppError>>,
+    action: Action<(Vec<String>, FolderDestination), Result<Vec<FileJobHandle>, AppError>>,
     tracker: BatchTracker,
 }
 
 impl FolderClassifyJob {
     pub fn new() -> Self {
         let tracker = BatchTracker::new();
-        let action = Action::new_local(|(path, dest): &(String, FolderDestination)| {
-            classify_unclassified_folder(path.clone(), dest.clone())
+        let action = Action::new_local(|(paths, dest): &(Vec<String>, FolderDestination)| {
+            classify_unclassified_folders(paths.clone(), dest.clone())
         });
 
         Effect::new(move |_| {
@@ -1587,9 +1942,9 @@ impl FolderClassifyJob {
         Self { action, tracker }
     }
 
-    pub fn dispatch(&self, path: String, dest: FolderDestination) {
+    pub fn dispatch(&self, paths: Vec<String>, dest: FolderDestination) {
         self.tracker.reset();
-        self.action.dispatch((path, dest));
+        self.action.dispatch((paths, dest));
     }
 
     pub fn reset(&self) {
@@ -1651,39 +2006,46 @@ impl LazyRoute for UnclassifiedPage {
             navigate(&url, Default::default());
         });
 
-        let selection = RwSignal::new(Vec::<UnclassifiedEntry>::new());
+        let file_selection = RwSignal::new(Vec::<UnclassifiedEntry>::new());
+        let folder_selection = RwSignal::new(Vec::<UnclassifiedEntry>::new());
         let modal_open = RwSignal::new(false);
-        let folder_target = RwSignal::new(None::<UnclassifiedEntry>);
+        let folder_modal_open = RwSignal::new(false);
 
         let classify = ClassifyJob::new();
         let folder_classify = FolderClassifyJob::new();
 
         Effect::new(move |_| {
             let _ = this.rel_path.get();
-            selection.set(Vec::new());
-            folder_target.set(None);
+            file_selection.set(Vec::new());
+            folder_selection.set(Vec::new());
+            folder_modal_open.set(false);
         });
+
         Effect::new(move |_| {
-            if selection.get().is_empty() && modal_open.get() {
+            if file_selection.get().is_empty() && modal_open.get() {
                 modal_open.set(false);
+            }
+            if folder_selection.get().is_empty() && folder_modal_open.get() {
+                folder_modal_open.set(false);
             }
         });
 
         let on_modal_close = Callback::new(move |_: ()| {
-            selection.set(Vec::new());
+            file_selection.set(Vec::new());
             this.refresh.update(|n| *n = n.wrapping_add(1));
         });
         let on_folder_modal_close = Callback::new(move |_: ()| {
-            folder_target.set(None);
+            folder_selection.set(Vec::new());
             this.refresh.update(|n| *n = n.wrapping_add(1));
         });
 
         let adapter = move |list: Vec<UnclassifiedEntry>| EntryListProps {
             entries: list,
             on_navigate,
-            selection,
+            file_selection,
+            folder_selection,
             modal_open,
-            folder_target,
+            folder_modal_open,
             classify,
             folder_classify,
             on_modal_close,
@@ -1763,9 +2125,10 @@ fn Breadcrumb(rel_path: Signal<String>, on_navigate: Callback<String>) -> impl I
 pub struct EntryListProps {
     entries: Vec<UnclassifiedEntry>,
     on_navigate: Callback<String>,
-    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    file_selection: RwSignal<Vec<UnclassifiedEntry>>,
+    folder_selection: RwSignal<Vec<UnclassifiedEntry>>,
     modal_open: RwSignal<bool>,
-    folder_target: RwSignal<Option<UnclassifiedEntry>>,
+    folder_modal_open: RwSignal<bool>,
     classify: ClassifyJob,
     folder_classify: FolderClassifyJob,
     on_modal_close: Callback<()>,
@@ -1776,9 +2139,10 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
     let EntryListProps {
         entries,
         on_navigate,
-        selection,
+        file_selection,
+        folder_selection,
         modal_open,
-        folder_target,
+        folder_modal_open,
         classify,
         folder_classify,
         on_modal_close,
@@ -1800,21 +2164,34 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
         .into_iter()
         .map(|entry| {
             if entry.is_dir {
-                Either::Left(view! { <DirRow entry on_navigate folder_target/> })
+                Either::Left(view! {
+                    <DirRow
+                        entry
+                        on_navigate
+                        folder_selection
+                    />
+                })
             } else {
-                Either::Right(view! { <FileRow entry selection modal_open/> })
+                Either::Right(view! {
+                    <FileRow entry file_selection modal_open/>
+                })
             }
         })
         .collect_view();
 
     view! {
         <div>
-            <SelectionBar entries=entries_for_bar selection modal_open/>
+            <SelectionBar entries=entries_for_bar file_selection folder_selection modal_open folder_modal_open/>
             <div class="border border-white/10 rounded-xl overflow-hidden bg-white/[0.02]">
                 <div class="divide-y divide-white/5">{rows}</div>
             </div>
-            <ClassifyModal selection open=modal_open job=classify on_close=on_modal_close/>
-            <FolderClassifyModal target=folder_target job=folder_classify on_close=on_folder_modal_close/>
+            <ClassifyModal selection=file_selection open=modal_open job=classify on_close=on_modal_close/>
+            <FolderClassifyModal
+                selection=folder_selection
+                open=folder_modal_open
+                job=folder_classify
+                on_close=on_folder_modal_close
+            />
         </div>
     }
     .into_any()
@@ -1827,16 +2204,18 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
 #[component]
 fn SelectionBar(
     entries: Vec<UnclassifiedEntry>,
-    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    file_selection: RwSignal<Vec<UnclassifiedEntry>>,
+    folder_selection: RwSignal<Vec<UnclassifiedEntry>>,
     modal_open: RwSignal<bool>,
+    folder_modal_open: RwSignal<bool>,
 ) -> impl IntoView {
     let total_supported = entries
         .iter()
         .filter(|e| !e.is_dir && kind_for_ext(e.ext.as_deref()).is_some())
         .count();
 
-    let all_selected = move || {
-        let n = selection.get().len();
+    let all_files_selected = move || {
+        let n = file_selection.get().len();
         total_supported > 0 && n == total_supported
     };
 
@@ -1844,14 +2223,37 @@ fn SelectionBar(
         let entries = entries.clone();
         Callback::new(move |ev: web_sys::Event| {
             if event_target_checked(&ev) {
-                select_all(selection, entries.clone());
+                select_all(file_selection, entries.clone());
             } else {
-                selection.set(Vec::new());
+                file_selection.set(Vec::new());
             }
         })
     };
 
-    let count = move || selection.get().len();
+    let file_count = move || file_selection.get().len();
+    let folder_count = move || folder_selection.get().len();
+    let total_count = move || file_count() + folder_count();
+
+    let on_clear_all = Callback::new(move |_: ()| {
+        file_selection.set(Vec::new());
+        folder_selection.set(Vec::new());
+    });
+
+    let on_classify = Callback::new(move |_: ()| {
+        let files = file_count();
+        let folders = folder_count();
+        // If there's a folder selection, open the folder modal (it handles
+        // mixed selections gracefully by only accepting folder paths).
+        if folders > 0 && files == 0 {
+            folder_modal_open.set(true);
+        } else if files > 0 && folders == 0 {
+            modal_open.set(true);
+        } else if files > 0 && folders > 0 {
+            // Mixed — the folder modal takes priority, but the file modal is
+            // not opened because we don't support mixed batches.
+            folder_modal_open.set(true);
+        }
+    });
 
     view! {
         <div class="flex items-center justify-between gap-3 mb-3 px-1 min-h-9">
@@ -1859,33 +2261,51 @@ fn SelectionBar(
                 <Show when=move || { total_supported > 0 }>
                     <label class="flex items-center gap-2 cursor-pointer select-none">
                         <input type="checkbox"
-                            prop:checked=all_selected
+                            prop:checked=all_files_selected
                             on:change=move |ev| on_select_all.run(ev)
                             class="accent-cyan-400 w-4 h-4"/>
-                        <span class="text-xs text-gray-400">"Select all"</span>
+                        <span class="text-xs text-gray-400">"Select all files"</span>
                     </label>
                 </Show>
-                {move || (count() > 0).then(|| view! {
+                {move || (total_count() > 0).then(|| view! {
                     <span class="text-xs text-cyan-300 font-medium">
-                        {format!("{} selected", count())}
+                        {move || {
+                            let f = file_count();
+                            let d = folder_count();
+                            match (f, d) {
+                                (0, d) => format!("{d} folder{}", plural(d)),
+                                (f, 0) => format!("{f} file{}", plural(f)),
+                                (f, d) => format!("{f} file{}, {d} folder{}", plural(f), plural(d)),
+                            }
+                        }}
                     </span>
                 })}
             </div>
             <div class="flex items-center gap-2 shrink-0">
-                {move || (count() > 0).then(|| view! {
+                {move || (total_count() > 0).then(|| view! {
                     <>
                         <button type="button"
-                            on:click=move |_| selection.set(Vec::new())
+                            on:click=move |_| on_clear_all.run(())
                             class="text-xs px-2 py-1 rounded-lg text-gray-300 hover:bg-white/10 transition">
                             "Clear"
                         </button>
                         <button type="button"
-                            on:click=move |_| modal_open.set(true)
+                            on:click=move |_| on_classify.run(())
                             class="text-xs px-3 py-1.5 rounded-lg \
                                    bg-gradient-to-r from-cyan-500 to-blue-500 \
                                    hover:from-cyan-400 hover:to-blue-400 \
                                    text-white font-bold transition">
-                            {move || format!("Classify {}", count())}
+                            {move || {
+                                let f = file_count();
+                                let d = folder_count();
+                                if d > 0 && f == 0 {
+                                    format!("Classify {d} folder{}", plural(d))
+                                } else if f > 0 && d == 0 {
+                                    format!("Classify {f} file{}", plural(f))
+                                } else {
+                                    format!("Classify {} item{}", f + d, plural(f + d))
+                                }
+                            }}
                         </button>
                     </>
                 })}
@@ -1929,33 +2349,52 @@ fn FileIcon() -> impl IntoView {
 fn DirRow(
     entry: UnclassifiedEntry,
     on_navigate: Callback<String>,
-    folder_target: RwSignal<Option<UnclassifiedEntry>>,
+    folder_selection: RwSignal<Vec<UnclassifiedEntry>>,
 ) -> impl IntoView {
     let target = entry.rel_path.clone();
     let name = entry.name.clone();
-    let entry_for_classify = entry;
-    let on_open = Callback::new(move |_: ()| on_navigate.run(target.clone()));
-    let on_classify =
-        Callback::new(move |_: ()| folder_target.set(Some(entry_for_classify.clone())));
+    let key = entry.rel_path.clone();
+    let entry_for_toggle = entry.clone();
+    let entry_for_single = entry;
 
+    let is_selected =
+        Signal::derive(move || folder_selection.get().iter().any(|e| e.rel_path == key));
+
+    let on_toggle = Callback::new(move |ev: web_sys::Event| {
+        if event_target_checked(&ev) {
+            toggle_folder_selection(folder_selection, entry_for_toggle.clone());
+        } else {
+            let path = entry_for_toggle.rel_path.clone();
+            folder_selection.update(|v| v.retain(|e| e.rel_path != path));
+        }
+    });
+
+    let on_single_classify = Callback::new(move |_: ()| {
+        folder_selection.set(vec![entry_for_single.clone()]);
+    });
+
+    let folder_target = target.clone();
     view! {
         <div class="flex items-center gap-2 pr-3 hover:bg-white/5 transition">
+            <input type="checkbox"
+                prop:checked=move || is_selected.get()
+                on:change=move |ev| on_toggle.run(ev)
+                class="accent-cyan-400 w-4 h-4 shrink-0 cursor-pointer ml-4"/>
             <button type="button"
-                on:click=move |_| on_open.run(())
-                class="flex-1 text-left flex items-center gap-3 px-4 py-2.5 min-w-0">
-                <span class="w-4 shrink-0"></span>
+                on:click=move |_| on_navigate.run(folder_target.clone())
+                class="flex-1 text-left flex items-center gap-3 px-2 py-2.5 min-w-0">
                 <span class="text-cyan-400 shrink-0"><FolderIcon/></span>
                 <span class="text-white text-sm truncate flex-1">{name}</span>
             </button>
             <button type="button"
-                on:click=move |_| on_classify.run(())
+                on:click=move |_| on_single_classify.run(())
                 class="text-xs shrink-0 px-2 py-1 rounded-md text-cyan-300 hover:text-white \
                        bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/30 \
                        transition whitespace-nowrap">
                 "Classify"
             </button>
             <button type="button"
-                on:click=move |_| on_open.run(())
+                on:click=move |_| on_navigate.run(target.clone())
                 class="text-gray-500 text-xs shrink-0 hover:text-white transition">
                 "Open →"
             </button>
@@ -1966,7 +2405,7 @@ fn DirRow(
 #[component]
 fn FileRow(
     entry: UnclassifiedEntry,
-    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    file_selection: RwSignal<Vec<UnclassifiedEntry>>,
     modal_open: RwSignal<bool>,
 ) -> impl IntoView {
     let is_supported = kind_for_ext(entry.ext.as_deref()).is_some();
@@ -1974,21 +2413,22 @@ fn FileRow(
     let size = entry.size;
     let key = entry.rel_path.clone();
 
-    let is_selected = Signal::derive(move || selection.get().iter().any(|e| e.rel_path == key));
+    let is_selected =
+        Signal::derive(move || file_selection.get().iter().any(|e| e.rel_path == key));
 
     let on_change = {
         let entry = entry.clone();
         Callback::new(move |ev: web_sys::Event| {
             if event_target_checked(&ev) {
-                toggle_selection(selection, entry.clone());
+                toggle_selection(file_selection, entry.clone());
             } else {
-                selection.update(|v| v.retain(|e| e.rel_path != entry.rel_path));
+                file_selection.update(|v| v.retain(|e| e.rel_path != entry.rel_path));
             }
         })
     };
 
     let on_single_classify = Callback::new(move |_: ()| {
-        selection.set(vec![entry.clone()]);
+        file_selection.set(vec![entry.clone()]);
         modal_open.set(true);
     });
 
@@ -2161,8 +2601,13 @@ fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>) -> 
             let (label, pct, bar_class, indeterminate, text_class) = match &s {
                 None => ("Waiting…".to_string(), 0.0_f32,
                          "bg-gradient-to-r from-cyan-400 to-blue-500", true, "text-gray-300"),
-                Some(ConversionStatus::Writing) => ("Moving…".to_string(), 0.0,
+                Some(ConversionStatus::Writing) => ("Starting…".to_string(), 0.0,
                          "bg-gradient-to-r from-cyan-400 to-blue-500", true, "text-gray-300"),
+                Some(ConversionStatus::Moving { progress, .. }) => {
+                    let p = if progress.is_finite() { *progress } else { 0.0 };
+                    (format!("Moving {:.0}%", p * 100.0), p,
+                     "bg-gradient-to-r from-cyan-400 to-blue-500", false, "text-gray-300")
+                }
                 Some(ConversionStatus::Converting { progress, .. }) => {
                     let p = if progress.is_finite() { *progress } else { 0.0 };
                     (format!("Converting {:.0}%", p * 100.0), p,
@@ -2176,12 +2621,6 @@ fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>) -> 
                          "bg-gray-500/50", false, "text-gray-500"),
                 Some(ConversionStatus::Failed(e)) => (format!("Failed: {}", e.message), 0.0,
                          "bg-red-500/60", false, "text-red-300"),
-                Some(ConversionStatus::Moving { progress, .. }) => {
-                    let p = if progress.is_finite() { *progress } else { 0.0 };
-                    (format!("Moving {:.0}%", p * 100.0), p,
-                     "bg-gradient-to-r from-cyan-400 to-blue-500", false, "text-gray-300")
-                }
-
             };
 
             let name = name.clone();
@@ -2319,6 +2758,13 @@ fn PhaseFinal(
     link: Signal<Option<(String, Option<Uuid>)>>,
     on_close: Callback<()>,
 ) -> impl IntoView {
+    let retrying = tracker.retrying;
+    let failed_count = move || tracker.failed_count();
+
+    let on_retry = Callback::new(move |_: ()| {
+        tracker.retry_failed();
+    });
+
     view! {
         <div class="space-y-4">
             <Show when=move || matches!(phase.get(), BatchPhase::Done)>
@@ -2360,9 +2806,7 @@ fn PhaseFinal(
                     <span class="text-gray-400 text-xl leading-none shrink-0">"■"</span>
                     <div class="min-w-0">
                         <div class="text-gray-300 font-bold">"Cancelled"</div>
-                        <div class="text-gray-400 text-xs mt-1">
-                            "No files were moved."
-                        </div>
+                        <div class="text-gray-400 text-xs mt-1">"No files were moved."</div>
                     </div>
                 </div>
             </Show>
@@ -2376,17 +2820,11 @@ fn PhaseFinal(
                         _ => return ().into_any(),
                     };
                     let total = succeeded + failed + cancelled;
-
                     let mut parts: Vec<String> = Vec::new();
                     if succeeded > 0 { parts.push(format!("{succeeded} moved")); }
                     if failed > 0 { parts.push(format!("{failed} failed")); }
                     if cancelled > 0 { parts.push(format!("{cancelled} cancelled")); }
-                    let summary = format!(
-                        "{} of {total}: {}",
-                        succeeded,
-                        parts.join(", "),
-                    );
-
+                    let summary = format!("{} of {total}: {}", succeeded, parts.join(", "));
                     view! {
                         <div class="bg-amber-500/15 border border-amber-500/30 rounded-xl p-4 \
                                     flex items-start gap-3">
@@ -2420,7 +2858,24 @@ fn PhaseFinal(
                 <FailedFilesList tracker/>
             </Show>
 
-            <div class="flex justify-end">
+            <div class="flex justify-end gap-2">
+                <Show when=move || {failed_count() > 0}>
+                    <button type="button"
+                        on:click=move |_| on_retry.run(())
+                        disabled=move || retrying.get()
+                        class="px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 \
+                               text-amber-200 font-bold text-sm transition \
+                               disabled:opacity-50">
+                        {move || {
+                            let n = failed_count();
+                            if retrying.get() {
+                                "Retrying…".to_string()
+                            } else {
+                                format!("Retry {n} failed")
+                            }
+                        }}
+                    </button>
+                </Show>
                 <button type="button"
                     on:click=move |_| on_close.run(())
                     class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 \
@@ -2614,7 +3069,6 @@ fn ClassifyModal(
     });
     let success_detail = Signal::derive(|| "The items are now in the collection.".to_string());
 
-    // Post-success link: derived from the first slot's section + collection.
     let link: Signal<Option<(String, Option<Uuid>)>> = Signal::derive(move || {
         tracker
             .slots()
@@ -2645,8 +3099,6 @@ fn ClassifyModal(
         }
         cancel_pending.set(true);
         job.cancel();
-        // The poll loop will see Cancelled for the affected jobs; no need to
-        // reset the flag — the modal moves to the final phase.
     });
 
     let confirm = Callback::new(move |_: ()| {
@@ -2855,36 +3307,52 @@ fn CollectionPicker(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Folder classify modal
+//  Folder classify modal (single and bulk)
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[component]
 fn FolderClassifyModal(
-    target: RwSignal<Option<UnclassifiedEntry>>,
+    selection: RwSignal<Vec<UnclassifiedEntry>>,
+    open: RwSignal<bool>,
     job: FolderClassifyJob,
     on_close: Callback<()>,
 ) -> impl IntoView {
-    let inspection: Resource<Result<FolderInspection, AppError>> = Resource::new(
-        move || target.get().map(|e| e.rel_path),
-        |p| async move {
-            match p {
-                Some(path) => inspect_unclassified_folder(path).await,
-                None => Err(AppError::public("No folder selected")),
+    // Inspect the current folder selection.
+    let inspection: Resource<Result<FoldersInspection, AppError>> = Resource::new(
+        move || {
+            if !open.get() {
+                return None;
+            }
+            Some(
+                selection
+                    .get()
+                    .iter()
+                    .map(|e| e.rel_path.clone())
+                    .collect::<Vec<_>>(),
+            )
+        },
+        |paths| async move {
+            match paths {
+                Some(p) if !p.is_empty() => inspect_unclassified_folders(p).await,
+                _ => Err(AppError::public("No folder selected")),
             }
         },
     );
 
-    let dominant = Memo::new(move |_| {
+    let common_kind = Memo::new(move |_| {
         inspection
             .get()
             .and_then(|r| r.ok())
-            .and_then(|i| i.dominant_kind)
+            .and_then(|i| i.common_kind)
     });
 
     let sections: Resource<Result<Vec<SectionWithCollections>, AppError>> = Resource::new(
         move || {
-            let kind = dominant.get().map(|k| k.as_str().to_string())?;
-            Some((target.get()?.rel_path, kind))
+            if !open.get() {
+                return None;
+            }
+            let kind = common_kind.get().map(|k| k.as_str().to_string())?;
+            Some((selection.get().first()?.rel_path.clone(), kind))
         },
         |input| async move {
             match input {
@@ -2899,7 +3367,7 @@ fn FolderClassifyModal(
     let section_title = RwSignal::new(String::new());
 
     Effect::new(move |_| {
-        let _ = target.get();
+        let _ = open.get();
         mode.set(DestinationMode::New);
         section_slug.set(String::new());
         section_title.set(String::new());
@@ -2908,13 +3376,14 @@ fn FolderClassifyModal(
     Effect::new(move |_| {
         if let Some(Ok(insp)) = inspection.get()
             && section_title.get_untracked().trim().is_empty()
+            && let Some(first) = insp.folders.first()
         {
-            section_title.set(insp.name.clone());
+            section_title.set(first.name.clone());
         }
     });
 
     Effect::new(move |_| {
-        if target.get().is_none() {
+        if !open.get() {
             job.reset();
         }
     });
@@ -2923,7 +3392,7 @@ fn FolderClassifyModal(
         let nested_only = inspection
             .get()
             .and_then(|r| r.ok())
-            .map(|i| i.has_subdirs)
+            .map(|i| i.any_has_subdirs)
             .unwrap_or(false);
         sections
             .get()
@@ -2958,10 +3427,17 @@ fn FolderClassifyModal(
         )
     });
 
-    let subtitle = Signal::derive(move || target.get().map(|e| e.name).unwrap_or_default());
+    let subtitle = Signal::derive(move || {
+        let sel = selection.get();
+        match sel.len() {
+            0 => String::new(),
+            1 => sel[0].name.clone(),
+            n => format!("{n} folders"),
+        }
+    });
 
     let can_confirm = Signal::derive(move || {
-        if !matches!(inspection.get(), Some(Ok(ref i)) if i.dominant_kind.is_some()) {
+        if !matches!(inspection.get(), Some(Ok(ref i)) if i.common_kind.is_some()) {
             return false;
         }
         match mode.get() {
@@ -2970,12 +3446,16 @@ fn FolderClassifyModal(
         }
     });
 
-    let confirm_label = Signal::derive(move || match inspection.get().and_then(|r| r.ok()) {
-        Some(i) if i.has_subdirs => format!("Classify folder ({})", i.subdir_names.len()),
-        _ => "Classify folder".to_string(),
+    let confirm_label = Signal::derive(move || {
+        let n = selection.get().len();
+        if n <= 1 {
+            "Classify folder".to_string()
+        } else {
+            format!("Classify {n} folders")
+        }
     });
 
-    let success_heading = Signal::derive(|| "Folder classified".to_string());
+    let success_heading = Signal::derive(|| "Folders classified".to_string());
     let success_detail = Signal::derive(move || {
         let files = tracker.slots().get().len();
         format!("{files} file{} moved.", plural(files))
@@ -2999,7 +3479,7 @@ fn FolderClassifyModal(
             phase.get_untracked(),
             BatchPhase::Done | BatchPhase::Partial { .. }
         );
-        target.set(None);
+        open.set(false);
         if refresh {
             on_close.run(());
         }
@@ -3014,9 +3494,11 @@ fn FolderClassifyModal(
     });
 
     let confirm = Callback::new(move |_: ()| {
-        let Some(entry) = target.get_untracked() else {
+        let sel = selection.get_untracked();
+        if sel.is_empty() {
             return;
-        };
+        }
+        let paths: Vec<String> = sel.iter().map(|e| e.rel_path.clone()).collect();
         let dest = match mode.get_untracked() {
             DestinationMode::Existing => {
                 let slug = section_slug.get_untracked();
@@ -3037,17 +3519,22 @@ fn FolderClassifyModal(
             }
         };
         cancel_pending.set(false);
-        job.dispatch(entry.rel_path.clone(), dest);
+        job.dispatch(paths, dest);
     });
 
     view! {
         {move || {
-            if target.get().is_none() {
+            if !open.get() || selection.get().is_empty() {
                 return ().into_any();
             }
+            let modal_title = if selection.get().len() == 1 {
+                "Classify folder"
+            } else {
+                "Classify folders"
+            };
             view! {
                 <ModalShell
-                    title="Classify folder"
+                    title=modal_title
                     subtitle=subtitle
                     busy=is_busy
                     on_close=try_close
@@ -3091,7 +3578,7 @@ fn FolderClassifyModal(
 
 #[component]
 fn FolderSetup(
-    inspection: Resource<Result<FolderInspection, AppError>>,
+    inspection: Resource<Result<FoldersInspection, AppError>>,
     existing_options: Signal<Vec<SectionWithCollections>>,
     has_existing: Signal<bool>,
     mode: RwSignal<DestinationMode>,
@@ -3105,25 +3592,25 @@ fn FolderSetup(
     view! {
         {move || match inspection.get() {
             None => view! {
-                <div class="py-8 text-center text-gray-500 text-sm">"Inspecting folder…"</div>
+                <div class="py-8 text-center text-gray-500 text-sm">"Inspecting folders…"</div>
             }.into_any(),
             Some(Err(e)) => view! {
                 <div class="py-4">
                     <ErrorView
                         error=Signal::derive(move || Some(e.clone()))
                         style=ErrorStyle::Banner
-                        heading="Cannot classify folder"/>
+                        heading="Cannot classify"/>
                 </div>
             }.into_any(),
-            Some(Ok(insp)) if insp.dominant_kind.is_none() => view! {
+            Some(Ok(insp)) if insp.common_kind.is_none() => view! {
                 <div class="py-4 space-y-3">
                     <ErrorView
                         error=Signal::derive(|| Some(AppError::public(
-                            "This folder has no media files, or mixes video and audio. \
-                             Split it up or move it manually."
+                            "The selected folders are empty or mix video and audio. \
+                             Select folders of the same kind and try again."
                         )))
                         style=ErrorStyle::Banner
-                        heading="Cannot classify folder"/>
+                        heading="Cannot classify"/>
                     <div class="flex justify-end">
                         <button type="button"
                             on:click=move |_| on_cancel.run(())
@@ -3135,21 +3622,34 @@ fn FolderSetup(
                 </div>
             }.into_any(),
             Some(Ok(insp)) => {
-                let has_subdirs = insp.has_subdirs;
-                let subdirs_sv = StoredValue::new(insp.subdir_names.clone());
-                let n_subdirs = insp.subdir_names.len();
-                let kind_label = insp.dominant_kind.unwrap().label().to_string();
+                let kind = insp.common_kind.unwrap();
+                let folder_count = insp.folders.len();
+                let total_files = insp.total_files;
+                let any_has_subdirs = insp.any_has_subdirs;
+                let total_size = insp.total_size;
+                let kind_label = kind.label().to_string();
+
+                // Build a preview of collection names.
+                let mut collections: Vec<String> = Vec::new();
+                for f in &insp.folders {
+                    if f.has_subdirs {
+                        collections.extend(f.subdir_names.iter().cloned());
+                    } else {
+                        collections.push(f.name.clone());
+                    }
+                }
+                let collection_count = collections.len();
+                let collections_preview = StoredValue::new(collections);
 
                 let summary = format!(
-                    "{} · {} · {} · {}",
-                    if has_subdirs {
-                        format!("{n_subdirs} subfolder{}", plural(n_subdirs))
-                    } else {
-                        format!("{} file{}", insp.file_count, plural(insp.file_count))
-                    },
-                    format_size(insp.total_size),
+                    "{} folder{} · {} file{} · {} · {} · {}",
+                    folder_count,
+                    plural(folder_count),
+                    total_files,
+                    plural(total_files),
+                    format_size(total_size),
                     kind_label,
-                    if has_subdirs { "nested" } else { "non-nested" },
+                    if any_has_subdirs { "nested" } else { "non-nested" },
                 );
 
                 view! {
@@ -3157,10 +3657,10 @@ fn FolderSetup(
                         <div class="text-xs text-gray-400 bg-white/5 border border-white/10 \
                                     rounded-lg px-3 py-2">
                             <div class="text-white text-sm font-medium mb-0.5">{summary}</div>
-                            <div>{if has_subdirs {
+                            <div>{if any_has_subdirs {
                                 "Each subfolder becomes its own collection. Only series / group sections are valid destinations."
                             } else {
-                                "A new collection is created and every file here becomes an item in it."
+                                "Each folder becomes its own collection."
                             }}</div>
                         </div>
 
@@ -3169,15 +3669,18 @@ fn FolderSetup(
                         <Show when=move || mode.get() == DestinationMode::New>
                             <div class="space-y-3">
                                 <TitleField label="Section title" value=section_title placeholder="Section title"/>
-                                <Show when=move || has_subdirs>
+                                <Show when=move || {collection_count > 1 || any_has_subdirs}>
                                     <div class="text-xs text-gray-400 bg-white/5 \
                                                 border border-white/10 rounded-lg px-3 py-2 \
                                                 max-h-40 overflow-auto">
                                         <div class="text-gray-500 uppercase tracking-wider mb-1">
-                                            "New collections"
+                                            {move || format!(
+                                                "{collection_count} new collection{}",
+                                                plural(collection_count),
+                                            )}
                                         </div>
                                         <ul class="space-y-0.5">
-                                            {move || subdirs_sv.with_value(|v| {
+                                            {move || collections_preview.with_value(|v| {
                                                 v.iter().map(|name| view! {
                                                     <li class="truncate text-white">"• " {name.clone()}</li>
                                                 }).collect_view()
