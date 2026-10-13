@@ -19,6 +19,11 @@ pub struct UploadResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ConversionStatus {
     Writing,
+    /// A cross-device copy is streaming. `progress` is bytes-copied / total.
+    Moving {
+        current_file: String,
+        progress: f32,
+    },
     Converting {
         conversion_index: usize,
         conversion_count: usize,
@@ -27,9 +32,6 @@ pub enum ConversionStatus {
     },
     Finalizing,
     Done,
-    /// The user cancelled the job (or a parent token was cancelled at
-    /// shutdown). Distinguished from `Failed` so the UI can show a neutral
-    /// "cancelled" state rather than a red error.
     Cancelled,
     Failed(AppError),
 }
@@ -57,8 +59,6 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     validate_extensions(&payload, kind)?;
 
     if !needs_conversion(&payload, kind) {
-        // Fast path: no job, no polling. Cancellation is still available
-        // in principle via the child token, though nothing will fire it.
         let cancel = state.cancel.child_token();
         let msg = process_upload(payload, &state, kind, None, &cancel).await?;
         return Ok(UploadResult {
@@ -120,6 +120,13 @@ pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, AppErro
 
     Ok(match &job.phase {
         JobPhase::Writing => ConversionStatus::Writing,
+        JobPhase::Moving {
+            current_file,
+            progress,
+        } => ConversionStatus::Moving {
+            current_file: current_file.clone(),
+            progress: *progress,
+        },
         JobPhase::Converting {
             conversion_index,
             conversion_count,

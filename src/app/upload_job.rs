@@ -50,7 +50,10 @@ impl UploadSignals {
 }
 
 fn is_terminal(s: &ConversionStatus) -> bool {
-    matches!(s, ConversionStatus::Done | ConversionStatus::Failed(_))
+    matches!(
+        s,
+        ConversionStatus::Done | ConversionStatus::Cancelled | ConversionStatus::Failed(_)
+    )
 }
 
 async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
@@ -68,9 +71,6 @@ async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
             Err(_) => {
                 consecutive_errors += 1;
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                    // Synthesize a transient failure. This is the only place
-                    // we fabricate an `AppError` — the connection died, so
-                    // there's nothing from the server to trust.
                     signals.status.set(Some(ConversionStatus::Failed(
                         AppError::public("Lost contact with the server").transient(),
                     )));
@@ -149,6 +149,13 @@ pub fn UploadProgress(status: Signal<Option<ConversionStatus>>) -> impl IntoView
         <Show when=move || status.get().is_some()>
             {move || status.get().map(|s| match s {
                 ConversionStatus::Writing => view! { <WritingStage/> }.into_any(),
+                ConversionStatus::Moving {
+                    current_file,
+                    progress,
+                } => view! {
+                    <MovingStage current_file=current_file progress=progress/>
+                }
+                .into_any(),
                 ConversionStatus::Converting {
                     conversion_index,
                     conversion_count,
@@ -169,16 +176,6 @@ pub fn UploadProgress(status: Signal<Option<ConversionStatus>>) -> impl IntoView
                 ConversionStatus::Failed(e) => view! { <FailedStage error=e/> }.into_any(),
             })}
         </Show>
-    }
-}
-
-#[component]
-fn CancelledStage() -> impl IntoView {
-    view! {
-        <div class="bg-gray-500/15 border border-gray-500/30 rounded-xl p-3 \
-                    text-gray-300 text-sm">
-            "Cancelled"
-        </div>
     }
 }
 
@@ -207,10 +204,17 @@ fn DoneStage() -> impl IntoView {
 }
 
 #[component]
+fn CancelledStage() -> impl IntoView {
+    view! {
+        <div class="bg-gray-500/15 border border-gray-500/30 rounded-xl p-3 \
+                    text-gray-300 text-sm">
+            "Cancelled"
+        </div>
+    }
+}
+
+#[component]
 fn FailedStage(error: AppError) -> impl IntoView {
-    // The `AppError` from the server already carries the right disposition —
-    // conversion failures are transient because a retry after fixing the
-    // input file can succeed. No wrapper, no reconstruction.
     let signal = Signal::derive(move || Some(error.clone()));
     view! {
         <ErrorView
@@ -218,6 +222,29 @@ fn FailedStage(error: AppError) -> impl IntoView {
             style=ErrorStyle::Banner
             heading="Conversion failed"
         />
+    }
+}
+
+#[component]
+fn MovingStage(#[prop(into)] current_file: String, progress: f32) -> impl IntoView {
+    let pct = if progress.is_finite() {
+        (progress * 100.0).round() as u32
+    } else {
+        0
+    };
+    view! {
+        <div class="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-4 space-y-2">
+            <div class="text-cyan-300 text-sm font-bold">"📦 Moving file..."</div>
+            <div class="text-xs text-gray-400 truncate font-mono">{current_file}</div>
+            <div class="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                <div
+                    class="h-full bg-gradient-to-r from-cyan-400 to-blue-500 \
+                           rounded-full transition-all duration-300"
+                    style=format!("width: {pct}%")
+                ></div>
+            </div>
+            <div class="text-xs text-cyan-300 font-mono text-right">{pct}"%"</div>
+        </div>
     }
 }
 

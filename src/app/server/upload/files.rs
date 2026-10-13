@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -7,12 +8,16 @@ use crate::app::error::AppError;
 use crate::app::model::MediaKind;
 use crate::app::server::AppState;
 use crate::app::server::convert::{
-    TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
-    is_video_container_supported,
+    JobPhase, Jobs, TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
+    is_video_container_supported, job_set_phase,
 };
 
 use super::naming::{sanitize_filename, slugify};
 use super::types::{StagedFile, UploadFile, UploadPayload};
+
+/// Chunk size for cross-device copies. 4 MiB keeps the job-progress signal
+/// ticking at a reasonable rate without meaningful syscall overhead.
+const COPY_CHUNK: usize = 4 * 1024 * 1024;
 
 fn extension_of(name: &str) -> String {
     name.rsplit('.').next().unwrap_or("").to_string()
@@ -84,14 +89,74 @@ async fn ensure_plan_dir(plan: &StagingPlan, media_root: &Path) -> Result<(), Ap
         .map_err(|e| AppError::internal("mkdir media staging dir", e))
 }
 
-async fn move_temp_to_final(temp_path: &Path, dest: &Path) -> Result<(), AppError> {
-    if tokio::fs::rename(temp_path, dest).await.is_ok() {
+/// Move `src` to `dst`, reporting byte progress through `jobs` while copying.
+///
+/// Same-filesystem moves are a single rename — no progress, done in
+/// microseconds. Cross-device moves stream in `COPY_CHUNK` chunks and publish
+/// a `JobPhase::Moving` update whenever the integer percentage changes, which
+/// keeps the client's progress bar honest without flooding the job map.
+async fn move_temp_to_final(
+    src: &Path,
+    dst: &Path,
+    total_size: u64,
+    display_name: &str,
+    jobs: &Jobs,
+    job_id: Option<&str>,
+) -> Result<(), AppError> {
+    if tokio::fs::rename(src, dst).await.is_ok() {
         return Ok(());
     }
-    tokio::fs::copy(temp_path, dest)
+
+    let mut reader = tokio::fs::File::open(src)
         .await
-        .map_err(|e| AppError::internal(format!("copy to {}", dest.display()), e))?;
-    let _ = tokio::fs::remove_file(temp_path).await;
+        .map_err(|e| AppError::internal(format!("open {}", src.display()), e))?;
+    let mut writer = tokio::fs::File::create(dst)
+        .await
+        .map_err(|e| AppError::internal(format!("create {}", dst.display()), e))?;
+
+    let mut buf = vec![0u8; COPY_CHUNK];
+    let mut copied: u64 = 0;
+    let mut last_bucket: u32 = u32::MAX;
+
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .await
+            .map_err(|e| AppError::internal("read during move", e))?;
+        if n == 0 {
+            break;
+        }
+        writer
+            .write_all(&buf[..n])
+            .await
+            .map_err(|e| AppError::internal("write during move", e))?;
+        copied += n as u64;
+
+        if total_size > 0 {
+            let pct = (copied as f64 / total_size as f64).clamp(0.0, 1.0) as f32;
+            let bucket = (pct * 100.0) as u32;
+            if bucket != last_bucket {
+                last_bucket = bucket;
+                job_set_phase(
+                    jobs,
+                    job_id,
+                    JobPhase::Moving {
+                        current_file: display_name.to_string(),
+                        progress: pct,
+                    },
+                )
+                .await;
+            }
+        }
+    }
+
+    writer
+        .flush()
+        .await
+        .map_err(|e| AppError::internal("flush during move", e))?;
+
+    // Best effort: if the unlink fails we've still got the copy.
+    let _ = tokio::fs::remove_file(src).await;
     Ok(())
 }
 
@@ -103,16 +168,25 @@ struct PlacedRaw {
 }
 
 async fn place_raw_file(
-    plan: &StagingPlan,
-    media_root: &Path,
+    ctx: &StagingContext<'_>,
     file: &UploadFile,
 ) -> Result<PlacedRaw, AppError> {
     let ext = extension_of(&file.filename);
     let stem = safe_stem(&file.filename);
     let token = Uuid::new_v4();
-    let rel = plan.rel_for(&stem, token, &ext);
-    let abs = media_root.join(&rel);
-    move_temp_to_final(&file.temp_path, &abs).await?;
+    let rel = ctx.plan.rel_for(&stem, token, &ext);
+    let abs = ctx.media_root.join(&rel);
+
+    move_temp_to_final(
+        &file.temp_path,
+        &abs,
+        file.size,
+        &file.filename,
+        &ctx.state.jobs,
+        ctx.job_id,
+    )
+    .await?;
+
     Ok(PlacedRaw {
         token,
         safe_stem: stem,
@@ -232,7 +306,7 @@ async fn stage_one_file(
     target: Option<TargetFormat>,
     track: &mut WrittenTracker,
 ) -> Result<StagedFile, AppError> {
-    let placed = place_raw_file(ctx.plan, ctx.media_root, file).await?;
+    let placed = place_raw_file(ctx, file).await?;
     track.add(placed.abs.clone());
 
     match target {

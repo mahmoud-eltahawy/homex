@@ -15,6 +15,12 @@ use crate::app::error::AppError;
 #[derive(Clone, Debug)]
 pub enum JobPhase {
     Writing,
+    /// A cross-device copy is in progress. Distinct from `Converting` so the
+    /// client shows "Moving X%" rather than "Converting X%".
+    Moving {
+        current_file: String,
+        progress: f32,
+    },
     Converting {
         conversion_index: usize,
         conversion_count: usize,
@@ -23,8 +29,6 @@ pub enum JobPhase {
     },
     Finalizing,
     Done,
-    /// The job was cancelled. Distinguished from `Failed` so the client can
-    /// render a neutral state and skip the "retry" affordance.
     Cancelled,
     Failed(AppError),
 }
@@ -33,9 +37,6 @@ pub enum JobPhase {
 pub struct Job {
     pub phase: JobPhase,
     pub started_at: Instant,
-    /// Per-job cancellation. A child of `AppState::cancel`, so process
-    /// shutdown still cancels everything, but this can be fired
-    /// independently.
     pub cancel: CancellationToken,
 }
 
@@ -100,8 +101,6 @@ pub fn is_convertible_audio(ext: &str) -> bool {
 
 // ─── ffprobe ──────────────────────────────────────────────────────────────
 
-/// Probe a file's duration in seconds. Returns `0.0` on any failure —
-/// downstream code guards against that.
 pub async fn ffprobe_duration(path: &Path) -> f64 {
     let out = match Command::new("ffprobe")
         .args([

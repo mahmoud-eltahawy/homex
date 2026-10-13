@@ -645,6 +645,13 @@ pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, A
         out.push(match jobs.get(id) {
             Some(job) => match &job.phase {
                 JobPhase::Writing => ConversionStatus::Writing,
+                JobPhase::Moving {
+                    current_file,
+                    progress,
+                } => ConversionStatus::Moving {
+                    current_file: current_file.clone(),
+                    progress: *progress,
+                },
                 JobPhase::Converting {
                     conversion_index,
                     conversion_count,
@@ -661,8 +668,6 @@ pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, A
                 JobPhase::Cancelled => ConversionStatus::Cancelled,
                 JobPhase::Failed(e) => ConversionStatus::Failed(e.clone()),
             },
-            // Job evicted after terminal — treat as success so the batch
-            // doesn't flip to Failed for a job that actually succeeded.
             None => ConversionStatus::Done,
         });
     }
@@ -2171,6 +2176,12 @@ fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>) -> 
                          "bg-gray-500/50", false, "text-gray-500"),
                 Some(ConversionStatus::Failed(e)) => (format!("Failed: {}", e.message), 0.0,
                          "bg-red-500/60", false, "text-red-300"),
+                Some(ConversionStatus::Moving { progress, .. }) => {
+                    let p = if progress.is_finite() { *progress } else { 0.0 };
+                    (format!("Moving {:.0}%", p * 100.0), p,
+                     "bg-gradient-to-r from-cyan-400 to-blue-500", false, "text-gray-300")
+                }
+
             };
 
             let name = name.clone();
