@@ -19,9 +19,10 @@ pub use collections::{
     move_collection_to_section, update_collection_field,
 };
 pub use files::{fetch_file_path, insert_file};
+
 pub use items::{
-    ItemDeletion, delete_item_cascade, fetch_items, move_items_to_collection, swap_item_order,
-    update_item_title,
+    ItemDeletion, delete_item_cascade, delete_items_cascade, fetch_items, move_items_to_collection,
+    swap_item_order, update_item_title,
 };
 pub use sections::{
     DeleteSectionOutcome, delete_section, fetch_section_by_slug, fetch_section_kind,

@@ -6,6 +6,7 @@ pub mod auth;
 pub mod config;
 pub mod convert;
 pub mod db;
+pub mod jobs;
 pub mod poster;
 pub mod routes;
 pub mod upload;

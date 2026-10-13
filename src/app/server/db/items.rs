@@ -193,3 +193,42 @@ pub async fn delete_item_cascade(db: &mut Db, id: Uuid) -> toasty::Result<ItemDe
     tx.commit().await?;
     Ok(ItemDeletion { media_paths })
 }
+
+// ─── Bulk deletion (used by "move to incoming") ───────────────────────────
+
+/// Delete multiple items in one transaction, update each collection's
+/// item count, and remove any `File` rows that become orphaned. Returns the
+/// relative paths whose `File` rows were removed — the caller is
+/// responsible for clearing those from disk.
+pub async fn delete_items_cascade(db: &mut Db, item_ids: &[Uuid]) -> toasty::Result<Vec<String>> {
+    if item_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut tx = db.transaction().await?;
+    let mut file_ids: Vec<Uuid> = Vec::with_capacity(item_ids.len());
+    let mut collection_deltas: HashMap<Uuid, i64> = HashMap::new();
+
+    for &id in item_ids {
+        let item = match Item::filter(Item::fields().id().eq(id))
+            .first()
+            .exec(&mut tx)
+            .await?
+        {
+            Some(i) => i,
+            None => continue,
+        };
+        file_ids.push(item.file_id);
+        *collection_deltas.entry(item.collection_id).or_insert(0) += 1;
+        item.delete().exec(&mut tx).await?;
+    }
+
+    for (cid, delta) in collection_deltas {
+        let mut c = CollectionRow::get_by_id(&mut tx, &cid).await?;
+        let new_count = (c.items_count - delta).max(0);
+        c.update().items_count(new_count).exec(&mut tx).await?;
+    }
+
+    let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
+    tx.commit().await?;
+    Ok(media_paths)
+}

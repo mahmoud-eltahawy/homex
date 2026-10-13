@@ -80,6 +80,30 @@ impl MediaKind {
             Self::Audio => "Audio",
         }
     }
+
+    pub fn from_extension(ext: &str) -> Option<Self> {
+        const VIDEO_EXTS: &[&str] = &[
+            "mp4", "mkv", "mov", "webm", "avi", "m4v", "wmv", "flv", "ts", "mpg", "mpeg", "3gp",
+            "ogv",
+        ];
+        const AUDIO_EXTS: &[&str] = &[
+            "mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "wma", "aiff", "aif", "alac",
+            "ape",
+        ];
+        let ext = ext.to_lowercase();
+        if VIDEO_EXTS.iter().any(|e| *e == ext) {
+            Some(Self::Video)
+        } else if AUDIO_EXTS.iter().any(|e| *e == ext) {
+            Some(Self::Audio)
+        } else {
+            None
+        }
+    }
+
+    pub fn from_filename(name: &str) -> Option<Self> {
+        let ext = name.rsplit_once('.').map(|(_, e)| e)?;
+        Self::from_extension(ext)
+    }
 }
 
 impl TryFrom<&str> for MediaKind {

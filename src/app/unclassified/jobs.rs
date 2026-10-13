@@ -1,0 +1,113 @@
+//! Client-side job wrappers for the two classify flows.
+
+use leptos::prelude::*;
+use uuid::Uuid;
+
+use crate::app::error::AppError;
+
+use super::tracker::BatchTracker;
+use super::types::{ClassifyInput, FileJobHandle, FolderDestination};
+use crate::app::unclassified::cancel_classify;
+use crate::app::unclassified::{classify_unclassified_files, classify_unclassified_folders};
+
+#[derive(Clone, Copy)]
+pub struct ClassifyJob {
+    action: Action<(Vec<ClassifyInput>, Uuid, Option<i64>), Result<Vec<FileJobHandle>, AppError>>,
+    tracker: BatchTracker,
+}
+
+impl ClassifyJob {
+    pub fn new() -> Self {
+        let tracker = BatchTracker::new();
+        let action = Action::new_local(
+            |(files, col, season): &(Vec<ClassifyInput>, Uuid, Option<i64>)| {
+                classify_unclassified_files(files.clone(), *col, *season)
+            },
+        );
+
+        Effect::new(move |_| {
+            let Some(val) = action.value().get() else {
+                return;
+            };
+            match val {
+                Ok(handles) => tracker.begin(handles),
+                Err(e) => tracker.error_pub().set(Some(e)),
+            }
+        });
+
+        Self { action, tracker }
+    }
+
+    pub fn dispatch(&self, files: Vec<ClassifyInput>, col: Uuid, season: Option<i64>) {
+        self.tracker.reset();
+        self.action.dispatch((files, col, season));
+    }
+
+    pub fn reset(&self) {
+        self.tracker.reset();
+    }
+
+    pub fn tracker(&self) -> BatchTracker {
+        self.tracker
+    }
+
+    pub fn cancel(&self) {
+        let ids = self.tracker.pending_job_ids();
+        if ids.is_empty() {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            let _ = cancel_classify(ids).await;
+        });
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct FolderClassifyJob {
+    action: Action<(Vec<String>, FolderDestination), Result<Vec<FileJobHandle>, AppError>>,
+    tracker: BatchTracker,
+}
+
+impl FolderClassifyJob {
+    pub fn new() -> Self {
+        let tracker = BatchTracker::new();
+        let action = Action::new_local(|(paths, dest): &(Vec<String>, FolderDestination)| {
+            classify_unclassified_folders(paths.clone(), dest.clone())
+        });
+
+        Effect::new(move |_| {
+            let Some(val) = action.value().get() else {
+                return;
+            };
+            match val {
+                Ok(handles) => tracker.begin(handles),
+                Err(e) => tracker.error_pub().set(Some(e)),
+            }
+        });
+
+        Self { action, tracker }
+    }
+
+    pub fn dispatch(&self, paths: Vec<String>, dest: FolderDestination) {
+        self.tracker.reset();
+        self.action.dispatch((paths, dest));
+    }
+
+    pub fn reset(&self) {
+        self.tracker.reset();
+    }
+
+    pub fn tracker(&self) -> BatchTracker {
+        self.tracker
+    }
+
+    pub fn cancel(&self) {
+        let ids = self.tracker.pending_job_ids();
+        if ids.is_empty() {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            let _ = cancel_classify(ids).await;
+        });
+    }
+}

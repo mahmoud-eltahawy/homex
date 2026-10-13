@@ -1,7 +1,9 @@
 mod files;
+mod incoming;
 mod multipart;
 mod naming;
 mod persist;
+mod return_to_incoming;
 mod types;
 mod validate;
 
@@ -9,8 +11,12 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
+pub use incoming::{
+    RawFile, collect_files, dominant_kind, ensure_kind_matches, read_immediate_subdirs,
+};
 pub use multipart::parse_upload_multipart;
-pub use naming::{extension_of, sanitize_filename, slugify};
+pub use naming::{extension_of, sanitize_filename, sanitize_rel, slugify};
+pub use return_to_incoming::move_file_to_incoming;
 use tokio::time::sleep;
 pub use types::{StagedFile, UploadFile, UploadPayload};
 pub use validate::{needs_conversion, validate_extensions};
