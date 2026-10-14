@@ -12,12 +12,11 @@ use crate::app::model::{Collection, CollectionKind, CollectionSummary, MediaKind
 pub(crate) async fn kind_of(db: &mut Db, id: Uuid) -> toasty::Result<Option<CollectionKind>> {
     use crate::app::model::{AudioCollectionRow, VideoCollectionRow};
 
-    if VideoCollectionRow::filter(VideoCollectionRow::fields().id().eq(id))
+    if !VideoCollectionRow::filter(VideoCollectionRow::fields().id().eq(id))
         .limit(1)
         .exec(db)
         .await?
-        .first()
-        .is_some()
+        .is_empty()
     {
         return Ok(Some(CollectionKind::Video));
     }
@@ -25,8 +24,7 @@ pub(crate) async fn kind_of(db: &mut Db, id: Uuid) -> toasty::Result<Option<Coll
         .limit(1)
         .exec(db)
         .await?
-        .first()
-        .is_some()
+        .is_empty()
     {
         return Ok(Some(CollectionKind::Audio));
     }
@@ -43,8 +41,7 @@ pub(crate) async fn kind_of_tx(
         .limit(1)
         .exec(tx)
         .await?
-        .first()
-        .is_some()
+        .is_empty()
     {
         return Ok(Some(CollectionKind::Video));
     }
@@ -52,8 +49,7 @@ pub(crate) async fn kind_of_tx(
         .limit(1)
         .exec(tx)
         .await?
-        .first()
-        .is_some()
+        .is_empty()
     {
         return Ok(Some(CollectionKind::Audio));
     }
