@@ -16,7 +16,7 @@ use crate::app::{
         upload_collection_poster,
     },
     common::refetch_on_success,
-    detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
+    detail::{DetailHero, DetailShell, DownloadButton, HeroBadge, HeroMeta},
     error::AppError,
     error_view::{ErrorStyle, ErrorView, action_error},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
@@ -683,6 +683,7 @@ fn Playlist(
     }
 
     let items_for_body = items.clone();
+
     let body = move || {
         let current = selected_season.get();
 
@@ -722,19 +723,36 @@ fn Playlist(
             })
             .collect();
 
+        // `WatchPage` collapses the playlist panel — and its download control
+        // — when there is a single entry. Render a download button ourselves
+        // in that case so the file is still reachable.
+        let single_item_download = if filtered.len() == 1 {
+            let item = &filtered[0];
+            Some((item.file_path(), item.display_title()))
+        } else {
+            None
+        };
+
         Either::Right(view! {
-            <WatchPage
-                edit_mode=use_edit_mode()
-                items=media_items.into()
-                initial_idx=initial_index
-                audio=audio
-                artwork=artwork.clone()
-                playlist_title=playlist_title.clone()
-                on_rename=on_rename
-                on_delete=on_delete
-                on_move=on_move
-                show_download=true
-            />
+            <>
+                {single_item_download.map(|(href, name)| view! {
+                    <div class="mb-4 flex justify-end">
+                        <DownloadButton href=href download_name=name/>
+                    </div>
+                })}
+                <WatchPage
+                    edit_mode=use_edit_mode()
+                    items=media_items.into()
+                    initial_idx=initial_index
+                    audio=audio
+                    artwork=artwork.clone()
+                    playlist_title=playlist_title.clone()
+                    on_rename=on_rename
+                    on_delete=on_delete
+                    on_move=on_move
+                    show_download=true
+                />
+            </>
         })
     };
 
