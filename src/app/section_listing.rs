@@ -7,12 +7,12 @@ use crate::app::{
     inline_edit::use_edit_mode,
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
-    resource_view::ResourceView,
     route_params::use_string_param,
     search::SearchBar,
     sections::fetch_section_by_slug,
 };
 use leptos::prelude::*;
+use leptos_outcome::ResourceView;
 use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
 

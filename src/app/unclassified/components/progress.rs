@@ -1,11 +1,10 @@
-use leptos::either::Either;
-use leptos::prelude::*;
-use uuid::Uuid;
-
 use crate::app::constants::routes;
-use crate::app::error_view::{ErrorStyle, ErrorView};
 use crate::app::unclassified::tracker::{BatchPhase, BatchTracker};
 use crate::app::upload_api::ConversionStatus;
+use leptos::either::Either;
+use leptos::prelude::*;
+use leptos_outcome::ErrorView;
+use uuid::Uuid;
 
 #[component]
 pub fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>) -> impl IntoView {
@@ -257,7 +256,7 @@ pub fn PhaseFinal(
                         BatchPhase::Failed(e) => Some(e),
                         _ => None,
                     })}
-                    style=ErrorStyle::Banner
+                    banner=true
                     heading="Move failed"
                 />
             </Show>

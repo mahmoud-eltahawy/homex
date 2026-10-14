@@ -1116,6 +1116,7 @@ dependencies = [
  "leptos_axum",
  "leptos_media_player",
  "leptos_meta",
+ "leptos_outcome",
  "leptos_router",
  "multer",
  "serde",
@@ -1670,6 +1671,15 @@ dependencies = [
  "send_wrapper",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "leptos_outcome"
+version = "0.1.0"
+source = "git+https://github.com/mahmoud-eltahawy/leptos_outcome.git#ba61579276c4a68694e9ceb4e58fa30d41a41de5"
+dependencies = [
+ "leptos",
+ "serde",
 ]
 
 [[package]]

@@ -1,5 +1,7 @@
 use leptos::either::Either;
 use leptos::prelude::*;
+use leptos_outcome::ResourceView;
+use leptos_outcome::action_error;
 use leptos_router::{LazyRoute, lazy_route};
 use uuid::Uuid;
 
@@ -9,18 +11,17 @@ use crate::app::{
         collections_paginated, refetch_on_success,
     },
     error::AppError,
-    error_view::{ErrorView, action_error},
     icons::{DeleteIcon, ViewAllIcon, icon_for},
     inline_edit::{EditableText, use_edit_mode},
     model::{Collection, MediaKind, Section},
     pagination::{PaginationControls, PaginationControlsProps},
-    resource_view::ResourceView,
     search::SearchBar,
     sections::{
         create_section, delete_section, fetch_sections, patch_section_tags, patch_section_title,
     },
     tags::TagEditor,
 };
+use leptos_outcome::ErrorView;
 
 const MEDIA_LIST_SIZE: usize = 6;
 

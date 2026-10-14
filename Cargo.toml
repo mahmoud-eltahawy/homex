@@ -47,6 +47,7 @@ slug = { version = "0.1", optional = true }
 tempfile = { version = "3", optional = true }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
 leptos_media_player = { git = "https://github.com/mahmoud-eltahawy/leptos_media_player.git"}
+leptos_outcome = { git = "https://github.com/mahmoud-eltahawy/leptos_outcome.git"}
 
 [features]
 hydrate = [

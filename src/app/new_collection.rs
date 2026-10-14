@@ -4,17 +4,16 @@
 //! collection row is created inside `upload_media` after staging — for
 //! video, only after a poster frame is extracted.
 
-use leptos::prelude::*;
-use leptos_router::hooks::use_navigate;
-use leptos_router::{LazyRoute, lazy_route};
-
 use crate::app::constants::routes;
 use crate::app::error::AppError;
-use crate::app::error_view::{ErrorStyle, ErrorView};
 use crate::app::model::{MediaKind, Section, Tag};
 use crate::app::route_params::use_string_param;
 use crate::app::tags::TagEditor;
 use crate::app::upload_job::{UploadJob, UploadProgress};
+use leptos::prelude::*;
+use leptos_outcome::ErrorView;
+use leptos_router::hooks::use_navigate;
+use leptos_router::{LazyRoute, lazy_route};
 
 // ─── FormData field names ─────────────────────────────────────────────────
 
@@ -297,7 +296,7 @@ impl LazyRoute for NewCollectionPage {
                                     <UploadProgress status=Signal::derive(move || upload_status.get())/>
                                 </div>
                                 <div class="mt-3">
-                                    <ErrorView error=upload_error style=ErrorStyle::Banner/>
+                                    <ErrorView error=upload_error banner=true/>
                                 </div>
                             </div>
                         }.into_any()

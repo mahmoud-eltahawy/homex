@@ -6,6 +6,7 @@ mod jobs;
 mod tracker;
 pub mod types;
 
+use leptos_outcome::ResourceView;
 pub use types::{
     ClassifyDestination, ClassifyInput, FileJobHandle, FolderInspection, FoldersInspection,
     SectionWithCollections, UnclassifiedEntry,
@@ -21,7 +22,6 @@ use crate::app::constants::routes;
 use crate::app::error::AppError;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
-use crate::app::resource_view::ResourceView;
 use crate::app::upload_api::ConversionStatus;
 
 use components::breadcrumb::Breadcrumb;

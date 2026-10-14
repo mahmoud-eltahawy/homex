@@ -1,10 +1,10 @@
+use crate::app::error::AppError;
+use crate::app::upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media};
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
+use leptos_outcome::ErrorView;
+use leptos_outcome::action_error;
 use uuid::Uuid;
-
-use crate::app::error::AppError;
-use crate::app::error_view::{ErrorStyle, ErrorView};
-use crate::app::upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media};
 
 const POLL_INTERVAL_MS: u32 = 700;
 const MAX_CONSECUTIVE_ERRORS: u32 = 10;
@@ -160,7 +160,7 @@ impl UploadJob {
     }
 
     pub fn error(&self) -> Signal<Option<AppError>> {
-        crate::app::error_view::action_error(self.action)
+        action_error(self.action)
     }
 
     /// True when the upload finished successfully. For the new-collection
@@ -249,7 +249,7 @@ fn FailedStage(error: AppError) -> impl IntoView {
     view! {
         <ErrorView
             error=signal
-            style=ErrorStyle::Banner
+            banner=true
             heading="Conversion failed"
         />
     }

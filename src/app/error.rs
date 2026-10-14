@@ -72,6 +72,18 @@ pub struct AppError {
     pub diagnostic: Option<String>,
 }
 
+// ─── UserFacingError bridge ───────────────────────────────────────────────────
+
+impl leptos_outcome::UserFacingError for AppError {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+
+    fn is_fatal(&self) -> bool {
+        matches!(self.disposition, Disposition::Fatal)
+    }
+}
+
 impl AppError {
     // ─── Constructors ─────────────────────────────────────────────────────
 

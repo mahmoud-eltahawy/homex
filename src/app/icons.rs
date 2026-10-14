@@ -195,32 +195,11 @@ pub fn icon_for(kind: MediaKind, nested: bool) -> AnyView {
 }
 
 #[component]
-pub fn LoadingIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-8 w-8 animate-spin text-cyan-400" label="Loading">
-            <circle cx="12" cy="12" r="10" stroke-dasharray="70 200" stroke-dashoffset="0" />
-            <circle cx="12" cy="12" r="2" fill="currentColor" />
-        </Icon>
-    }
-}
-
-#[component]
 pub fn RetryIcon() -> impl IntoView {
     view! {
         <Icon class="h-6 w-6 text-gray-400 hover:text-white transition-colors" label="Retry">
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1.03 6.36 2.36L21 8" />
             <polyline points="21 3 21 8 16 8" />
-        </Icon>
-    }
-}
-
-#[component]
-pub fn ErrorIcon() -> impl IntoView {
-    view! {
-        <Icon class="h-6 w-6 text-red-400" label="Something Went Wrong">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <circle cx="12" cy="16" r="0.5" fill="currentColor" />
         </Icon>
     }
 }

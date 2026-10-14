@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use leptos::{either::Either, prelude::*};
+use leptos_outcome::ResourceView;
+use leptos_outcome::action_error;
 use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
 use uuid::Uuid;
 use web_sys::wasm_bindgen::JsCast;
@@ -18,17 +20,16 @@ use crate::app::{
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, DownloadButton, HeroBadge, HeroMeta},
     error::AppError,
-    error_view::{ErrorStyle, ErrorView, action_error},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
     model::{Collection, CollectionSummary, Item, MediaKind, Section},
-    resource_view::ResourceView,
     route_params::{use_optional_uuid_param, use_string_param, use_uuid_param},
     sections::fetch_section_by_slug,
     tags::TagEditor,
     unclassified::move_items_to_incoming,
     upload_job::{UploadJob, UploadProgress},
 };
+use leptos_outcome::ErrorView;
 
 // ─── Multipart form field names (client-side) ─────────────────────────────
 
@@ -645,7 +646,7 @@ fn AppendItems(
                 <UploadProgress status=Signal::derive(move || upload_status.get())/>
             </div>
             <div class="mt-3">
-                <ErrorView error=upload_error style=ErrorStyle::Banner/>
+                <ErrorView error=upload_error banner=true/>
             </div>
         </Show>
     }

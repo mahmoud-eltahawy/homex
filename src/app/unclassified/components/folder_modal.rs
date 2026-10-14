@@ -1,8 +1,4 @@
-use leptos::prelude::*;
-use uuid::Uuid;
-
 use crate::app::error::AppError;
-use crate::app::error_view::{ErrorStyle, ErrorView};
 use crate::app::unclassified::helpers::{format_size, plural};
 use crate::app::unclassified::jobs::FolderClassifyJob;
 use crate::app::unclassified::tracker::BatchPhase;
@@ -11,6 +7,9 @@ use crate::app::unclassified::types::{
     UnclassifiedEntry,
 };
 use crate::app::unclassified::{fetch_sections_with_collections, inspect_unclassified_folders};
+use leptos::prelude::*;
+use leptos_outcome::ErrorView;
+use uuid::Uuid;
 
 use super::primitives::{FormActions, ModalShell, SectionSelect, TitleField};
 use super::progress::{BatchProgress, PhaseFinal};
@@ -323,7 +322,7 @@ fn FolderSetup(
                 <div class="py-4">
                     <ErrorView
                         error=Signal::derive(move || Some(e.clone()))
-                        style=ErrorStyle::Banner
+                        banner=true
                         heading="Cannot classify"/>
                 </div>
             }.into_any(),
@@ -334,7 +333,7 @@ fn FolderSetup(
                             "The selected folders are empty or mix video and audio. \
                                  Select folders of the same kind and try again."
                         )))
-                        style=ErrorStyle::Banner
+                        banner=true
                         heading="Cannot classify"/>
                     <div class="flex justify-end">
                         <button type="button"

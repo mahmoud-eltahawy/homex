@@ -1,8 +1,8 @@
-use leptos::prelude::*;
-use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
-
 use crate::app::error::AppError;
-use crate::app::error_view::{ErrorView, action_error};
+use leptos::prelude::*;
+use leptos_outcome::ErrorView;
+use leptos_outcome::action_error;
+use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
 
 #[cfg(feature = "ssr")]
 use crate::app::constants::{auth as auth_consts, messages};

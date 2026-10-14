@@ -1,8 +1,4 @@
-use leptos::prelude::*;
-use uuid::Uuid;
-
 use crate::app::error::AppError;
-use crate::app::error_view::ErrorView;
 use crate::app::model::MediaKind;
 use crate::app::unclassified::fetch_sections_with_collections;
 use crate::app::unclassified::helpers::{file_stem, kind_for_ext, parse_season};
@@ -11,6 +7,9 @@ use crate::app::unclassified::tracker::BatchPhase;
 use crate::app::unclassified::types::{
     ClassifyDestination, ClassifyInput, SectionWithCollections, UnclassifiedEntry,
 };
+use leptos::prelude::*;
+use leptos_outcome::ErrorView;
+use uuid::Uuid;
 
 use super::primitives::{FormActions, ModalShell, SeasonField, SectionSelect, TitleField};
 use super::progress::{BatchProgress, PhaseFinal};
