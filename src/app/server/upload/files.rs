@@ -13,10 +13,8 @@ use crate::app::server::convert::{
 };
 
 use super::naming::{sanitize_filename, slugify};
-use super::types::{StagedFile, UploadFile, UploadPayload};
+use super::types::{StagedFile, UploadFile, UploadPayload, UploadTarget};
 
-/// Chunk size for cross-device copies. 4 MiB keeps the job-progress signal
-/// ticking at a reasonable rate without meaningful syscall overhead.
 const COPY_CHUNK: usize = 4 * 1024 * 1024;
 
 fn extension_of(name: &str) -> String {
@@ -67,11 +65,16 @@ impl StagingPlan {
 }
 
 fn storage_slug(payload: &UploadPayload) -> String {
-    let raw = slugify(&payload.title);
-    if raw.is_empty() {
-        Uuid::new_v4().to_string()
-    } else {
-        raw
+    match &payload.target {
+        UploadTarget::New { title, .. } => {
+            let raw = slugify(title);
+            if raw.is_empty() {
+                Uuid::new_v4().to_string()
+            } else {
+                raw
+            }
+        }
+        UploadTarget::Existing { collection_id, .. } => format!("collection-{collection_id}"),
     }
 }
 
@@ -89,12 +92,6 @@ async fn ensure_plan_dir(plan: &StagingPlan, media_root: &Path) -> Result<(), Ap
         .map_err(|e| AppError::internal("mkdir media staging dir", e))
 }
 
-/// Move `src` to `dst`, reporting byte progress through `jobs` while copying.
-///
-/// Same-filesystem moves are a single rename — no progress, done in
-/// microseconds. Cross-device moves stream in `COPY_CHUNK` chunks and publish
-/// a `JobPhase::Moving` update whenever the integer percentage changes, which
-/// keeps the client's progress bar honest without flooding the job map.
 async fn move_temp_to_final(
     src: &Path,
     dst: &Path,
@@ -155,7 +152,6 @@ async fn move_temp_to_final(
         .await
         .map_err(|e| AppError::internal("flush during move", e))?;
 
-    // Best effort: if the unlink fails we've still got the copy.
     let _ = tokio::fs::remove_file(src).await;
     Ok(())
 }
@@ -216,9 +212,9 @@ async fn stage_kept_file(placed: &PlacedRaw, file: &UploadFile) -> Result<Staged
         duration: duration_secs_rounded(&placed.abs).await,
         size: file.size,
         title: file.title.clone(),
+        origin: file.temp_path.clone(),
     })
 }
-
 async fn stage_converted_file(
     ctx: &StagingContext<'_>,
     placed: &PlacedRaw,
@@ -254,6 +250,7 @@ async fn stage_converted_file(
         duration: total_secs.round() as i64,
         size,
         title: file.title.clone(),
+        origin: file.temp_path.clone(),
     })
 }
 

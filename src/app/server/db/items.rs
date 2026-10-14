@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use toasty::Db;
 use uuid::Uuid;
 
+use super::collections::decrement_or_delete;
 use super::files::purge_orphan_files;
-use crate::app::model::{CollectionRow, Item};
+use crate::app::model::Item;
 
 // ─── Item queries ─────────────────────────────────────────────────────────
 
@@ -62,24 +63,33 @@ pub async fn swap_item_order(db: &mut Db, id: Uuid, is_up: bool) -> toasty::Resu
 
 // ─── Move items between collections ───────────────────────────────────────
 
-/// Move a batch of items into `to_collection_id`, appending them after the
-/// existing items in the destination (per season, when applicable).
-///
-/// Skips ids that are already in the destination — that's an idempotent
-/// no-op, not a failure. Ids that don't exist at all are logged and skipped;
-/// DB errors abort the whole move.
 pub async fn move_items_to_collection(
     db: &mut Db,
     item_ids: &[Uuid],
     to_collection_id: Uuid,
 ) -> toasty::Result<()> {
+    use super::collections::kind_of;
+    use crate::app::model::{AudioCollectionRow, CollectionKind, VideoCollectionRow};
+
     if item_ids.is_empty() {
         return Ok(());
     }
 
+    let dest_kind = kind_of(db, to_collection_id)
+        .await?
+        .ok_or_else(|| super::err_not_found("collection"))?;
+
     let mut tx = db.transaction().await?;
 
-    let _ = CollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
+    // Verify destination exists.
+    match dest_kind {
+        CollectionKind::Video => {
+            VideoCollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
+        }
+        CollectionKind::Audio => {
+            AudioCollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
+        }
+    }
 
     let mut moved: Vec<Item> = Vec::with_capacity(item_ids.len());
     for &id in item_ids {
@@ -127,6 +137,7 @@ pub async fn move_items_to_collection(
             .await?;
     }
 
+    // Renumber sources per season.
     for &from_id in from_counts.keys() {
         let remaining = Item::filter(Item::fields().collection_id().eq(from_id))
             .order_by((
@@ -148,20 +159,32 @@ pub async fn move_items_to_collection(
         }
     }
 
-    for (&from_id, &count) in &from_counts {
-        let mut c = CollectionRow::get_by_id(&mut tx, &from_id).await?;
-        let items_count = c.items_count;
-        c.update()
-            .items_count((items_count - count).max(0))
-            .exec(&mut tx)
-            .await?;
+    // Bump items_count on both source and destination.
+    async fn bump(
+        tx: &mut toasty::Transaction<'_>,
+        kind: CollectionKind,
+        id: Uuid,
+        delta: i64,
+    ) -> toasty::Result<()> {
+        match kind {
+            CollectionKind::Video => {
+                let mut c = VideoCollectionRow::get_by_id(tx, &id).await?;
+                let n = (c.items_count + delta).max(0);
+                c.update().items_count(n).exec(tx).await
+            }
+            CollectionKind::Audio => {
+                let mut c = AudioCollectionRow::get_by_id(tx, &id).await?;
+                let n = (c.items_count + delta).max(0);
+                c.update().items_count(n).exec(tx).await
+            }
+        }
     }
-    let mut to_c = CollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
-    let items_count = to_c.items_count;
-    to_c.update()
-        .items_count(items_count + moved.len() as i64)
-        .exec(&mut tx)
-        .await?;
+
+    for (&from_id, &count) in &from_counts {
+        // Sources are always the same kind as the destination.
+        bump(&mut tx, dest_kind, from_id, -count).await?;
+    }
+    bump(&mut tx, dest_kind, to_collection_id, moved.len() as i64).await?;
 
     tx.commit().await?;
     Ok(())
@@ -171,6 +194,12 @@ pub async fn move_items_to_collection(
 
 pub struct ItemDeletion {
     pub media_paths: Vec<String>,
+    pub emptied_poster: Option<String>,
+}
+
+pub struct BulkItemDeletion {
+    pub media_paths: Vec<String>,
+    pub emptied_posters: Vec<String>,
 }
 
 pub async fn delete_item_cascade(db: &mut Db, id: Uuid) -> toasty::Result<ItemDeletion> {
@@ -180,33 +209,30 @@ pub async fn delete_item_cascade(db: &mut Db, id: Uuid) -> toasty::Result<ItemDe
     let (file_id, collection_id) = (item.file_id, item.collection_id);
     item.delete().exec(&mut tx).await?;
 
-    let mut collection = CollectionRow::get_by_id(&mut tx, &collection_id).await?;
-    let items_count = collection.items_count;
-    collection
-        .update()
-        .items_count((items_count - 1).max(0))
-        .exec(&mut tx)
-        .await?;
-
+    let emptied_poster = decrement_or_delete(&mut tx, collection_id, 1).await?;
     let media_paths = purge_orphan_files(&mut tx, [file_id]).await?;
 
     tx.commit().await?;
-    Ok(ItemDeletion { media_paths })
+    Ok(ItemDeletion {
+        media_paths,
+        emptied_poster,
+    })
 }
 
-// ─── Bulk deletion (used by "move to incoming") ───────────────────────────
-
-/// Delete multiple items in one transaction, update each collection's
-/// item count, and remove any `File` rows that become orphaned. Returns the
-/// relative paths whose `File` rows were removed — the caller is
-/// responsible for clearing those from disk.
-pub async fn delete_items_cascade(db: &mut Db, item_ids: &[Uuid]) -> toasty::Result<Vec<String>> {
+pub async fn delete_items_cascade(
+    db: &mut Db,
+    item_ids: &[Uuid],
+) -> toasty::Result<BulkItemDeletion> {
     if item_ids.is_empty() {
-        return Ok(Vec::new());
+        return Ok(BulkItemDeletion {
+            media_paths: Vec::new(),
+            emptied_posters: Vec::new(),
+        });
     }
+
     let mut tx = db.transaction().await?;
     let mut file_ids: Vec<Uuid> = Vec::with_capacity(item_ids.len());
-    let mut collection_deltas: HashMap<Uuid, i64> = HashMap::new();
+    let mut deltas: HashMap<Uuid, i64> = HashMap::new();
 
     for &id in item_ids {
         let item = match Item::filter(Item::fields().id().eq(id))
@@ -218,17 +244,21 @@ pub async fn delete_items_cascade(db: &mut Db, item_ids: &[Uuid]) -> toasty::Res
             None => continue,
         };
         file_ids.push(item.file_id);
-        *collection_deltas.entry(item.collection_id).or_insert(0) += 1;
+        *deltas.entry(item.collection_id).or_insert(0) += 1;
         item.delete().exec(&mut tx).await?;
     }
 
-    for (cid, delta) in collection_deltas {
-        let mut c = CollectionRow::get_by_id(&mut tx, &cid).await?;
-        let new_count = (c.items_count - delta).max(0);
-        c.update().items_count(new_count).exec(&mut tx).await?;
+    let mut emptied_posters: Vec<String> = Vec::new();
+    for (collection_id, delta) in deltas {
+        if let Some(poster) = decrement_or_delete(&mut tx, collection_id, delta).await? {
+            emptied_posters.push(poster);
+        }
     }
 
     let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
     tx.commit().await?;
-    Ok(media_paths)
+    Ok(BulkItemDeletion {
+        media_paths,
+        emptied_posters,
+    })
 }

@@ -1,7 +1,7 @@
 use crate::app::constants::{APP_TITLE, HTML_DIR, HTML_LANG, STYLESHEET_URL};
 use crate::app::{
     collection_detail::CollectionDetailPage, home::HomePage, layout::Layout, login::LoginPage,
-    section_listing::SectionListingPage,
+    new_collection::NewCollectionPage, section_listing::SectionListingPage,
 };
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
@@ -24,6 +24,7 @@ mod inline_edit;
 mod layout;
 mod login;
 mod model;
+mod new_collection;
 mod pagination;
 mod resource_view;
 mod route_params;
@@ -66,6 +67,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/login") view={Lazy::<LoginPage>::new()}/>
                 <ParentRoute path=path!("") view=Layout>
                     <Route path=path!("/") view={Lazy::<HomePage>::new()}/>
+                    <Route path=path!("/new-collection/:slug") view={Lazy::<NewCollectionPage>::new()}/>
                     <Route path=path!("/s/:slug") view={Lazy::<SectionListingPage>::new()}/>
                     <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
                     <Route path=path!("/s/:slug/:id/item/:item_id") view={Lazy::<CollectionDetailPage>::new()}/>

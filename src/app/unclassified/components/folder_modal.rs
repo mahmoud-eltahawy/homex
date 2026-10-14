@@ -7,7 +7,7 @@ use crate::app::unclassified::helpers::{format_size, plural};
 use crate::app::unclassified::jobs::FolderClassifyJob;
 use crate::app::unclassified::tracker::BatchPhase;
 use crate::app::unclassified::types::{
-    DestinationMode, FolderDestination, FoldersInspection, SectionWithCollections,
+    ClassifyDestination, DestinationMode, FoldersInspection, SectionWithCollections,
     UnclassifiedEntry,
 };
 use crate::app::unclassified::{fetch_sections_with_collections, inspect_unclassified_folders};
@@ -209,7 +209,23 @@ pub fn FolderClassifyModal(
                 if slug.is_empty() {
                     return;
                 }
-                FolderDestination::Existing { section_slug: slug }
+                // Existing sections are handled by the "folder → existing
+                // section" branch on the server, which needs a section slug.
+                // We wrap it as a New with the existing section_slug... no —
+                // the classify server fn accepts `ClassifyDestination::New`
+                // with the section's title, but here we only have the slug.
+                // Use the section picker's slug and pass it as New's
+                // section_slug + the section's title.
+                let title = existing_options
+                    .get_untracked()
+                    .into_iter()
+                    .find(|s| s.slug == slug)
+                    .map(|s| s.title)
+                    .unwrap_or_default();
+                ClassifyDestination::New {
+                    section_slug: slug,
+                    title,
+                }
             }
             DestinationMode::New => {
                 let t = section_title.get_untracked();
@@ -217,8 +233,13 @@ pub fn FolderClassifyModal(
                 if t.is_empty() {
                     return;
                 }
-                FolderDestination::New {
-                    section_title: t.to_string(),
+                let slug = section_slug.get_untracked();
+                if slug.is_empty() {
+                    return;
+                }
+                ClassifyDestination::New {
+                    section_slug: slug,
+                    title: t.to_string(),
                 }
             }
         };

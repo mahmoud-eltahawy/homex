@@ -252,36 +252,73 @@ pub fn EditableTextArea(
     }
 }
 
+// ─── Poster ───────────────────────────────────────────────────────────────
+//
+// Two optional controls, both plain props. The caller passes exactly one:
+//   - `on_file` (audio): "Change image" picker.
+//   - `on_regenerate` (video): "Try another frame" button.
+
 #[component]
 pub fn EditablePoster(
     src: Signal<Option<String>>,
     placeholder: ViewFn,
-    on_file: Callback<web_sys::File>,
     #[prop(into)] input_id: String,
+    on_file: Option<Callback<web_sys::File>>,
+    on_regenerate: Option<Callback<()>>,
+    regenerating: Signal<bool>,
 ) -> impl IntoView {
     let edit_mode = use_edit_mode();
+    let input_id_for_picker = input_id.clone();
 
-    let edit_view = {
-        let input_id_for_input = input_id.clone();
-        move || {
-            edit_mode.get().then_some(view! {
+    let controls = move || -> AnyView {
+        if !edit_mode.get() {
+            return ().into_any();
+        }
+        if let Some(cb) = on_file {
+            let cb_files: Callback<Vec<web_sys::File>> =
+                Callback::new(move |files: Vec<web_sys::File>| {
+                    if let Some(f) = files.into_iter().next() {
+                        cb.run(f);
+                    }
+                });
+            return view! {
                 <FilePicker
-                    id=input_id_for_input.clone()
+                    id=input_id_for_picker.clone()
                     accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                     class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 \
                            px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md \
                            hover:bg-black/80 text-white text-xs font-medium cursor-pointer \
                            opacity-80 group-hover:opacity-100 transition"
-                    on_files=Callback::new(move |files: Vec<web_sys::File>| {
-                        if let Some(f) = files.into_iter().next() {
-                            on_file.run(f);
-                        }
-                    })
+                    on_files=cb_files
                 >
                     <UploadIcon/> "Change image"
                 </FilePicker>
-            })
+            }
+            .into_any();
         }
+        if let Some(cb) = on_regenerate {
+            return view! {
+                <button
+                    type="button"
+                    disabled=move || regenerating.get()
+                    on:click=move |_| cb.run(())
+                    title="Extract a different frame from the video"
+                    class="absolute bottom-2 end-2 inline-flex items-center gap-1.5 \
+                           px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md \
+                           hover:bg-black/80 text-white text-xs font-medium \
+                           opacity-80 group-hover:opacity-100 transition \
+                           disabled:opacity-40 disabled:cursor-wait"
+                >
+                    {move || if regenerating.get() {
+                        "Extracting…"
+                    } else {
+                        "↻ Try another frame"
+                    }}
+                </button>
+            }
+            .into_any();
+        }
+        ().into_any()
     };
 
     view! {
@@ -296,7 +333,7 @@ pub fn EditablePoster(
                 }),
                 None => Either::Right(placeholder.run()),
             }}
-            {edit_view}
+            {controls}
         </div>
     }
 }

@@ -1,12 +1,10 @@
-use std::path::Path;
 use toasty::{Db, Transaction};
 use uuid::Uuid;
 
-use super::types::{StagedFile, UploadPayload};
+use super::types::{StagedFile, UploadPayload, UploadTarget};
 use crate::app::error::{AppError, ErrorContext};
-use crate::app::model::{CollectionRow, Item};
+use crate::app::model::{AudioCollectionRow, Item, VideoCollectionRow};
 use crate::app::server::db;
-use crate::app::server::poster::write_poster;
 
 pub async fn insert_files(
     db: &mut Db,
@@ -40,15 +38,39 @@ async fn next_item_number_tx(
     Ok(last.first().map(|i| i.number + 1).unwrap_or(0))
 }
 
-// At the top of the file, near the existing imports:
 static INSERT_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+async fn bump_count(
+    tx: &mut Transaction<'_>,
+    collection_id: Uuid,
+    delta: i64,
+) -> Result<(), AppError> {
+    if let Ok(mut c) = VideoCollectionRow::get_by_id(tx, &collection_id).await {
+        let n = c.items_count + delta;
+        c.update()
+            .items_count(n)
+            .exec(tx)
+            .await
+            .context("upload: bump video items_count")?;
+        return Ok(());
+    }
+    let mut c = AudioCollectionRow::get_by_id(tx, &collection_id)
+        .await
+        .context("upload: load audio collection")?;
+    let n = c.items_count + delta;
+    c.update()
+        .items_count(n)
+        .exec(tx)
+        .await
+        .context("upload: bump audio items_count")?;
+    Ok(())
+}
 
 pub async fn insert_items_and_poster(
     db: &mut Db,
     payload: &UploadPayload,
     file_rows: &[(Uuid, String)],
-    data_dir: &Path,
 ) -> Result<(), AppError> {
     let _guard = INSERT_LOCK.lock().await;
     let mut tx = db
@@ -56,7 +78,11 @@ pub async fn insert_items_and_poster(
         .await
         .context("upload: begin transaction")?;
 
-    let collection_id = payload.collection_id;
+    let collection_id = match &payload.target {
+        UploadTarget::Existing { collection_id } => *collection_id,
+        UploadTarget::New { id, .. } => *id,
+    };
+
     let start = next_item_number_tx(&mut tx, collection_id, payload.season_number)
         .await
         .context("upload: next item number")?;
@@ -76,26 +102,7 @@ pub async fn insert_items_and_poster(
         .context("upload: insert item")?;
     }
 
-    let mut collection = CollectionRow::get_by_id(&mut tx, &collection_id)
-        .await
-        .context("upload: load collection")?;
-    let new_count = collection.items_count + file_rows.len() as i64;
-    collection
-        .update()
-        .items_count(new_count)
-        .exec(&mut tx)
-        .await
-        .context("upload: bump item count")?;
-
-    if let Some((ext, bytes)) = payload.poster.as_ref() {
-        let url = write_poster(data_dir, &payload.section_slug, collection_id, ext, bytes).await?;
-        collection
-            .update()
-            .poster(Some(url))
-            .exec(&mut tx)
-            .await
-            .context("upload: set collection poster")?;
-    }
+    bump_count(&mut tx, collection_id, file_rows.len() as i64).await?;
 
     tx.commit().await.context("upload: commit transaction")?;
     Ok(())

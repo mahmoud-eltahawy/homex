@@ -2,7 +2,7 @@
 
 export HOMEX_TOKEN="0000"
 export HOMEX_CONFIG="$(pwd)/homex.dev.toml"
-export HOMEX_UNCLASSIFIED_DIR=/home/eltahawy/storage
+export HOMEX_UNCLASSIFIED_DIR=/home/eltahawy/Downloads
 cargo leptos watch --split --hot-reload
 
 # To reset the dev DB after a model change:

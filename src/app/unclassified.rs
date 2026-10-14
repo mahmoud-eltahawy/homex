@@ -1,16 +1,4 @@
 //! Unclassified media browser.
-//!
-//! Exposes the optional incoming folder (`HOMEX_UNCLASSIFIED_DIR`) as a
-//! navigateable tree. Files, batches of files, and whole folders can be
-//! classified into the library.
-//!
-//! Every file becomes its own job running in its own `tokio::spawn` task.
-//! The client tracks all jobs by id and shows one progress bar per file.
-//! Concurrency, timeouts and cancellation come from `server::jobs`.
-//!
-//! The current folder is encoded in the URL as `?path=<relative>`, so the
-//! browser back/forward navigates the tree. `rel_path` is a `Signal` derived
-//! from the query map.
 
 mod components;
 mod helpers;
@@ -19,7 +7,7 @@ mod tracker;
 pub mod types;
 
 pub use types::{
-    ClassifyInput, FileJobHandle, FolderDestination, FolderInspection, FoldersInspection,
+    ClassifyDestination, ClassifyInput, FileJobHandle, FolderInspection, FoldersInspection,
     SectionWithCollections, UnclassifiedEntry,
 };
 
@@ -130,12 +118,12 @@ fn ext_of(name: &str) -> Option<String> {
 pub async fn fetch_sections_with_collections(
     media_kind: String,
 ) -> Result<Vec<SectionWithCollections>, AppError> {
-    use crate::app::model::{CollectionRow, SectionRow};
+    use crate::app::model::{AudioCollectionRow, SectionRow, VideoCollectionRow};
     use crate::app::server::AppState;
 
     let mut state: AppState = expect_context();
 
-    let sections = SectionRow::filter(SectionRow::fields().media_kind().eq(media_kind))
+    let sections = SectionRow::filter(SectionRow::fields().media_kind().eq(media_kind.clone()))
         .order_by(SectionRow::fields().title().asc())
         .exec(&mut state.db)
         .await
@@ -143,27 +131,51 @@ pub async fn fetch_sections_with_collections(
 
     let mut out = Vec::with_capacity(sections.len());
     for s in sections {
-        let collections =
-            CollectionRow::filter(CollectionRow::fields().section_slug().eq(s.slug.clone()))
-                .order_by(CollectionRow::fields().title().asc())
-                .exec(&mut state.db)
-                .await
-                .map_err(|e| AppError::internal("fetch collections", e))?;
+        let rows: Vec<CollectionSummary> = match media_kind.as_str() {
+            "video" => VideoCollectionRow::filter(
+                VideoCollectionRow::fields()
+                    .section_slug()
+                    .eq(s.slug.clone()),
+            )
+            .order_by(VideoCollectionRow::fields().title().asc())
+            .exec(&mut state.db)
+            .await
+            .map_err(|e| AppError::internal("fetch video collections", e))?
+            .into_iter()
+            .map(|c| CollectionSummary {
+                id: c.id,
+                title: c.title,
+                section_slug: c.section_slug,
+                section_title: s.title.clone(),
+                nested: s.nested,
+            })
+            .collect(),
+            _ => AudioCollectionRow::filter(
+                AudioCollectionRow::fields()
+                    .section_slug()
+                    .eq(s.slug.clone()),
+            )
+            .order_by(AudioCollectionRow::fields().title().asc())
+            .exec(&mut state.db)
+            .await
+            .map_err(|e| AppError::internal("fetch audio collections", e))?
+            .into_iter()
+            .map(|c| CollectionSummary {
+                id: c.id,
+                title: c.title,
+                section_slug: c.section_slug,
+                section_title: s.title.clone(),
+                nested: s.nested,
+            })
+            .collect(),
+        };
+
         out.push(SectionWithCollections {
             id: s.id,
             slug: s.slug.clone(),
             title: s.title.clone(),
             nested: s.nested,
-            collections: collections
-                .into_iter()
-                .map(|c| CollectionSummary {
-                    id: c.id,
-                    title: c.title,
-                    section_slug: c.section_slug,
-                    section_title: s.title.clone(),
-                    nested: s.nested,
-                })
-                .collect(),
+            collections: rows,
         });
     }
     Ok(out)
@@ -318,18 +330,21 @@ pub async fn cancel_classify(job_ids: Vec<String>) -> Result<(), AppError> {
     Ok(())
 }
 
+// ─── Classify: files ──────────────────────────────────────────────────────
+
 #[server]
 pub async fn classify_unclassified_files(
     files: Vec<ClassifyInput>,
-    collection_id: Uuid,
+    destination: ClassifyDestination,
     season_number: Option<i64>,
 ) -> Result<Vec<FileJobHandle>, AppError> {
-    use crate::app::model::{CollectionRow, MediaKind, SectionRow};
-    use crate::app::server::AppState;
+    use crate::app::model::{MediaKind, SectionRow};
     use crate::app::server::jobs::{
         acquire_classify_locks, ensure_roots_disjoint, prepare_file_job, register_and_spawn,
         spawn_lock_holder,
     };
+    use crate::app::server::upload::{UploadTarget, extract_poster_for_new_video_collection};
+    use crate::app::server::{AppState, db};
 
     if files.is_empty() {
         return Err(AppError::public("No files selected"));
@@ -347,6 +362,62 @@ pub async fn classify_unclassified_files(
         .map_err(|e| AppError::internal("canonicalize root", e))?;
     ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
+    // Resolve the destination section (needed for kind).
+    let mut db = state.db.clone();
+
+    let (target, section_slug, section_kind, section_nested) = match &destination {
+        ClassifyDestination::Existing(id) => {
+            let collection = db::fetch_collection_any(&mut db, *id)
+                .await
+                .map_err(|e| AppError::internal("load collection", e))?
+                .ok_or_else(|| AppError::not_found("collection"))?;
+            let section = SectionRow::filter(
+                SectionRow::fields()
+                    .slug()
+                    .eq(collection.section_slug.clone()),
+            )
+            .first()
+            .exec(&mut db)
+            .await
+            .map_err(|e| AppError::internal("load section", e))?
+            .ok_or_else(|| AppError::not_found("section"))?;
+            let kind = MediaKind::try_from(section.media_kind.as_str())
+                .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
+            (
+                UploadTarget::Existing { collection_id: *id },
+                collection.section_slug.clone(),
+                kind,
+                section.nested,
+            )
+        }
+        ClassifyDestination::New {
+            section_slug,
+            title,
+        } => {
+            let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
+                .first()
+                .exec(&mut db)
+                .await
+                .map_err(|e| AppError::internal("load section", e))?
+                .ok_or_else(|| AppError::not_found("section"))?;
+            let kind = MediaKind::try_from(section.media_kind.as_str())
+                .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
+            let id = Uuid::new_v4();
+            (
+                UploadTarget::New {
+                    id,
+                    title: title.clone(),
+                    description: None,
+                    tags: Vec::new(),
+                },
+                section_slug.clone(),
+                kind,
+                section.nested,
+            )
+        }
+    };
+
+    // Resolve source files.
     let mut upload_files = Vec::with_capacity(files.len());
     for input in &files {
         upload_files.push(resolve_upload_file(&root, &root_canon, input).await?);
@@ -355,59 +426,79 @@ pub async fn classify_unclassified_files(
     let paths: Vec<std::path::PathBuf> = upload_files.iter().map(|f| f.temp_path.clone()).collect();
     let lock = acquire_classify_locks(paths)?;
 
-    let mut db = state.db.clone();
-    let collection = CollectionRow::get_by_id(&mut db, &collection_id)
-        .await
-        .map_err(|e| AppError::internal("load collection", e))?;
-    let section = SectionRow::filter(
-        SectionRow::fields()
-            .slug()
-            .eq(collection.section_slug.clone()),
-    )
-    .first()
-    .exec(&mut db)
-    .await
-    .map_err(|e| AppError::internal("load section", e))?
-    .ok_or_else(|| AppError::not_found("section"))?;
-    let kind = MediaKind::try_from(section.media_kind.as_str())
-        .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
+    let season_number =
+        if section_nested && section_kind == MediaKind::Video && season_number.is_none() {
+            Some(1)
+        } else {
+            season_number
+        };
 
-    let season_number = if section.nested && kind == MediaKind::Video && season_number.is_none() {
-        Some(1)
-    } else {
-        season_number
+    // If new: extract the poster before dispatching.
+    if let UploadTarget::New { id, title, .. } = &target {
+        let id = *id;
+        match section_kind {
+            MediaKind::Video => {
+                let first = upload_files
+                    .first()
+                    .ok_or_else(|| AppError::public("No files selected"))?;
+                let url = extract_poster_for_new_video_collection(
+                    &state,
+                    &section_slug,
+                    id,
+                    &first.temp_path,
+                    true,
+                )
+                .await?;
+                db::insert_video_collection(&mut db, id, &section_slug, title, None, &[], &url)
+                    .await
+                    .map_err(|e| AppError::internal("insert video collection", e))?;
+            }
+            MediaKind::Audio => {
+                db::insert_audio_collection(&mut db, id, &section_slug, title, None, &[], None)
+                    .await
+                    .map_err(|e| AppError::internal("insert audio collection", e))?;
+            }
+        }
+    }
+
+    // The collection row was inserted above, before dispatching, so its
+    // poster could be extracted. Jobs must reference it as existing —
+    // otherwise `execute_upload` will try to insert it again and fail the
+    // UNIQUE constraint on `id`.
+    let collection_id = match &target {
+        UploadTarget::Existing { collection_id } => *collection_id,
+        UploadTarget::New { id, .. } => *id,
     };
+    let target_for_jobs = UploadTarget::Existing { collection_id };
 
     let mut prepared = Vec::with_capacity(upload_files.len());
     for (input, file) in files.into_iter().zip(upload_files) {
         prepared.push(prepare_file_job(
             file,
-            collection_id,
-            &collection.section_slug,
-            &collection.title,
+            target_for_jobs.clone(),
+            &section_slug,
             season_number,
-            kind,
+            section_kind,
             input.rel_path,
         )?);
     }
 
-    let handles = register_and_spawn(
-        &state,
-        prepared,
-        &collection.section_slug,
-        Some(collection_id),
-    )
-    .await;
+    let handles = register_and_spawn(&state, prepared, &section_slug, Some(collection_id)).await;
     let job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
     spawn_lock_holder(state.clone(), job_ids, lock);
 
     Ok(handles)
 }
 
+// ─── Classify: folders ────────────────────────────────────────────────────
+
+#[cfg(feature = "ssr")]
+const MAX_CLASSIFY_GROUPS: usize = 50;
+
 #[server]
 pub async fn classify_unclassified_folder(
     rel_path: String,
-    destination: FolderDestination,
+    destination: ClassifyDestination,
 ) -> Result<Vec<FileJobHandle>, AppError> {
     classify_unclassified_folders(vec![rel_path], destination).await
 }
@@ -415,7 +506,7 @@ pub async fn classify_unclassified_folder(
 #[server]
 pub async fn classify_unclassified_folders(
     rel_paths: Vec<String>,
-    destination: FolderDestination,
+    destination: ClassifyDestination,
 ) -> Result<Vec<FileJobHandle>, AppError> {
     use crate::app::model::{MediaKind, SectionRow};
     use crate::app::server::jobs::{
@@ -423,8 +514,8 @@ pub async fn classify_unclassified_folders(
         spawn_cleanup_watcher, spawn_lock_holder,
     };
     use crate::app::server::upload::{
-        RawFile, collect_files, dominant_kind, ensure_kind_matches, read_immediate_subdirs,
-        sanitize_rel,
+        RawFile, UploadTarget, collect_files, ensure_kind_matches,
+        extract_poster_for_new_video_collection, read_immediate_subdirs, sanitize_rel,
     };
     use crate::app::server::{AppState, db};
 
@@ -480,6 +571,7 @@ pub async fn classify_unclassified_folders(
         any
     };
 
+    // Resolve the destination section.
     enum Dest {
         Existing {
             slug: String,
@@ -494,13 +586,21 @@ pub async fn classify_unclassified_folders(
     }
 
     let dest = match destination.clone() {
-        FolderDestination::Existing { section_slug } => {
-            let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
-                .first()
-                .exec(&mut db)
+        ClassifyDestination::Existing(id) => {
+            let collection = db::fetch_collection_any(&mut db, id)
                 .await
-                .map_err(|e| AppError::internal("load section", e))?
-                .ok_or_else(|| AppError::not_found("section"))?;
+                .map_err(|e| AppError::internal("load collection", e))?
+                .ok_or_else(|| AppError::not_found("collection"))?;
+            let section = SectionRow::filter(
+                SectionRow::fields()
+                    .slug()
+                    .eq(collection.section_slug.clone()),
+            )
+            .first()
+            .exec(&mut db)
+            .await
+            .map_err(|e| AppError::internal("load section", e))?
+            .ok_or_else(|| AppError::not_found("section"))?;
             let kind = MediaKind::try_from(section.media_kind.as_str())
                 .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
             if any_has_subdirs && !section.nested {
@@ -509,43 +609,31 @@ pub async fn classify_unclassified_folders(
                 ));
             }
             Dest::Existing {
-                slug: section_slug,
+                slug: collection.section_slug.clone(),
                 kind,
                 nested: section.nested,
             }
         }
-        FolderDestination::New { section_title } => {
-            let title = section_title.trim().to_string();
+        ClassifyDestination::New {
+            section_slug,
+            title,
+        } => {
+            let title = title.trim().to_string();
             if title.is_empty() {
                 return Err(AppError::validation("Section title is required"));
             }
-            let mut common: Option<MediaKind> = None;
-            let mut total_files = 0usize;
-            for abs in &abs_canons {
-                let files = collect_files(&root_canon, abs, any_has_subdirs).await?;
-                total_files += files.len();
-                let k = dominant_kind(&files).ok_or_else(|| {
-                    AppError::public(
-                        "At least one folder is empty or mixes video and audio — split it up before classifying.",
-                    )
-                })?;
-                match common {
-                    None => common = Some(k),
-                    Some(prev) if prev == k => {}
-                    _ => {
-                        return Err(AppError::public(
-                            "Selected folders mix video and audio — classify them separately.",
-                        ));
-                    }
-                }
-            }
-            if total_files == 0 {
-                return Err(AppError::public("Folders contain no media files"));
-            }
+            let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
+                .first()
+                .exec(&mut db)
+                .await
+                .map_err(|e| AppError::internal("load section", e))?
+                .ok_or_else(|| AppError::not_found("section"))?;
+            let kind = MediaKind::try_from(section.media_kind.as_str())
+                .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
             Dest::New {
                 title,
-                kind: common.unwrap(),
-                nested: any_has_subdirs,
+                kind,
+                nested: section.nested,
             }
         }
     };
@@ -604,14 +692,21 @@ pub async fn classify_unclassified_folders(
             "No media files found in the selected folders",
         ));
     }
+    if groups.len() > MAX_CLASSIFY_GROUPS {
+        return Err(AppError::public(format!(
+            "Too many folders selected ({}). Classify at most {} at a time.",
+            groups.len(),
+            MAX_CLASSIFY_GROUPS,
+        )));
+    }
 
+    // For existing sections, skip groups whose title already exists.
     let existing = match &dest {
-        Dest::Existing { slug, .. } => existing_collection_titles(&mut db, slug).await?,
+        Dest::Existing { slug, .. } => existing_collection_titles(&mut db, slug, kind).await?,
         Dest::New { .. } => Default::default(),
     };
-
     let before = groups.len();
-    let mut kept: Vec<Group> = Vec::with_capacity(before);
+    let mut kept = Vec::with_capacity(before);
     for g in groups {
         if existing.contains_key(&g.title) {
             continue;
@@ -631,7 +726,7 @@ pub async fn classify_unclassified_folders(
             if skipped == 1 { "" } else { "s" },
         );
     }
-    groups = kept;
+    let groups = kept;
 
     let section_slug = match &dest {
         Dest::Existing { slug, .. } => slug.clone(),
@@ -648,9 +743,49 @@ pub async fn classify_unclassified_folders(
     let mut cleanup_watchers: Vec<(Vec<String>, std::path::PathBuf)> = Vec::new();
 
     for group in groups {
-        let collection_id = db::insert_collection(&mut db, &section_slug, &group.title)
-            .await
-            .map_err(|e| AppError::internal("create collection", e))?;
+        let collection_id = Uuid::new_v4();
+
+        // Extract the poster (or insert audio collection) before dispatching.
+        match kind {
+            MediaKind::Video => {
+                let first = group
+                    .files
+                    .first()
+                    .ok_or_else(|| AppError::public("Empty group"))?;
+                let url = extract_poster_for_new_video_collection(
+                    &state,
+                    &section_slug,
+                    collection_id,
+                    &first.abs,
+                    true,
+                )
+                .await?;
+                db::insert_video_collection(
+                    &mut db,
+                    collection_id,
+                    &section_slug,
+                    &group.title,
+                    None,
+                    &[],
+                    &url,
+                )
+                .await
+                .map_err(|e| AppError::internal("insert video collection", e))?;
+            }
+            MediaKind::Audio => {
+                db::insert_audio_collection(
+                    &mut db,
+                    collection_id,
+                    &section_slug,
+                    &group.title,
+                    None,
+                    &[],
+                    None,
+                )
+                .await
+                .map_err(|e| AppError::internal("insert audio collection", e))?;
+            }
+        }
 
         let mut group_job_ids = Vec::new();
         for raw in group.files {
@@ -662,9 +797,8 @@ pub async fn classify_unclassified_folders(
             };
             let p = prepare_file_job(
                 upload,
-                collection_id,
+                UploadTarget::Existing { collection_id },
                 &section_slug,
-                &group.title,
                 group.season,
                 kind,
                 raw.rel,
@@ -677,7 +811,6 @@ pub async fn classify_unclassified_folders(
     }
 
     let handles = register_and_spawn(&state, prepared, &section_slug, None).await;
-
     let all_job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
     spawn_lock_holder(state.clone(), all_job_ids, lock);
 
@@ -688,12 +821,14 @@ pub async fn classify_unclassified_folders(
     Ok(handles)
 }
 
+// ─── Move items back to incoming ──────────────────────────────────────────
+
 #[server]
 pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError> {
     use crate::app::model::{File, Item};
     use crate::app::server::jobs::canonical_media_root;
     use crate::app::server::upload::move_file_to_incoming;
-    use crate::app::server::{AppState, db};
+    use crate::app::server::{AppState, db, remove_poster};
 
     if item_ids.is_empty() {
         return Ok(());
@@ -734,13 +869,18 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
     }
 
     if !moved.is_empty() {
-        let _ = db::delete_items_cascade(&mut db, &moved).await;
+        let del = db::delete_items_cascade(&mut db, &moved)
+            .await
+            .map_err(|e| AppError::internal("delete items cascade", e))?;
+        for poster in &del.emptied_posters {
+            remove_poster(&state, Some(poster.as_str())).await;
+        }
     }
     Ok(())
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Server-only helpers used by the classify paths
+//  SSR-only helpers
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(feature = "ssr")]
@@ -791,21 +931,36 @@ async fn resolve_upload_file(
 async fn existing_collection_titles(
     db: &mut toasty::Db,
     section_slug: &str,
+    kind: crate::app::model::MediaKind,
 ) -> Result<std::collections::HashMap<String, Uuid>, AppError> {
-    use crate::app::model::CollectionRow;
+    use crate::app::model::{AudioCollectionRow, VideoCollectionRow};
     use std::collections::HashMap;
-    let rows = CollectionRow::filter(
-        CollectionRow::fields()
-            .section_slug()
-            .eq(section_slug.to_string()),
-    )
-    .exec(db)
-    .await
-    .map_err(|e| AppError::internal("load existing collections", e))?;
-    Ok(rows
+
+    let rows: Vec<(String, Uuid)> = match kind {
+        crate::app::model::MediaKind::Video => VideoCollectionRow::filter(
+            VideoCollectionRow::fields()
+                .section_slug()
+                .eq(section_slug.to_string()),
+        )
+        .exec(db)
+        .await
+        .map_err(|e| AppError::internal("load existing collections", e))?
         .into_iter()
         .map(|r| (r.title, r.id))
-        .collect::<HashMap<_, _>>())
+        .collect(),
+        crate::app::model::MediaKind::Audio => AudioCollectionRow::filter(
+            AudioCollectionRow::fields()
+                .section_slug()
+                .eq(section_slug.to_string()),
+        )
+        .exec(db)
+        .await
+        .map_err(|e| AppError::internal("load existing collections", e))?
+        .into_iter()
+        .map(|r| (r.title, r.id))
+        .collect(),
+    };
+    Ok(rows.into_iter().collect::<HashMap<_, _>>())
 }
 
 #[cfg(feature = "ssr")]

@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
+use uuid::Uuid;
 
 use crate::app::error::AppError;
 
@@ -14,12 +15,13 @@ pub struct UploadResult {
     pub success: bool,
     pub message: String,
     pub job_id: Option<String>,
+    pub collection_id: Uuid,
+    pub section_slug: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ConversionStatus {
     Writing,
-    /// A cross-device copy is streaming. `progress` is bytes-copied / total.
     Moving {
         current_file: String,
         progress: f32,
@@ -41,13 +43,17 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     use crate::app::model::MediaKind;
     use crate::app::server::convert::{Job, JobPhase};
     use crate::app::server::upload::{
-        needs_conversion, parse_upload_multipart, process_upload, schedule_job_eviction,
-        validate_extensions,
+        UploadTarget, needs_conversion, parse_upload_multipart, process_upload,
+        schedule_job_eviction, validate_extensions,
     };
     use crate::app::server::{AppState, db};
 
     let mut state: AppState = expect_context();
-    let payload = parse_upload_multipart(data).await?;
+
+    // Generate the id before parsing so a new-collection payload can
+    // reference it (the poster filename embeds it).
+    let next_id = Uuid::new_v4();
+    let payload = parse_upload_multipart(data, next_id).await?;
 
     let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
         .await
@@ -58,6 +64,12 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
 
     validate_extensions(&payload, kind)?;
 
+    let (collection_id, section_slug) = match &payload.target {
+        UploadTarget::Existing { collection_id } => (*collection_id, payload.section_slug.clone()),
+        UploadTarget::New { id, .. } => (*id, payload.section_slug.clone()),
+    };
+
+    // ── Synchronous path ─────────────────────────────────────────────────
     if !needs_conversion(&payload, kind) {
         let cancel = state.cancel.child_token();
         let msg = process_upload(payload, &state, kind, None, &cancel).await?;
@@ -65,9 +77,12 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
             success: true,
             message: msg,
             job_id: None,
+            collection_id,
+            section_slug,
         });
     }
 
+    // ── Async path — conversion runs in the background ───────────────────
     let job_id = uuid::Uuid::new_v4().to_string();
     let cancel = state.cancel.child_token();
     {
@@ -104,6 +119,8 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
         success: true,
         message: messages::UPLOAD_STARTED_BG.into(),
         job_id: Some(job_id),
+        collection_id,
+        section_slug,
     })
 }
 

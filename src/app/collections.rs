@@ -7,18 +7,10 @@ use uuid::Uuid;
 use crate::app::constants::messages;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
-
 #[cfg(feature = "ssr")]
 use crate::app::server::db;
-
-// ─── Multipart form field names (poster upload) ───────────────────────────────
-
 #[cfg(feature = "ssr")]
-mod fields {
-    pub const SECTION: &str = "section";
-    pub const ID: &str = "id";
-    pub const POSTER_FILE: &str = "poster_file";
-}
+mod fields;
 
 #[server]
 pub async fn fetch_collections(
@@ -76,15 +68,6 @@ pub async fn fetch_items(collection_id: Uuid) -> Result<Vec<Item>, AppError> {
 }
 
 #[server]
-pub async fn create_empty_collection(section_slug: String) -> Result<Uuid, AppError> {
-    use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::insert_empty_collection(&mut state.db, &section_slug)
-        .await
-        .context("insert empty collection")
-}
-
-#[server]
 pub async fn patch_collection_field(
     id: Uuid,
     field: String,
@@ -102,7 +85,6 @@ pub async fn patch_collection_field(
     let f = match field.as_str() {
         "title" => CollectionField::Title,
         "description" => CollectionField::Description,
-        "poster" => CollectionField::Poster,
         _ => return Err(AppError::public(messages::UNKNOWN_FIELD)),
     };
 
@@ -144,19 +126,20 @@ pub async fn delete_collection(id: Uuid) -> Result<(), AppError> {
     let del = db::delete_collection_cascade(&mut state.db, id)
         .await
         .context("delete collection cascade")?;
-    remove_poster(&state, del.poster_url.as_deref()).await;
     remove_media_files(&state, &del.media_paths).await;
+    remove_poster(&state, del.poster_url.as_deref()).await;
     Ok(())
 }
 
 #[server]
 pub async fn delete_item(id: Uuid) -> Result<(), AppError> {
-    use crate::app::server::{AppState, remove_media_files};
+    use crate::app::server::{AppState, remove_media_files, remove_poster};
     let mut state: AppState = expect_context();
     let del = db::delete_item_cascade(&mut state.db, id)
         .await
         .context("delete item cascade")?;
     remove_media_files(&state, &del.media_paths).await;
+    remove_poster(&state, del.emptied_poster.as_deref()).await;
     Ok(())
 }
 
@@ -164,8 +147,10 @@ pub async fn delete_item(id: Uuid) -> Result<(), AppError> {
 pub async fn upload_collection_poster(
     data: server_fn::codec::MultipartData,
 ) -> Result<String, AppError> {
-    use crate::app::server::db::CollectionField;
-    use crate::app::server::{AppState, poster::write_poster, upload::extension_of};
+    use crate::app::model::MediaKind;
+    use crate::app::server::AppState;
+    use crate::app::server::poster::write_poster;
+    use crate::app::server::upload::extension_of;
 
     let mut state: AppState = expect_context();
 
@@ -196,23 +181,108 @@ pub async fn upload_collection_poster(
 
     let (ext, bytes) = bytes.ok_or_else(|| AppError::public(messages::NO_IMAGE_RECEIVED))?;
 
-    let collection = db::fetch_collection_detail(&mut state.db, &section_slug, id)
+    let section = db::fetch_section_by_slug(&mut state.db, &section_slug)
         .await
-        .context("fetch collection for poster")?
-        .ok_or_else(|| AppError::public(messages::COLLECTION_NOT_FOUND))?;
+        .context("fetch section for poster")?
+        .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
+    if MediaKind::try_from(section.media_kind.as_str())
+        .map_err(|e| AppError::internal("section has invalid media_kind", e))?
+        != MediaKind::Audio
+    {
+        return Err(AppError::public(
+            "This section's poster is generated automatically from its media",
+        ));
+    }
 
     let url = write_poster(
         &state.config.storage.data_dir,
-        &collection.section_slug,
+        &section.slug,
         id,
         &ext,
         &bytes,
     )
     .await?;
 
-    db::update_collection_field(&mut state.db, id, CollectionField::Poster, Some(&url))
+    db::set_collection_poster(&mut state.db, id, Some(&url))
         .await
-        .context("set collection poster")?;
+        .context("save regenerated poster")?;
+
+    Ok(url)
+}
+
+#[server]
+pub async fn regenerate_collection_poster(
+    section_slug: String,
+    collection_id: Uuid,
+) -> Result<String, AppError> {
+    use crate::app::model::MediaKind;
+    use crate::app::server::AppState;
+    use crate::app::server::convert::{ffprobe_duration, is_video_container_supported};
+    use crate::app::server::poster::{extract_and_save_poster, pick_timestamp};
+
+    let mut state: AppState = expect_context();
+
+    let section = db::fetch_section_by_slug(&mut state.db, &section_slug)
+        .await
+        .context("fetch section for regenerate")?
+        .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
+    if MediaKind::try_from(section.media_kind.as_str())
+        .map_err(|e| AppError::internal("section has invalid media_kind", e))?
+        != MediaKind::Video
+    {
+        return Err(AppError::public(
+            "Only video sections have extractable posters",
+        ));
+    }
+
+    let items = db::fetch_items(&mut state.db, collection_id)
+        .await
+        .context("fetch items for poster")?;
+    let first = items
+        .first()
+        .ok_or_else(|| AppError::public("Collection has no items yet"))?;
+
+    let rel = db::fetch_file_path(&mut state.db, first.file_id)
+        .await
+        .context("resolve first item file")?
+        .ok_or_else(|| AppError::not_found("file"))?;
+
+    let ext = rel.rsplit('.').next().unwrap_or("");
+    if !is_video_container_supported(ext) {
+        return Err(AppError::public("Cannot extract a poster from this file"));
+    }
+
+    let abs = state.config.storage.media_root.join(&rel);
+    if tokio::fs::metadata(&abs).await.is_err() {
+        return Err(AppError::public("Source file is missing"));
+    }
+
+    let previous = db::fetch_collection_detail(&mut state.db, &section_slug, collection_id)
+        .await
+        .context("fetch collection for poster regen")?
+        .and_then(|c| c.poster);
+
+    let duration = ffprobe_duration(&abs).await;
+    let ts = pick_timestamp(duration, false);
+    let url = extract_and_save_poster(
+        &state.config.storage.data_dir,
+        &section_slug,
+        collection_id,
+        &abs,
+        ts,
+    )
+    .await?;
+
+    if let Some(old) = previous.as_deref()
+        && old != url
+    {
+        crate::app::server::remove_poster(&state, Some(old)).await;
+    }
+
+    db::set_collection_poster(&mut state.db, collection_id, Some(&url))
+        .await
+        .context("save regenerated poster")?;
+
     Ok(url)
 }
 
@@ -231,7 +301,7 @@ pub async fn move_collection_to_section(
     collection_id: Uuid,
     to_section_slug: String,
 ) -> Result<(), AppError> {
-    use crate::app::server::db::{self, CollectionField, MoveCollectionError};
+    use crate::app::server::db::{self, MoveCollectionError};
     use crate::app::server::{AppState, poster};
 
     let mut state: AppState = expect_context();
@@ -255,14 +325,9 @@ pub async fn move_collection_to_section(
         )
         .await
     {
-        db::update_collection_field(
-            &mut state.db,
-            collection_id,
-            CollectionField::Poster,
-            Some(&new_url),
-        )
-        .await
-        .context("move collection poster")?;
+        db::set_collection_poster(&mut state.db, collection_id, Some(&new_url))
+            .await
+            .context("save regenerated poster")?;
     }
 
     Ok(())
@@ -290,20 +355,4 @@ pub async fn move_items_to_collection(
         .await
         .context("move items to collection")?;
     Ok(())
-}
-
-#[server]
-pub async fn create_collection_named(
-    section_slug: String,
-    title: String,
-) -> Result<Uuid, AppError> {
-    use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    let t = title.trim();
-    if t.is_empty() {
-        return Err(AppError::validation(messages::TITLE_REQUIRED));
-    }
-    db::insert_collection(&mut state.db, &section_slug, t)
-        .await
-        .context("insert named collection")
 }

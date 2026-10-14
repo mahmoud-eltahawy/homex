@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::app::error::AppError;
 use crate::app::upload_api::ConversionStatus;
 
-use super::types::{ClassifyInput, FileJobHandle};
+use super::types::{ClassifyDestination, ClassifyInput, FileJobHandle};
 
 const POLL_INTERVAL_MS: u32 = 700;
 const MAX_CONSECUTIVE_ERRORS: u32 = 10;
@@ -158,8 +158,6 @@ impl BatchTracker {
         self.retrying
     }
 
-    /// Seed the error signal from outside — used by `jobs.rs` on dispatch
-    /// failure.
     pub fn error_pub(&self) -> RwSignal<Option<AppError>> {
         self.error
     }
@@ -188,15 +186,13 @@ impl BatchTracker {
             .count()
     }
 
-    /// Re-dispatch every slot currently in `Failed` state, grouped by
-    /// destination so each batch shares one collection and season.
     pub fn retry_failed(&self) {
         if self.retrying.get_untracked() {
             return;
         }
 
         let slots = self.slots.get_untracked();
-        let mut groups: std::collections::HashMap<(Uuid, Option<i64>, String), Vec<ClassifyInput>> =
+        let mut groups: std::collections::HashMap<(Uuid, Option<i64>), Vec<ClassifyInput>> =
             std::collections::HashMap::new();
 
         for s in &slots {
@@ -204,7 +200,7 @@ impl BatchTracker {
                 continue;
             }
             let Some(cid) = s.collection_id else { continue };
-            let key = (cid, s.season_number, s.section_slug.clone());
+            let key = (cid, s.season_number);
             groups.entry(key).or_default().push(ClassifyInput {
                 rel_path: s.rel_path.clone(),
                 title: s.title.clone(),
@@ -226,12 +222,14 @@ impl BatchTracker {
             let mut failed_to_start: Option<AppError> = None;
 
             let mut keys: Vec<_> = groups.keys().cloned().collect();
-            keys.sort_by_key(|(_, season, _)| season.unwrap_or(-1));
+            keys.sort_by_key(|(_, season)| season.unwrap_or(-1));
 
             for key in keys {
-                let (cid, season, _) = key.clone();
+                let (cid, season) = key;
                 let files = groups.remove(&key).unwrap();
-                match classify_unclassified_files(files, cid, season).await {
+                match classify_unclassified_files(files, ClassifyDestination::Existing(cid), season)
+                    .await
+                {
                     Ok(mut h) => new_handles.append(&mut h),
                     Err(e) => {
                         failed_to_start = Some(e);

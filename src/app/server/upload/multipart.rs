@@ -9,7 +9,7 @@ use crate::app::constants::messages;
 use crate::app::error::AppError;
 
 use super::naming::extension_of;
-use super::types::{UploadFile, UploadPayload};
+use super::types::{UploadFile, UploadPayload, UploadTarget};
 
 mod fields;
 
@@ -28,11 +28,12 @@ struct StagedTempFile {
 
 #[derive(Default)]
 struct Accumulator {
-    title: String,
     section_slug: String,
-    description: String,
-    collection_id: Uuid,
     season_number: Option<i64>,
+    collection_id: Option<Uuid>,
+    collection_title: Option<String>,
+    description: Option<String>,
+    tags: Vec<String>,
     files: BTreeMap<usize, StagedTempFile>,
     file_titles: BTreeMap<usize, String>,
     poster: Option<(String, Vec<u8>)>,
@@ -40,11 +41,12 @@ struct Accumulator {
 
 enum FieldKind {
     Poster,
-    Title,
     SectionSlug,
-    Description,
-    CollectionId,
     SeasonNumber,
+    CollectionId,
+    CollectionTitle,
+    Description,
+    Tag(usize),
     FileTitle(usize),
     File(usize),
     Unknown,
@@ -53,6 +55,12 @@ enum FieldKind {
 fn classify_field(name: &str) -> FieldKind {
     if name == fields::POSTER_FILE {
         return FieldKind::Poster;
+    }
+    if let Some(idx) = name
+        .strip_prefix(fields::TAG_PREFIX)
+        .and_then(|s| s.parse().ok())
+    {
+        return FieldKind::Tag(idx);
     }
     if let Some(idx) = name
         .strip_prefix(fields::FILE_TITLE_PREFIX)
@@ -67,11 +75,11 @@ fn classify_field(name: &str) -> FieldKind {
         return FieldKind::File(idx);
     }
     match name {
-        fields::TITLE => FieldKind::Title,
         fields::SECTION_SLUG => FieldKind::SectionSlug,
-        fields::DESCRIPTION => FieldKind::Description,
-        fields::COLLECTION_ID => FieldKind::CollectionId,
         fields::SEASON_NUMBER => FieldKind::SeasonNumber,
+        fields::COLLECTION_ID => FieldKind::CollectionId,
+        fields::COLLECTION_TITLE => FieldKind::CollectionTitle,
+        fields::DESCRIPTION => FieldKind::Description,
         _ => FieldKind::Unknown,
     }
 }
@@ -93,10 +101,29 @@ async fn handle_text_field(dest: &mut String, field: multer::Field<'_>) -> Resul
     Ok(())
 }
 
-async fn handle_uuid_field(dest: &mut Uuid, field: multer::Field<'_>) -> Result<(), AppError> {
+async fn handle_uuid_field(
+    dest: &mut Option<Uuid>,
+    field: multer::Field<'_>,
+) -> Result<(), AppError> {
     let raw = field.text().await?;
-    *dest = Uuid::parse_str(&raw)
-        .map_err(|e| AppError::hidden("Invalid request", "collection_id parse", e))?;
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    *dest = Some(
+        Uuid::parse_str(&raw)
+            .map_err(|e| AppError::hidden("Invalid request", "collection_id parse", e))?,
+    );
+    Ok(())
+}
+
+async fn handle_optional_string_field(
+    dest: &mut Option<String>,
+    field: multer::Field<'_>,
+) -> Result<(), AppError> {
+    let raw = field.text().await?;
+    if !raw.trim().is_empty() {
+        *dest = Some(raw);
+    }
     Ok(())
 }
 
@@ -105,6 +132,18 @@ async fn handle_optional_i64_field(
     field: multer::Field<'_>,
 ) -> Result<(), AppError> {
     *dest = field.text().await?.parse().ok();
+    Ok(())
+}
+
+async fn handle_tag_field(
+    acc: &mut Accumulator,
+    _idx: usize,
+    field: multer::Field<'_>,
+) -> Result<(), AppError> {
+    let t = field.text().await?;
+    if !t.trim().is_empty() {
+        acc.tags.push(t);
+    }
     Ok(())
 }
 
@@ -165,11 +204,14 @@ async fn handle_field(
     let name = field.name().map(String::from).unwrap_or_default();
     match classify_field(&name) {
         FieldKind::Poster => handle_poster_field(acc, field).await,
-        FieldKind::Title => handle_text_field(&mut acc.title, field).await,
         FieldKind::SectionSlug => handle_text_field(&mut acc.section_slug, field).await,
-        FieldKind::Description => handle_text_field(&mut acc.description, field).await,
-        FieldKind::CollectionId => handle_uuid_field(&mut acc.collection_id, field).await,
         FieldKind::SeasonNumber => handle_optional_i64_field(&mut acc.season_number, field).await,
+        FieldKind::CollectionId => handle_uuid_field(&mut acc.collection_id, field).await,
+        FieldKind::CollectionTitle => {
+            handle_optional_string_field(&mut acc.collection_title, field).await
+        }
+        FieldKind::Description => handle_optional_string_field(&mut acc.description, field).await,
+        FieldKind::Tag(idx) => handle_tag_field(acc, idx, field).await,
         FieldKind::FileTitle(idx) => handle_file_title_field(acc, idx, field).await,
         FieldKind::File(idx) => handle_file_field(acc, temp_dir, idx, field).await,
         FieldKind::Unknown => drain_field(field).await,
@@ -205,19 +247,37 @@ fn build_upload_files(
         .collect()
 }
 
-fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPayload, AppError> {
+fn finalize(
+    acc: Accumulator,
+    next_id: Uuid,
+    temp_dir: tempfile::TempDir,
+) -> Result<UploadPayload, AppError> {
     if acc.files.is_empty() {
         return Err(AppError::public(messages::NO_FILES_RECEIVED));
     }
     if acc.section_slug.is_empty() {
         return Err(AppError::public(messages::SECTION_SLUG_MISSING));
     }
+
+    let target = match (acc.collection_id, acc.collection_title) {
+        (Some(id), _) => UploadTarget::Existing { collection_id: id },
+        (None, Some(title)) => UploadTarget::New {
+            id: next_id,
+            title,
+            description: acc.description,
+            tags: acc.tags,
+        },
+        (None, None) => {
+            return Err(AppError::public(
+                "Either collection_id or collection_title is required",
+            ));
+        }
+    };
+
     let files = build_upload_files(acc.files, acc.file_titles);
     Ok(UploadPayload {
         section_slug: acc.section_slug,
-        collection_id: acc.collection_id,
-        title: acc.title,
-        description: acc.description,
+        target,
         season_number: acc.season_number,
         files,
         poster: acc.poster,
@@ -225,12 +285,15 @@ fn finalize(acc: Accumulator, temp_dir: tempfile::TempDir) -> Result<UploadPaylo
     })
 }
 
-pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload, AppError> {
+pub async fn parse_upload_multipart(
+    data: MultipartData,
+    next_id: Uuid,
+) -> Result<UploadPayload, AppError> {
     let mut multipart = data
         .into_inner()
         .ok_or_else(|| AppError::internal("multipart", "missing multipart body"))?;
     let temp_dir = fresh_temp_dir()?;
 
     let acc = run_parse_loop(&mut multipart, temp_dir.path()).await?;
-    finalize(acc, temp_dir)
+    finalize(acc, next_id, temp_dir)
 }

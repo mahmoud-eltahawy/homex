@@ -1,5 +1,6 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
+use uuid::Uuid;
 
 use crate::app::error::AppError;
 use crate::app::error_view::{ErrorStyle, ErrorView};
@@ -14,6 +15,9 @@ pub struct UploadJob {
     pub status: RwSignal<Option<ConversionStatus>>,
     pub done_tick: RwSignal<u32>,
     pub pending: Signal<bool>,
+    pub collection_id: RwSignal<Option<Uuid>>,
+    pub section_slug: RwSignal<Option<String>>,
+    is_new_collection: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -21,6 +25,8 @@ struct UploadSignals {
     status: RwSignal<Option<ConversionStatus>>,
     done_tick: RwSignal<u32>,
     active_job: RwSignal<Option<String>>,
+    collection_id: RwSignal<Option<Uuid>>,
+    section_slug: RwSignal<Option<String>>,
 }
 
 impl UploadSignals {
@@ -29,6 +35,8 @@ impl UploadSignals {
             status: RwSignal::new(None),
             done_tick: RwSignal::new(0),
             active_job: RwSignal::new(None),
+            collection_id: RwSignal::new(None),
+            section_slug: RwSignal::new(None),
         }
     }
 
@@ -92,6 +100,8 @@ fn install_dispatch_result_effect(
         let Some(Ok(result)) = action.value().get() else {
             return;
         };
+        signals.collection_id.set(Some(result.collection_id));
+        signals.section_slug.set(Some(result.section_slug));
         match result.job_id {
             Some(id) => signals.active_job.set(Some(id)),
             None => signals.bump_done(),
@@ -118,6 +128,14 @@ fn derive_pending(
 
 impl UploadJob {
     pub fn new() -> Self {
+        Self::build(false)
+    }
+
+    pub fn new_for_new_collection() -> Self {
+        Self::build(true)
+    }
+
+    fn build(is_new_collection: bool) -> Self {
         let action = Action::new_local(|fd: &web_sys::FormData| upload_media(fd.clone().into()));
         let signals = UploadSignals::new();
 
@@ -131,6 +149,9 @@ impl UploadJob {
             status: signals.status,
             done_tick: signals.done_tick,
             pending,
+            collection_id: signals.collection_id,
+            section_slug: signals.section_slug,
+            is_new_collection,
         }
     }
 
@@ -140,6 +161,15 @@ impl UploadJob {
 
     pub fn error(&self) -> Signal<Option<AppError>> {
         crate::app::error_view::action_error(self.action)
+    }
+
+    /// True when the upload finished successfully. For the new-collection
+    /// flow this drives the navigate-on-completion effect.
+    pub fn is_terminal_success(&self) -> bool {
+        // Sync path: done_tick incremented on dispatch result Ok.
+        // Async path: polling sees ConversionStatus::Done and bumps done_tick.
+        let _ = self.is_new_collection;
+        self.done_tick.get() > 0
     }
 }
 

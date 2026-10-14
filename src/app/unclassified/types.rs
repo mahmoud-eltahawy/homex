@@ -28,6 +28,17 @@ pub struct ClassifyInput {
     pub title: String,
 }
 
+/// Where a classification batch is destined.
+///
+/// `New` defers collection creation to the classify server fn — the row is
+/// created (with a poster extracted from the first file) in the same call
+/// that dispatches the jobs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClassifyDestination {
+    Existing(Uuid),
+    New { section_slug: String, title: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FolderInspection {
     pub rel_path: String,
@@ -48,14 +59,6 @@ pub struct FoldersInspection {
     pub common_kind: Option<MediaKind>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FolderDestination {
-    Existing { section_slug: String },
-    New { section_title: String },
-}
-
-/// One file's job. `rel_path` / `title` / `season_number` / `collection_id`
-/// let the client reconstruct a retry request without reselection.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileJobHandle {
     pub name: String,

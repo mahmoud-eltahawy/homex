@@ -1,12 +1,9 @@
-use crate::app::constants::routes;
 use crate::app::{
-    collections::create_empty_collection,
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionGridProps, CollectionPage,
         collections_paginated,
     },
     error::AppError,
-    error_view::{ErrorView, action_error},
     inline_edit::use_edit_mode,
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
@@ -18,7 +15,6 @@ use crate::app::{
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
-use uuid::Uuid;
 
 const LISTING_PAGE_SIZE: usize = 18;
 
@@ -113,61 +109,33 @@ fn SectionListingBody(
     }
 }
 
-// ─── Create-new-collection flow ───────────────────────────────────────────
-
-fn use_create_collection_nav(section_slug: String) -> Action<String, Result<Uuid, AppError>> {
-    let action = Action::new_local(move |s: &String| create_empty_collection(s.clone()));
-    let navigate = use_navigate();
-    let slug_for_nav = section_slug;
-
-    Effect::new(move |_| {
-        if let Some(Ok(id)) = action.value().get() {
-            let href = routes::collection(&slug_for_nav, id);
-            navigate(&href, Default::default());
-        }
-    });
-
-    action
-}
-
 #[component]
 fn CreateNewButton(
     #[prop(into)] section_slug: String,
     #[prop(into)] label: String,
 ) -> impl IntoView {
-    let action = use_create_collection_nav(section_slug.clone());
-    let slug_for_action = section_slug;
-    let label_for_view = label;
+    let navigate = use_navigate();
     let edit_on = use_edit_mode();
+
+    let slug = section_slug;
+    let on_click = move |_| {
+        let href = format!("/new-collection/{}", slug);
+        navigate(&href, Default::default());
+    };
 
     view! {
         <Show when=move || edit_on.get()>
-            <div class="flex flex-col items-end gap-2">
-                <button
-                    type="button"
-                    on:click={
-                        let slug = slug_for_action.clone();
-                        move |_| { let _ = action.dispatch(slug.clone()); }
-                    }
-                    disabled=move || action.pending().get()
-                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl \
-                           bg-gradient-to-r from-cyan-500 to-blue-500 \
-                           hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
-                           shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 \
-                           disabled:opacity-50"
-                >
-                    <span class="text-lg leading-none">"+"</span>
-                    {
-                        let label_for_view = label_for_view.clone();
-                        move || if action.pending().get() {
-                            "Creating...".to_string()
-                        } else {
-                            label_for_view.clone()
-                        }
-                    }
-                </button>
-                <ErrorView error=action_error(action)/>
-            </div>
+            <button
+                type="button"
+                on:click=on_click.clone()
+                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl \
+                       bg-gradient-to-r from-cyan-500 to-blue-500 \
+                       hover:from-cyan-400 hover:to-blue-400 text-white font-bold text-sm \
+                       shadow-lg shadow-cyan-500/20 transition-all hover:scale-105"
+            >
+                <span class="text-lg leading-none">"+"</span>
+                {label.clone()}
+            </button>
         </Show>
     }
 }

@@ -14,15 +14,16 @@ use super::Config;
 
 pub use collections::{
     CollectionDeletion, CollectionField, CollectionMove, MoveCollectionError,
-    delete_collection_cascade, fetch_collection_detail, fetch_collection_summaries,
-    fetch_collections, fetch_collections_count, insert_collection, insert_empty_collection,
-    move_collection_to_section, update_collection_field,
+    delete_collection_cascade, fetch_collection_any, fetch_collection_detail,
+    fetch_collection_summaries, fetch_collections, fetch_collections_count,
+    insert_audio_collection, insert_video_collection, move_collection_to_section,
+    set_collection_poster, update_collection_field,
 };
 pub use files::{fetch_file_path, insert_file};
 
 pub use items::{
-    ItemDeletion, delete_item_cascade, delete_items_cascade, fetch_items, move_items_to_collection,
-    swap_item_order, update_item_title,
+    BulkItemDeletion, ItemDeletion, delete_item_cascade, delete_items_cascade, fetch_items,
+    move_items_to_collection, swap_item_order, update_item_title,
 };
 pub use sections::{
     DeleteSectionOutcome, delete_section, fetch_section_by_slug, fetch_section_kind,
@@ -47,7 +48,8 @@ pub async fn init(config: &Config) -> Result<Db, Box<dyn std::error::Error>> {
         .models(toasty::models!(
             crate::app::model::File,
             crate::app::model::SectionRow,
-            crate::app::model::CollectionRow,
+            crate::app::model::VideoCollectionRow,
+            crate::app::model::AudioCollectionRow,
             crate::app::model::Item,
             crate::app::model::Tag,
             crate::app::model::SectionTag,

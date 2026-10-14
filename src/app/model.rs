@@ -4,9 +4,6 @@ use uuid::Uuid;
 use crate::app::constants::routes;
 
 // ─── Tag canonicalization (SSR only) ──────────────────────────────────────
-//
-// Used by the tag write path in `server::db`. The client never canonicalizes
-// — it just forwards the names the user typed.
 
 #[cfg(feature = "ssr")]
 pub fn canonicalize_tags<I, S>(tags: I) -> Vec<String>
@@ -117,6 +114,17 @@ impl TryFrom<&str> for MediaKind {
     }
 }
 
+// ─── CollectionKind (SSR only) ────────────────────────────────────────────
+//
+// Internal to the db dispatcher. Never crosses the wire.
+
+#[cfg(feature = "ssr")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionKind {
+    Video,
+    Audio,
+}
+
 // ─── Tag ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,9 +139,6 @@ pub struct Tag {
 }
 
 // ─── File (SSR only) ──────────────────────────────────────────────────────
-//
-// `File` never crosses the wire: items carry `file_id` and the stream route
-// resolves it server-side. So the whole struct is SSR-only.
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
@@ -185,12 +190,38 @@ pub struct SectionRow {
     pub position: i64,
 }
 
+/// A collection belonging to a video section.
+///
+/// A row can only exist because a video was uploaded into it and a poster
+/// frame was extracted from that video. `poster` is therefore `String`, not
+/// `Option<String>` — the invariant is enforced by the server function that
+/// inserts the row (`extract_and_insert_new_collection`).
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
-#[table = "collections"]
-pub struct CollectionRow {
+#[table = "video_collections"]
+pub struct VideoCollectionRow {
     #[key]
-    #[auto]
+    pub id: Uuid,
+    #[index]
+    pub section_id: Uuid,
+    #[index]
+    pub section_slug: String,
+    pub title: String,
+    pub poster: String,
+    pub description: Option<String>,
+    pub position: i64,
+    pub items_count: i64,
+}
+
+/// A collection belonging to an audio section.
+///
+/// Audio has no frame to extract, so the poster is user-supplied and
+/// genuinely optional.
+#[cfg(feature = "ssr")]
+#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
+#[table = "audio_collections"]
+pub struct AudioCollectionRow {
+    #[key]
     pub id: Uuid,
     #[index]
     pub section_id: Uuid,
@@ -245,6 +276,10 @@ pub struct Section {
     pub tags: Vec<Tag>,
 }
 
+/// Read model for grids, cards, listings. The DB stores video and audio
+/// collections in separate tables; this type lets the shared UI treat them
+/// uniformly. `poster` is `Option` because audio collections may never get
+/// one — for video collections it is always `Some` in practice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
     pub id: Uuid,
@@ -259,7 +294,6 @@ pub struct Collection {
     pub tags: Vec<Tag>,
 }
 
-/// Lightweight shape used by the "move items" destination picker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollectionSummary {
     pub id: Uuid,
@@ -287,8 +321,25 @@ impl From<SectionRow> for Section {
 }
 
 #[cfg(feature = "ssr")]
-impl From<CollectionRow> for Collection {
-    fn from(row: CollectionRow) -> Self {
+impl From<VideoCollectionRow> for Collection {
+    fn from(row: VideoCollectionRow) -> Self {
+        Self {
+            id: row.id,
+            section_id: row.section_id,
+            section_slug: row.section_slug,
+            title: row.title,
+            poster: Some(row.poster),
+            description: row.description,
+            position: row.position,
+            items_count: row.items_count,
+            tags: Vec::new(),
+        }
+    }
+}
+
+#[cfg(feature = "ssr")]
+impl From<AudioCollectionRow> for Collection {
+    fn from(row: AudioCollectionRow) -> Self {
         Self {
             id: row.id,
             section_id: row.section_id,

@@ -12,7 +12,8 @@ use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
         move_collection_to_section, move_item, move_items_to_collection, patch_collection_field,
-        patch_collection_tags, patch_item_title, upload_collection_poster,
+        patch_collection_tags, patch_item_title, regenerate_collection_poster,
+        upload_collection_poster,
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, HeroBadge, HeroMeta},
@@ -37,6 +38,7 @@ mod fields;
 
 type PatchAction = Action<(Uuid, String, Option<String>), Result<(), AppError>>;
 type PosterUploadAction = Action<web_sys::FormData, Result<String, AppError>>;
+type RegenerateAction = Action<(String, Uuid), Result<String, AppError>>;
 type RenameItemAction = Action<(Uuid, String), Result<(), AppError>>;
 type DeleteItemAction = Action<Uuid, Result<(), AppError>>;
 type TagsAction = Action<(Uuid, Vec<String>), Result<(), AppError>>;
@@ -48,6 +50,7 @@ type MoveToIncomingAction = Action<Vec<Uuid>, Result<(), AppError>>;
 struct CollectionActions {
     patch: PatchAction,
     poster_upload: PosterUploadAction,
+    regenerate: RegenerateAction,
     rename_item: RenameItemAction,
     delete_item: DeleteItemAction,
     move_item: Action<(Uuid, bool), Result<(), AppError>>,
@@ -61,6 +64,9 @@ impl CollectionActions {
         });
         let poster_upload =
             Action::new_local(|fd: &web_sys::FormData| upload_collection_poster(fd.clone().into()));
+        let regenerate = Action::new_local(|(slug, id): &(String, Uuid)| {
+            regenerate_collection_poster(slug.clone(), *id)
+        });
         let rename_item =
             Action::new_local(|(id, t): &(Uuid, String)| patch_item_title(*id, t.clone()));
         let delete_item = Action::new_local(|id: &Uuid| delete_item(*id));
@@ -77,6 +83,7 @@ impl CollectionActions {
         Self {
             patch,
             poster_upload,
+            regenerate,
             rename_item,
             delete_item,
             move_item,
@@ -107,6 +114,9 @@ impl CollectionActions {
     }
     fn poster_error(self) -> Signal<Option<AppError>> {
         action_error(self.poster_upload)
+    }
+    fn regenerate_error(self) -> Signal<Option<AppError>> {
+        action_error(self.regenerate)
     }
     fn rename_error(self) -> Signal<Option<AppError>> {
         action_error(self.rename_item)
@@ -161,7 +171,7 @@ impl CollectionEditState {
     }
 }
 
-// ─── Poster upload ────────────────────────────────────────────────────────
+// ─── Poster upload (audio only) ───────────────────────────────────────────
 
 fn use_poster_upload(
     section_slug: String,
@@ -171,9 +181,9 @@ fn use_poster_upload(
 ) -> Callback<web_sys::File> {
     let on_file = Callback::new(move |file: web_sys::File| {
         let fd = web_sys::FormData::new().unwrap();
-        let _ = fd.append_with_str("section", &section_slug);
-        let _ = fd.append_with_str("id", &collection_id.to_string());
-        let _ = fd.append_with_blob_and_filename("poster_file", &file, &file.name());
+        let _ = fd.append_with_str(fields::SECTION, &section_slug);
+        let _ = fd.append_with_str(fields::ID, &collection_id.to_string());
+        let _ = fd.append_with_blob_and_filename(fields::POSTER_FILE, &file, &file.name());
         poster_upload.dispatch(fd);
     });
 
@@ -321,9 +331,11 @@ fn CollectionContent(
     });
 
     let slug_for_poster = section_slug.clone();
+    let slug_for_regen = section_slug.clone();
     let slug_for_picker = section_slug.clone();
     let slug_for_append = section_slug;
 
+    // Audio: manual picker.
     let on_poster_file = use_poster_upload(
         slug_for_poster,
         collection_id,
@@ -331,18 +343,35 @@ fn CollectionContent(
         actions.poster_upload,
     );
 
+    // Video: regenerate.
+    let on_regenerate = Callback::new(move |_: ()| {
+        actions
+            .regenerate
+            .dispatch((slug_for_regen.clone(), collection_id));
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(url)) = actions.regenerate.value().get() {
+            edit.poster.set(Some(url));
+        }
+    });
+    let regenerating = actions.regenerate.pending();
+
+    let audio_picker = is_audio.then_some(on_poster_file);
+    let video_regen = (!is_audio).then_some(on_regenerate);
+
     let on_rename = actions.rename_callback();
     let on_delete = actions.delete_callback();
+    let on_move = actions.move_callback();
 
     let poster_for_shell = edit.poster.get_untracked();
     let placeholder = make_poster_placeholder(is_audio);
     let icon = icon_for(section.media_kind(), section.nested);
     let badge_label = section.badge_label();
-    let on_move = actions.move_callback();
     let kind = section.media_kind();
 
     let patch_error = actions.patch_error();
     let poster_error = actions.poster_error();
+    let regenerate_error = actions.regenerate_error();
     let tags_error = actions.tags_error();
     let rename_error = actions.rename_error();
     let delete_error = actions.delete_error();
@@ -366,8 +395,10 @@ fn CollectionContent(
                 <EditablePoster
                     src=Signal::derive(move || edit.poster.get())
                     placeholder=placeholder
-                    on_file=on_poster_file
                     input_id=format!("poster-collection-{collection_id}")
+                    on_file=audio_picker
+                    on_regenerate=video_regen
+                    regenerating=Signal::derive(move || regenerating.get())
                 />
             }>
                 <HeroBadge label=badge_label.to_string() icon=icon/>
@@ -426,6 +457,7 @@ fn CollectionContent(
                     <ErrorView error=patch_error/>
                     <ErrorView error=tags_error/>
                     <ErrorView error=poster_error/>
+                    <ErrorView error=regenerate_error/>
                 </div>
                 <AppendItems
                     upload=upload

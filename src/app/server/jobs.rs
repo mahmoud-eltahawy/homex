@@ -1,9 +1,4 @@
 //! Job orchestration primitives.
-//!
-//! The `Job` / `Jobs` / `JobPhase` types live in `convert.rs`. This module
-//! adds the surrounding machinery: a global concurrency bound, path locks,
-//! the `PreparedJob` shape, and the spawn/wait helpers used by any endpoint
-//! that fans a batch of file operations out into per-file jobs.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -17,20 +12,13 @@ use crate::app::model::MediaKind;
 use crate::app::server::AppState;
 use crate::app::server::convert::{Job, JobPhase, job_set_phase};
 use crate::app::server::upload::{
-    UploadFile, UploadPayload, process_upload, schedule_job_eviction,
+    UploadFile, UploadPayload, UploadTarget, process_upload, schedule_job_eviction,
 };
 use crate::app::unclassified::FileJobHandle;
-
-// ─── Constants ────────────────────────────────────────────────────────────
 
 pub const JOB_TIMEOUT_SECS: u64 = 15 * 60;
 pub const WATCHER_DEADLINE_SECS: u64 = 30 * 60;
 
-// ─── Global concurrency bound ─────────────────────────────────────────────
-
-/// Process-wide semaphore bounding concurrent file operations. Sized to
-/// `clamp(cpus * 2, 2, 16)` so a folder with hundreds of files doesn't
-/// spawn hundreds of ffmpeg processes at once.
 pub fn upload_semaphore() -> &'static tokio::sync::Semaphore {
     use tokio::sync::Semaphore;
     static SEM: OnceLock<Semaphore> = OnceLock::new();
@@ -52,7 +40,6 @@ fn active_classifications() -> &'static std::sync::Mutex<std::collections::HashS
     SET.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// RAII guard releasing every path acquired by `acquire_classify_locks`.
 pub struct ClassifyLocks(Vec<PathBuf>);
 
 impl Drop for ClassifyLocks {
@@ -66,8 +53,6 @@ impl Drop for ClassifyLocks {
     }
 }
 
-/// Atomically acquire locks on every path. Fails if any is already locked.
-/// The lock is held until the returned guard is dropped.
 pub fn acquire_classify_locks(paths: Vec<PathBuf>) -> Result<ClassifyLocks, AppError> {
     if paths.is_empty() {
         return Ok(ClassifyLocks(Vec::new()));
@@ -91,8 +76,6 @@ pub fn acquire_classify_locks(paths: Vec<PathBuf>) -> Result<ClassifyLocks, AppE
 
 // ─── Config validation ────────────────────────────────────────────────────
 
-/// Canonicalize `media_root` once per process. The result is leaked so it
-/// can be reused across requests without re-running syscalls.
 pub fn canonical_media_root(media_root: &Path) -> Result<&'static Path, AppError> {
     use std::sync::OnceLock;
     static CACHE: OnceLock<Result<&'static PathBuf, String>> = OnceLock::new();
@@ -107,8 +90,6 @@ pub fn canonical_media_root(media_root: &Path) -> Result<&'static Path, AppError
     }
 }
 
-/// Refuse to operate if the unclassified root and the media root overlap.
-/// A rename-onto-itself would silently delete files.
 pub fn ensure_roots_disjoint(unclassified_canon: &Path, media_root: &Path) -> Result<(), AppError> {
     let media_canon = canonical_media_root(media_root)?;
     if unclassified_canon == media_canon
@@ -134,8 +115,7 @@ pub fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
     tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))
 }
 
-/// A fully-prepared file job. The client-facing `FileJobHandle` is built
-/// from this when the job is registered.
+/// A fully-prepared file job.
 pub struct PreparedJob {
     pub name: String,
     pub job_id: String,
@@ -147,11 +127,11 @@ pub struct PreparedJob {
     pub cancel: CancellationToken,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_file_job(
     file: UploadFile,
-    collection_id: Uuid,
+    target: UploadTarget,
     section_slug: &str,
-    collection_title: &str,
     season: Option<i64>,
     kind: MediaKind,
     rel_path: String,
@@ -166,9 +146,7 @@ pub fn prepare_file_job(
         season_number: season,
         payload: UploadPayload {
             section_slug: section_slug.to_string(),
-            collection_id,
-            title: collection_title.to_string(),
-            description: String::new(),
+            target,
             season_number: season,
             files: vec![file],
             poster: None,
@@ -181,8 +159,6 @@ pub fn prepare_file_job(
 
 // ─── Registration + spawn ─────────────────────────────────────────────────
 
-/// Register every prepared job in one lock acquisition, then spawn one
-/// worker per job. Returns handles the client uses to poll.
 pub async fn register_and_spawn(
     state: &AppState,
     prepared: Vec<PreparedJob>,
@@ -256,7 +232,6 @@ fn spawn_job_worker(state: AppState, p: PreparedJob) {
 
 // ─── Watchers ─────────────────────────────────────────────────────────────
 
-/// Wait (bounded) until every job id reaches a terminal phase.
 pub async fn wait_for_terminal(state: &AppState, job_ids: &[String]) {
     let wait = async {
         loop {
@@ -281,8 +256,6 @@ pub async fn wait_for_terminal(state: &AppState, job_ids: &[String]) {
     let _ = tokio::time::timeout(Duration::from_secs(WATCHER_DEADLINE_SECS), wait).await;
 }
 
-/// Hold a `ClassifyLocks` guard for the duration of a batch, releasing it
-/// once every job has reached a terminal phase.
 pub fn spawn_lock_holder(state: AppState, job_ids: Vec<String>, lock: ClassifyLocks) {
     tokio::spawn(async move {
         let _lock = lock;
@@ -290,7 +263,6 @@ pub fn spawn_lock_holder(state: AppState, job_ids: Vec<String>, lock: ClassifyLo
     });
 }
 
-/// Remove a source folder once every job in its group has finished.
 pub fn spawn_cleanup_watcher(state: AppState, job_ids: Vec<String>, dir: PathBuf) {
     tokio::spawn(async move {
         wait_for_terminal(&state, &job_ids).await;
@@ -301,6 +273,3 @@ pub fn spawn_cleanup_watcher(state: AppState, job_ids: Vec<String>, dir: PathBuf
         }
     });
 }
-
-// Re-export so callers don't need to know where `FolderDestination` lives.
-pub use crate::app::unclassified::types::FolderDestination as _FolderDestination;

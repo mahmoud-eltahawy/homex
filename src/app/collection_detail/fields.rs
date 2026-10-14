@@ -1,3 +1,7 @@
+pub const SECTION: &str = "section";
+pub const ID: &str = "id";
+pub const POSTER_FILE: &str = "poster_file";
+
 pub const SECTION_SLUG: &str = "section_slug";
 pub const COLLECTION_ID: &str = "collection_id";
 pub const SEASON_NUMBER: &str = "season_number";

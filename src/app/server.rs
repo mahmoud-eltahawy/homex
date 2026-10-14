@@ -14,8 +14,7 @@ pub mod upload;
 pub use config::Config;
 pub use convert::Jobs;
 
-// Re-export the centralized error API so `use crate::app::server::{ToastyErr, db}`
-// keeps working across the codebase.
+// Re-export the centralized error API.
 pub use crate::app::error::{AppError, ErrorContext};
 
 #[derive(Clone)]
@@ -38,6 +37,7 @@ pub async fn remove_media_files(state: &AppState, rel_paths: &[String]) {
     }
 }
 
+/// Unlink a poster file. `None` is a no-op.
 pub async fn remove_poster(state: &AppState, url: Option<&str>) {
     let Some(url) = url else { return };
     let Some(rest) = url.strip_prefix(constants::routes::POSTERS_URL_PREFIX) else {

@@ -1,15 +1,16 @@
 use leptos::prelude::*;
 use uuid::Uuid;
 
-use crate::app::collections::create_collection_named;
 use crate::app::error::AppError;
-use crate::app::error_view::{ErrorView, action_error};
+use crate::app::error_view::ErrorView;
 use crate::app::model::MediaKind;
 use crate::app::unclassified::fetch_sections_with_collections;
 use crate::app::unclassified::helpers::{file_stem, kind_for_ext, parse_season};
 use crate::app::unclassified::jobs::ClassifyJob;
 use crate::app::unclassified::tracker::BatchPhase;
-use crate::app::unclassified::types::{ClassifyInput, SectionWithCollections, UnclassifiedEntry};
+use crate::app::unclassified::types::{
+    ClassifyDestination, ClassifyInput, SectionWithCollections, UnclassifiedEntry,
+};
 
 use super::primitives::{FormActions, ModalShell, SeasonField, SectionSelect, TitleField};
 use super::progress::{BatchProgress, PhaseFinal};
@@ -77,11 +78,6 @@ pub fn ClassifyModal(
     let form = FileFormState::new();
     let is_single = Signal::derive(move || selection.get().len() == 1);
 
-    let create_action: Action<(String, String), Result<Uuid, AppError>> =
-        Action::new_local(|(slug, t): &(String, String)| {
-            create_collection_named(slug.clone(), t.clone())
-        });
-
     Effect::new(move |_| {
         if !open.get() {
             return;
@@ -104,15 +100,6 @@ pub fn ClassifyModal(
         form.collection_id.set(None);
         form.creating_new.set(false);
         form.new_title.set(String::new());
-    });
-
-    Effect::new(move |_| {
-        if let Some(Ok(id)) = create_action.value().get() {
-            sections.refetch();
-            form.collection_id.set(Some(id));
-            form.creating_new.set(false);
-            form.new_title.set(String::new());
-        }
     });
 
     Effect::new(move |_| {
@@ -162,7 +149,13 @@ pub fn ClassifyModal(
         )
     });
 
-    let can_move = Signal::derive(move || form.collection_id.get().is_some());
+    let can_move = Signal::derive(move || {
+        if form.creating_new.get() {
+            !form.section_slug.get().is_empty() && !form.new_title.get().trim().is_empty()
+        } else {
+            form.collection_id.get().is_some()
+        }
+    });
 
     let confirm_label = Signal::derive(move || {
         let n = selection.get().len();
@@ -225,13 +218,28 @@ pub fn ClassifyModal(
     });
 
     let confirm = Callback::new(move |_: ()| {
-        let Some(col) = form.collection_id.get_untracked() else {
-            return;
-        };
         let sel = selection.get_untracked();
         if sel.is_empty() {
             return;
         }
+
+        let dest = if form.creating_new.get_untracked() {
+            let slug = form.section_slug.get_untracked();
+            let title = form.new_title.get_untracked();
+            if slug.is_empty() || title.trim().is_empty() {
+                return;
+            }
+            ClassifyDestination::New {
+                section_slug: slug,
+                title: title.trim().to_string(),
+            }
+        } else {
+            let Some(id) = form.collection_id.get_untracked() else {
+                return;
+            };
+            ClassifyDestination::Existing(id)
+        };
+
         cancel_pending.set(false);
         let season = parse_season(&form.season.get_untracked());
         let files = if sel.len() == 1 {
@@ -247,22 +255,7 @@ pub fn ClassifyModal(
                 })
                 .collect()
         };
-        job.dispatch(files, col, season);
-    });
-
-    let submit_create = Callback::new(move |_: ()| {
-        let slug = form.section_slug.get_untracked();
-        let title = form.new_title.get_untracked();
-        let title = title.trim();
-        if slug.is_empty() || title.is_empty() {
-            return;
-        }
-        create_action.dispatch((slug, title.to_string()));
-    });
-
-    let cancel_create = Callback::new(move |_: ()| {
-        form.creating_new.set(false);
-        form.new_title.set(String::new());
+        job.dispatch(files, dest, season);
     });
 
     view! {
@@ -303,10 +296,6 @@ pub fn ClassifyModal(
                                     collection_id=form.collection_id
                                     creating_new=form.creating_new
                                     new_title=form.new_title
-                                    create_pending=create_action.pending().into()
-                                    create_error=action_error(create_action)
-                                    on_submit_create=submit_create
-                                    on_cancel_create=cancel_create
                                 />
                             </Show>
                             <Show when=move || chosen_is_series.get()>
@@ -349,11 +338,9 @@ fn CollectionPicker(
     collection_id: RwSignal<Option<Uuid>>,
     creating_new: RwSignal<bool>,
     new_title: RwSignal<String>,
-    create_pending: Signal<bool>,
-    create_error: Signal<Option<AppError>>,
-    on_submit_create: Callback<()>,
-    on_cancel_create: Callback<()>,
 ) -> impl IntoView {
+    let create_error: Signal<Option<AppError>> = Signal::derive(|| None);
+
     view! {
         <div>
             <div class="flex items-center justify-between mb-1">
@@ -399,26 +386,14 @@ fn CollectionPicker(
                         <input type="text"
                             prop:value=move || new_title.get()
                             on:input=move |e| new_title.set(event_target_value(&e))
-                            on:keydown=move |e| {
-                                if e.key() == "Enter" { e.prevent_default(); on_submit_create.run(()); }
-                                else if e.key() == "Escape" { on_cancel_create.run(()); }
-                            }
                             autofocus=true
                             placeholder="New collection title"
                             class="flex-1 bg-white/10 text-white rounded-lg px-3 py-1.5 text-sm \
                                        focus:outline-none focus:ring-1 focus:ring-cyan-400"/>
                         <button type="button"
-                            on:click=move |_| on_submit_create.run(())
-                            disabled=move || create_pending.get() || new_title.get().trim().is_empty()
-                            class="shrink-0 px-3 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/40 \
-                                       text-white text-sm font-medium transition disabled:opacity-50">
-                            {move || if create_pending.get() { "Creating…" } else { "Create" }}
-                        </button>
-                        <button type="button"
-                            on:click=move |_| on_cancel_create.run(())
-                            disabled=move || create_pending.get()
+                            on:click=move |_| creating_new.set(false)
                             class="shrink-0 px-3 rounded-lg bg-white/5 hover:bg-white/15 \
-                                       text-gray-300 text-sm transition disabled:opacity-50">
+                                       text-gray-300 text-sm transition">
                             "Cancel"
                         </button>
                     </div>

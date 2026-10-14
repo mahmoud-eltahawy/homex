@@ -2,7 +2,7 @@ use toasty::Db;
 use uuid::Uuid;
 
 use super::tags::fetch_section_tags;
-use crate::app::model::{CollectionRow, Section, SectionRow, SectionTag};
+use crate::app::model::{AudioCollectionRow, Section, SectionRow, SectionTag, VideoCollectionRow};
 
 // ─── Section queries ──────────────────────────────────────────────────────
 
@@ -97,14 +97,25 @@ pub enum DeleteSectionOutcome {
 pub async fn delete_section(db: &mut Db, id: Uuid) -> toasty::Result<DeleteSectionOutcome> {
     let section = SectionRow::get_by_id(db, &id).await?;
 
-    let collection_count = CollectionRow::filter(
-        CollectionRow::fields()
+    let video_count = VideoCollectionRow::filter(
+        VideoCollectionRow::fields()
             .section_slug()
             .eq(section.slug.clone()),
     )
     .count()
     .exec(db)
     .await? as i64;
+
+    let audio_count = AudioCollectionRow::filter(
+        AudioCollectionRow::fields()
+            .section_slug()
+            .eq(section.slug.clone()),
+    )
+    .count()
+    .exec(db)
+    .await? as i64;
+
+    let collection_count = video_count + audio_count;
 
     if collection_count > 0 {
         return Ok(DeleteSectionOutcome::NotEmpty { collection_count });

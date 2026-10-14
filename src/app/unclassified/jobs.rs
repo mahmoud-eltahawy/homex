@@ -1,18 +1,20 @@
 //! Client-side job wrappers for the two classify flows.
 
 use leptos::prelude::*;
-use uuid::Uuid;
 
 use crate::app::error::AppError;
 
 use super::tracker::BatchTracker;
-use super::types::{ClassifyInput, FileJobHandle, FolderDestination};
+use super::types::{ClassifyDestination, ClassifyInput, FileJobHandle};
 use crate::app::unclassified::cancel_classify;
 use crate::app::unclassified::{classify_unclassified_files, classify_unclassified_folders};
 
 #[derive(Clone, Copy)]
 pub struct ClassifyJob {
-    action: Action<(Vec<ClassifyInput>, Uuid, Option<i64>), Result<Vec<FileJobHandle>, AppError>>,
+    action: Action<
+        (Vec<ClassifyInput>, ClassifyDestination, Option<i64>),
+        Result<Vec<FileJobHandle>, AppError>,
+    >,
     tracker: BatchTracker,
 }
 
@@ -20,8 +22,8 @@ impl ClassifyJob {
     pub fn new() -> Self {
         let tracker = BatchTracker::new();
         let action = Action::new_local(
-            |(files, col, season): &(Vec<ClassifyInput>, Uuid, Option<i64>)| {
-                classify_unclassified_files(files.clone(), *col, *season)
+            |(files, dest, season): &(Vec<ClassifyInput>, ClassifyDestination, Option<i64>)| {
+                classify_unclassified_files(files.clone(), dest.clone(), *season)
             },
         );
 
@@ -38,9 +40,14 @@ impl ClassifyJob {
         Self { action, tracker }
     }
 
-    pub fn dispatch(&self, files: Vec<ClassifyInput>, col: Uuid, season: Option<i64>) {
+    pub fn dispatch(
+        &self,
+        files: Vec<ClassifyInput>,
+        dest: ClassifyDestination,
+        season: Option<i64>,
+    ) {
         self.tracker.reset();
-        self.action.dispatch((files, col, season));
+        self.action.dispatch((files, dest, season));
     }
 
     pub fn reset(&self) {
@@ -64,14 +71,14 @@ impl ClassifyJob {
 
 #[derive(Clone, Copy)]
 pub struct FolderClassifyJob {
-    action: Action<(Vec<String>, FolderDestination), Result<Vec<FileJobHandle>, AppError>>,
+    action: Action<(Vec<String>, ClassifyDestination), Result<Vec<FileJobHandle>, AppError>>,
     tracker: BatchTracker,
 }
 
 impl FolderClassifyJob {
     pub fn new() -> Self {
         let tracker = BatchTracker::new();
-        let action = Action::new_local(|(paths, dest): &(Vec<String>, FolderDestination)| {
+        let action = Action::new_local(|(paths, dest): &(Vec<String>, ClassifyDestination)| {
             classify_unclassified_folders(paths.clone(), dest.clone())
         });
 
@@ -88,7 +95,7 @@ impl FolderClassifyJob {
         Self { action, tracker }
     }
 
-    pub fn dispatch(&self, paths: Vec<String>, dest: FolderDestination) {
+    pub fn dispatch(&self, paths: Vec<String>, dest: ClassifyDestination) {
         self.tracker.reset();
         self.action.dispatch((paths, dest));
     }
