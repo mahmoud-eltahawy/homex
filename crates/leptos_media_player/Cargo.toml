@@ -10,10 +10,10 @@ categories = ["gui", "web-programming", "multimedia"]
 readme = "README.md"
 
 [dependencies]
-leptos = "0.8"
-leptos-use = "0.19"
-wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = [
+leptos = { workspace = true }
+leptos-use = { workspace = true }
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true , features = [
     "Document",
     "Element",
     "Event",
@@ -24,5 +24,5 @@ web-sys = { version = "0.3", features = [
     "KeyboardEvent",
     "MouseEvent",
 ] }
-serde = { version = "1", features = ["derive"] }
-uuid = { version = "1", features = ["v4", "serde", "js"] }
+serde = { workspace = true, features = ["derive"] }
+uuid = { workspace = true, features = ["v4", "serde", "js"] }

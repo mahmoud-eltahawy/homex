@@ -10,11 +10,11 @@ keywords = ["leptos", "error", "resource", "async", "ui"]
 categories = ["web-programming", "wasm"]
 
 [dependencies]
-leptos = "0.8"
-serde = { version = "1", features = ["derive"] }
+leptos = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-serde_json = "1"
+serde_json = { workspace = true }
 
 [package.metadata.docs.rs]
 targets = ["wasm32-unknown-unknown"]
