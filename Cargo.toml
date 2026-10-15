@@ -3,13 +3,18 @@ members = [
     ".",
     "crates/leptos_media_player",
     "crates/leptos_outcome",
+    "crates/icons",
 ]
 resolver = "3"
 
-[package]
-name = "homex"
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+
+[package]
+name = "homex"
+version.workspace = true
+edition.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -21,6 +26,7 @@ web-sys = "0.3"
 serde = "1"
 uuid = "1"
 serde_json = "1"
+icons               = { path = "crates/icons" }
 
 [dependencies]
 leptos                 = { workspace = true }
@@ -54,6 +60,7 @@ uuid                   = { workspace = true, features = ["v4", "serde", "js"] }
 # ── Local, editable copies ────────────────────────────────────────────────
 leptos_media_player = { path = "crates/leptos_media_player" }
 leptos_outcome      = { path = "crates/leptos_outcome" }
+icons               = { workspace = true }
 
 sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio", "sqlite", "uuid", "macros", "migrate",

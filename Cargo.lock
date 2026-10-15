@@ -997,6 +997,7 @@ dependencies = [
  "console_error_panic_hook",
  "gloo-timers",
  "http-body-util",
+ "icons",
  "infer",
  "leptos",
  "leptos-use",
@@ -1159,6 +1160,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "icons"
+version = "0.1.0"
+dependencies = [
+ "leptos",
 ]
 
 [[package]]
