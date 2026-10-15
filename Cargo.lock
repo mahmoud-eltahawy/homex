@@ -1538,6 +1538,7 @@ dependencies = [
 name = "leptos_media_player"
 version = "0.1.0"
 dependencies = [
+ "icons",
  "leptos",
  "leptos-use",
  "serde",
@@ -1565,6 +1566,7 @@ dependencies = [
 name = "leptos_outcome"
 version = "0.1.0"
 dependencies = [
+ "icons",
  "leptos",
  "serde",
  "serde_json",

@@ -12,6 +12,7 @@ categories = ["web-programming", "wasm"]
 [dependencies]
 leptos = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+icons = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
