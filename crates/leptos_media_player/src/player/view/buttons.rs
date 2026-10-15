@@ -4,11 +4,11 @@ use leptos::either::Either;
 use leptos::prelude::*;
 
 use crate::ContextBundle;
-use crate::icons::{
+use crate::player::state::{PlayerDerived, PlayerHandlers, PlayerNav, PlayerSignals};
+use icons::player::{
     FullscreenExitIcon, FullscreenIcon, MuteIcon, NextPageIcon, PauseIcon, PlayIcon, PrevPageIcon,
     VolumeIcon,
 };
-use crate::player::state::{PlayerDerived, PlayerHandlers, PlayerNav, PlayerSignals};
 
 // ─── Nav direction ────────────────────────────────────────────────────────
 

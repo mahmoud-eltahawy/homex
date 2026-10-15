@@ -1,10 +1,9 @@
 //! The [`UserFacingError`] trait, the [`SimpleError`] convenience type, and
 //! the [`ErrorView`] component.
 
+use icons::outcome::ErrorIcon;
 use leptos::{either::Either, prelude::*};
 use serde::{Deserialize, Serialize};
-
-use crate::icons::ErrorIcon;
 
 // ─── Trait ────────────────────────────────────────────────────────────────────
 

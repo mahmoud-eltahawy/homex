@@ -265,7 +265,6 @@
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
-mod icons;
 mod player;
 mod playlist;
 mod style;

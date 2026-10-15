@@ -11,61 +11,75 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 
+[workspace.dependencies]
+# ── Leptos stack ──────────────────────────────────────────────────────────
+leptos        = "0.8"
+leptos_router = "0.8"
+leptos_meta   = "0.8"
+leptos-use    = "0.19"
+
+# ── WASM / browser ────────────────────────────────────────────────────────
+wasm-bindgen = "0.2"
+web-sys      = "0.3"
+
+# ── Serialization ─────────────────────────────────────────────────────────
+serde      = "1"
+serde_json = "1"
+uuid       = "1"
+
+# ── Internal ──────────────────────────────────────────────────────────────
+icons               = { path = "crates/icons" }
+leptos_media_player = { path = "crates/leptos_media_player" }
+leptos_outcome      = { path = "crates/leptos_outcome" }
+
 [package]
-name = "homex"
+name              = "homex"
 version.workspace = true
 edition.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
-[workspace.dependencies]
-leptos = "0.8"
-leptos-use = "0.19"
-wasm-bindgen = "0.2"
-web-sys = "0.3"
-serde = "1"
-uuid = "1"
-serde_json = "1"
-icons               = { path = "crates/icons" }
 
 [dependencies]
-leptos                 = { workspace = true }
-leptos_router          = { version = "0.8.0" }
-leptos_meta            = { version = "0.8.0" }
-axum                   = { version = "0.8.0", optional = true }
-console_error_panic_hook = { version = "0.1", optional = true }
-leptos_axum            = { version = "0.8.0", optional = true }
-tokio                  = { version = "1", features = ["rt-multi-thread","process","io-util","fs","signal"], optional = true }
-gloo-timers            = { version = "0.4.0", features = ["futures"] }
-wasm-bindgen           = { workspace = true, optional = true }
-web-sys                = { workspace = true, features = [
+leptos        = { workspace = true }
+leptos_router = { workspace = true }
+leptos_meta   = { workspace = true }
+leptos-use    = { workspace = true }
+serde         = { workspace = true, features = ["derive"] }
+uuid          = { workspace = true, features = ["v4", "serde", "js"] }
+wasm-bindgen  = { workspace = true, optional = true }
+
+web-sys = { workspace = true, features = [
     "Blob", "Document", "Element", "Event", "File", "FileList", "FormData",
     "HtmlFormElement", "HtmlInputElement", "HtmlSelectElement",
     "HtmlVideoElement", "MouseEvent", "SubmitEvent", "Url",
 ] }
-serde                  = { workspace = true, features = ["derive"] }
-tower-http             = { version = "0.6.0", features = ["fs"], optional = true }
-leptos-use             = { workspace = true }
-server_fn              = { version = "0.8.13", features = ["multipart"] }
-toml                   = { version = "1", optional = true }
-tower                  = { version = "0.5", optional = true }
-tokio-util             = { version = "0.7", optional = true }
-http-body-util         = { version = "0.1", optional = true }
-multer                 = { version = "3", optional = true }
-infer                  = { version = "0.16", optional = true }
-slug                   = { version = "0.1", optional = true }
-tempfile               = { version = "3", optional = true }
-uuid                   = { workspace = true, features = ["v4", "serde", "js"] }
 
-# ── Local, editable copies ────────────────────────────────────────────────
-leptos_media_player = { path = "crates/leptos_media_player" }
-leptos_outcome      = { path = "crates/leptos_outcome" }
+# Internal, editable copies
 icons               = { workspace = true }
+leptos_media_player = { workspace = true }
+leptos_outcome      = { workspace = true }
 
-sqlx = { version = "0.9", default-features = false, features = [
+# ── Everything else, unchanged ────────────────────────────────────────────
+axum                     = { version = "0.8.0", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+leptos_axum              = { version = "0.8.0", optional = true }
+tokio                    = { version = "1", features = ["rt-multi-thread","process","io-util","fs","signal"], optional = true }
+gloo-timers              = { version = "0.4.0", features = ["futures"] }
+tower-http               = { version = "0.6.0", features = ["fs"], optional = true }
+server_fn                = { version = "0.8.13", features = ["multipart"] }
+toml                     = { version = "1", optional = true }
+tower                    = { version = "0.5", optional = true }
+tokio-util               = { version = "0.7", optional = true }
+http-body-util           = { version = "0.1", optional = true }
+multer                   = { version = "3", optional = true }
+infer                    = { version = "0.16", optional = true }
+slug                     = { version = "0.1", optional = true }
+tempfile                 = { version = "3", optional = true }
+sqlx                     = { version = "0.9", default-features = false, features = [
     "runtime-tokio", "sqlite", "uuid", "macros", "migrate",
 ], optional = true }
-# 
+
 [features]
 hydrate = [
     "leptos/hydrate",

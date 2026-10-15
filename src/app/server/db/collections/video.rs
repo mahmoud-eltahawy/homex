@@ -343,7 +343,7 @@ pub(super) async fn delete_cascade(
         .execute(&mut *tx)
         .await?;
 
-    let media_paths = purge_orphan_files(&mut *tx, file_ids).await?;
+    let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
 
     tx.commit().await?;
     Ok(CollectionDeletion {

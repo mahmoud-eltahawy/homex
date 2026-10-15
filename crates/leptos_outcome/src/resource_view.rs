@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::error::{ErrorView, UserFacingError};
-use crate::icons::LoadingIcon;
+use icons::outcome::LoadingIcon;
 
 /// Render a [`Resource<Result<T, E>>`](leptos::prelude::Resource) as loading,
 /// success, or error.

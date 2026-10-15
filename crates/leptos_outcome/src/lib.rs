@@ -47,7 +47,6 @@
 
 pub mod error;
 pub mod extract;
-pub mod icons;
 pub mod resource_view;
 
 // ─── Root re-exports ──────────────────────────────────────────────────────────

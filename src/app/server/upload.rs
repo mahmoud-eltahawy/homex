@@ -84,7 +84,7 @@ async fn extract_and_insert_new_collection(
     };
     let id = *id;
 
-    let mut db = state.db.clone();
+    let db = state.db.clone();
 
     match kind {
         MediaKind::Video => {
@@ -116,7 +116,7 @@ async fn extract_and_insert_new_collection(
                 });
 
             db::insert_video_collection(
-                &mut db,
+                &db,
                 id,
                 &payload.section_slug,
                 title,
@@ -156,7 +156,7 @@ async fn extract_and_insert_new_collection(
             });
 
             db::insert_audio_collection(
-                &mut db,
+                &db,
                 id,
                 &payload.section_slug,
                 title,

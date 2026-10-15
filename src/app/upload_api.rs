@@ -48,14 +48,14 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     };
     use crate::app::server::{AppState, db};
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
 
     // Generate the id before parsing so a new-collection payload can
     // reference it (the poster filename embeds it).
     let next_id = Uuid::new_v4();
     let payload = parse_upload_multipart(data, next_id).await?;
 
-    let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
+    let kind_str = db::fetch_section_kind(&state.db, &payload.section_slug)
         .await
         .context("fetch section kind for upload")?
         .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;

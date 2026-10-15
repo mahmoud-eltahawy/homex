@@ -9,7 +9,7 @@ use leptos::prelude::*;
 
 use crate::ContextBundle;
 use crate::MediaItem;
-use crate::icons::{DeleteIcon, DownloadIcon, EditIcon, PlayIcon};
+use icons::{DeleteIcon, DownloadIcon, EditIcon, player::PlayIcon};
 
 use super::{PlaylistConfig, use_edit_mode};
 
