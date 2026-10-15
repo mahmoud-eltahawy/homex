@@ -1,20 +1,13 @@
 //! Centralized error reporting.
 //!
-//! `AppError` is the error type returned by every `#[server]` function. It
-//! carries two faces:
+//! `AppError` carries two faces:
 //!
-//!   * the **user message** — the only thing that crosses the wire,
-//!   * the **diagnostic**   — full detail, logged server-side, never sent.
+//! * the **code** — a serializable enum shared by client and server,
+//! * the **diagnostic** — full detail, logged server-side, never sent.
 //!
-//! Public errors (validation, not-found, "title required") log at `WARN` on
-//! the server so they show up without looking like crashes. Internal errors
-//! log at `ERROR` with the context and source; the client sees a generic
-//! message.
-//!
-//! `AppError` implements [`server_fn::error::FromServerFnError`], so it can
-//! be used directly as the error type of a `#[server]` function. The
-//! `message` and `disposition` fields are serialized; the `diagnostic` is
-//! not — it never leaves the server.
+//! The message the user reads is derived from `ErrorCode` on demand by
+//! [`AppError::user_message`]. That method is the single source of truth
+//! for what each error says.
 
 use std::fmt::{self, Display};
 
@@ -22,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::constants::messages;
 
-// ─── Disposition ─────────────────────────────────────────────────────────────
+// ─── Disposition ──────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Disposition {
@@ -32,7 +25,64 @@ pub enum Disposition {
     Fatal,
 }
 
-// ─── Log level ───────────────────────────────────────────────────────────────
+// ─── ErrorCode ────────────────────────────────────────────────────────────
+
+/// Every catalogued error the app can produce. The client renders these
+/// by matching on the code, so the wire form and the display form are
+/// guaranteed to agree.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ErrorCode {
+    // Resources
+    CollectionNotFound,
+    SectionNotFound,
+    FileNotFound,
+    JobNotFound,
+
+    // Validation
+    TitleRequired,
+    NameRequired,
+    InvalidToken,
+    InvalidPath,
+
+    // Upload
+    NoFilesReceived,
+    NoImageReceived,
+    SectionSlugMissing,
+    TargetMissing,
+    MediaKindMismatch,
+    UnsupportedFormat,
+
+    // Sections
+    SectionNotEmpty {
+        collection_count: usize,
+    },
+    UniqueSectionIdFailed,
+
+    // Classify
+    ClassificationInProgress,
+    NoFoldersSelected,
+    NoFilesFound,
+    NotAFolder,
+    NotAFile,
+    TooManyFolders {
+        count: usize,
+        max: usize,
+    },
+
+    // Poster
+    ImageTooLarge {
+        mb: usize,
+    },
+
+    /// A user-safe message with runtime detail the catalogue can't express
+    /// as a fixed string. The client displays it verbatim.
+    Detailed(String),
+
+    /// Generic "something went wrong"; the diagnostic field carries detail.
+    Internal,
+}
+
+// ─── Log level ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogLevel {
@@ -52,102 +102,132 @@ impl LogLevel {
             Self::Error => leptos::logging::error!("[error] {msg}"),
         }
     }
-
-    /// No-op on the client — error logging is a server concern.
     #[cfg(not(feature = "ssr"))]
     fn emit(self, _msg: &str) {}
 }
 
-// ─── AppError ────────────────────────────────────────────────────────────────
+// ─── AppError ─────────────────────────────────────────────────────────────
 
-/// The error type returned by every `#[server]` function.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppError {
-    /// What the client will see. Always safe to display.
-    pub message: String,
-    /// Whether retrying the same operation could succeed.
+    pub code: ErrorCode,
     pub disposition: Disposition,
-    /// Full diagnostic. `None` for purely public errors. Never serialized.
     #[serde(skip)]
     pub diagnostic: Option<String>,
 }
 
-// ─── UserFacingError bridge ───────────────────────────────────────────────────
+// ─── Message rendering ────────────────────────────────────────────────────
+
+impl AppError {
+    /// The text shown to the user. Runs on the client; also used by
+    /// [`Display`].
+    pub fn user_message(&self) -> String {
+        use ErrorCode as E;
+        match &self.code {
+            E::CollectionNotFound => messages::COLLECTION_NOT_FOUND.into(),
+            E::SectionNotFound => messages::SECTION_NOT_FOUND.into(),
+            E::FileNotFound => messages::FILE_NOT_FOUND.into(),
+            E::JobNotFound => messages::JOB_NOT_FOUND.into(),
+
+            E::TitleRequired => messages::TITLE_REQUIRED.into(),
+            E::NameRequired => messages::NAME_REQUIRED.into(),
+            E::InvalidToken => messages::INVALID_TOKEN.into(),
+            E::InvalidPath => messages::INVALID_PATH.into(),
+
+            E::NoFilesReceived => messages::NO_FILES_RECEIVED.into(),
+            E::NoImageReceived => messages::NO_IMAGE_RECEIVED.into(),
+            E::SectionSlugMissing => messages::SECTION_SLUG_MISSING.into(),
+            E::TargetMissing => messages::UPLOAD_TARGET_MISSING.into(),
+            E::MediaKindMismatch => messages::MEDIA_KIND_MISMATCH.into(),
+            E::UnsupportedFormat => messages::UNSUPPORTED_FORMAT.into(),
+
+            E::SectionNotEmpty { collection_count } => format!(
+                "{} ({} collection{})",
+                messages::SECTION_NOT_EMPTY,
+                collection_count,
+                if *collection_count == 1 { "" } else { "s" },
+            ),
+            E::UniqueSectionIdFailed => messages::UNIQUE_SECTION_ID_FAILED.into(),
+
+            E::ClassificationInProgress => messages::CLASSIFICATION_IN_PROGRESS.into(),
+            E::NoFoldersSelected => messages::NO_FOLDERS_SELECTED.into(),
+            E::NoFilesFound => messages::NO_FILES_FOUND.into(),
+            E::NotAFolder => messages::NOT_A_FOLDER.into(),
+            E::NotAFile => messages::NOT_A_FILE.into(),
+            E::TooManyFolders { count, max } => {
+                format!("Too many folders selected ({count}). Classify at most {max} at a time.")
+            }
+
+            E::ImageTooLarge { mb } => format!("Image size exceeds {mb} MB"),
+
+            E::Detailed(s) => s.clone(),
+            E::Internal => messages::INTERNAL_ERROR.into(),
+        }
+    }
+}
+
+// ─── UserFacingError bridge ───────────────────────────────────────────────
 
 impl leptos_outcome::UserFacingError for AppError {
     fn message(&self) -> String {
-        self.message.clone()
+        AppError::user_message(self)
     }
-
     fn is_fatal(&self) -> bool {
         matches!(self.disposition, Disposition::Fatal)
     }
 }
 
-impl AppError {
-    // ─── Constructors ─────────────────────────────────────────────────────
+// ─── Constructors ─────────────────────────────────────────────────────────
 
-    /// Public error. Message is safe to display, no hidden diagnostic.
-    /// Logged at `WARN` on the server.
-    ///
-    /// Disposition defaults to `Fatal` (a validation failure won't fix
-    /// itself on retry). Chain [`.transient()`] if it should be retryable.
-    pub fn public(msg: impl Into<String>) -> Self {
-        let message = msg.into();
-        LogLevel::Warn.emit(&format!("[public] {message}"));
+impl AppError {
+    /// A catalogued public error. Logged at `WARN` on the server.
+    pub fn public(code: ErrorCode) -> Self {
+        LogLevel::Warn.emit(&format!("[public] {code:?}"));
         Self {
-            message,
+            code,
             disposition: Disposition::Fatal,
             diagnostic: None,
         }
     }
 
-    /// Internal error. Client sees `messages::INTERNAL_ERROR`; the real cause
-    /// is logged at `ERROR` with `context` prefixed.
+    /// A public error carrying a message that isn't in the catalogue.
+    /// Use sparingly — prefer adding a code.
+    pub fn detailed(msg: impl Into<String>) -> Self {
+        Self::public(ErrorCode::Detailed(msg.into()))
+    }
+
+    /// Internal error. Client sees a generic message; cause is logged at
+    /// `ERROR` with `context` prefixed.
     pub fn internal(context: impl Into<String>, source: impl Display) -> Self {
         let diagnostic = format!("{}: {}", context.into(), source);
         LogLevel::Error.emit(&diagnostic);
         Self {
-            message: messages::INTERNAL_ERROR.into(),
+            code: ErrorCode::Internal,
             disposition: Disposition::Transient,
             diagnostic: Some(diagnostic),
         }
     }
 
-    /// Internal error with a custom user-facing message.
-    pub fn hidden(
-        user_msg: impl Into<String>,
-        context: impl Into<String>,
-        source: impl Display,
-    ) -> Self {
+    /// Internal error with a specific user-facing code.
+    pub fn hidden(code: ErrorCode, context: impl Into<String>, source: impl Display) -> Self {
         let diagnostic = format!("{}: {}", context.into(), source);
         LogLevel::Error.emit(&diagnostic);
         Self {
-            message: user_msg.into(),
+            code,
             disposition: Disposition::Fatal,
             diagnostic: Some(diagnostic),
         }
     }
 
-    /// `"<what> not found"` — a 404-style public error.
-    pub fn not_found(what: &str) -> Self {
-        Self::public(format!("{what} not found"))
+    /// Alias for `public` — documents validation intent.
+    pub fn validation(code: ErrorCode) -> Self {
+        Self::public(code)
     }
 
-    /// Public validation failure. Alias for `public` — documents intent.
-    pub fn validation(msg: impl Into<String>) -> Self {
-        Self::public(msg)
-    }
-
-    // ─── Builder ──────────────────────────────────────────────────────────
-
-    /// Mark this error retryable.
     pub fn transient(mut self) -> Self {
         self.disposition = Disposition::Transient;
         self
     }
-
-    /// Mark this error as not worth retrying.
     pub fn fatal(mut self) -> Self {
         self.disposition = Disposition::Fatal;
         self
@@ -156,13 +236,13 @@ impl AppError {
 
 impl Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&self.user_message())
     }
 }
 
 impl std::error::Error for AppError {}
 
-// ─── FromServerFnError ───────────────────────────────────────────────────────
+// ─── FromServerFnError ────────────────────────────────────────────────────
 
 impl server_fn::error::FromServerFnError for AppError {
     type Encoder = server_fn::codec::JsonEncoding;
@@ -171,16 +251,15 @@ impl server_fn::error::FromServerFnError for AppError {
         let diagnostic = format!("server_fn: {value:?}");
         LogLevel::Error.emit(&diagnostic);
         Self {
-            message: messages::INTERNAL_ERROR.into(),
+            code: ErrorCode::Internal,
             disposition: Disposition::Transient,
             diagnostic: Some(diagnostic),
         }
     }
 }
 
-// ─── Conversions for common error types ──────────────────────────────────────
+// ─── Conversions ──────────────────────────────────────────────────────────
 
-/// Framework-level multipart errors become internal errors with context.
 #[cfg(feature = "ssr")]
 impl From<multer::Error> for AppError {
     fn from(e: multer::Error) -> Self {
@@ -188,13 +267,8 @@ impl From<multer::Error> for AppError {
     }
 }
 
-// ─── Context extension ───────────────────────────────────────────────────────
+// ─── Context extension ────────────────────────────────────────────────────
 
-/// Attach context to any fallible operation, mapping the error into an
-/// `AppError::internal`.
-///
-///     let row = toasty::create!(...).exec(db).await
-///         .context("insert collection")?;
 pub trait ErrorContext<T> {
     fn context(self, ctx: impl Into<String>) -> Result<T, AppError>;
 }

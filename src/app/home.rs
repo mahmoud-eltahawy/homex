@@ -407,22 +407,22 @@ fn CollectionStrip(collections: Vec<Collection>) -> impl IntoView {
 #[derive(Clone, Copy)]
 struct NewSectionFormState {
     title: RwSignal<String>,
-    kind: RwSignal<String>,
+    kind: RwSignal<MediaKind>,
     nested: RwSignal<bool>,
     client_error: RwSignal<Option<String>>,
-    create: Action<(String, String, bool), Result<Uuid, AppError>>,
+    create: Action<(String, MediaKind, bool), Result<Uuid, AppError>>,
 }
 
 fn use_new_section_form(
     sections_resource: Resource<Result<Vec<Section>, AppError>>,
 ) -> NewSectionFormState {
     let title = RwSignal::new(String::new());
-    let kind = RwSignal::new("video".to_string());
+    let kind = RwSignal::new(MediaKind::Video);
     let nested = RwSignal::new(false);
     let client_error = RwSignal::new(None::<String>);
 
-    let create = Action::new_local(|(t, k, n): &(String, String, bool)| {
-        create_section(t.clone(), k.clone(), *n)
+    let create = Action::new_local(|(t, k, n): &(String, MediaKind, bool)| {
+        create_section(t.clone(), *k, *n)
     });
 
     refetch_on_success(create, sections_resource);
@@ -478,8 +478,12 @@ fn NewSectionForm(sections_resource: Resource<Result<Vec<Section>, AppError>>) -
                 <label class="flex flex-col text-sm">
                     <span class="mb-1 text-gray-300">"Type"</span>
                     <select
-                        prop:value=move || state.kind.get()
-                        on:change=move |e| state.kind.set(event_target_value(&e))
+                        prop:value=move || state.kind.get().as_str().to_string()
+                        on:change=move |e| {
+                            if let Ok(k) = MediaKind::try_from(event_target_value(&e).as_str()) {
+                                state.kind.set(k);
+                            }
+                        }
                         class="bg-white/10 rounded-lg px-3 py-1.5 text-white"
                     >
                         <option value="video">"Video"</option>

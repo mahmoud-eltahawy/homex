@@ -48,6 +48,7 @@ leptos-use    = { workspace = true }
 serde         = { workspace = true, features = ["derive"] }
 uuid          = { workspace = true, features = ["v4", "serde", "js"] }
 wasm-bindgen  = { workspace = true, optional = true }
+serde_json    = { workspace = true }
 
 web-sys = { workspace = true, features = [
     "Blob", "Document", "Element", "Event", "File", "FileList", "FormData",

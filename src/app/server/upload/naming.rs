@@ -6,7 +6,7 @@
 
 pub use slug::slugify;
 
-use crate::app::error::AppError;
+use crate::app::error::{AppError, ErrorCode};
 
 // ─── Filename helpers ─────────────────────────────────────────────────────
 
@@ -35,8 +35,6 @@ pub fn extension_of(filename: &str) -> String {
     }
 }
 
-/// Validate a relative path against `..` and empty segments. Returns the
-/// normalised path with leading/trailing slashes stripped.
 pub fn sanitize_rel(rel: &str) -> Result<String, AppError> {
     let trimmed = rel.trim_matches('/');
     if trimmed.is_empty() {
@@ -44,7 +42,7 @@ pub fn sanitize_rel(rel: &str) -> Result<String, AppError> {
     }
     for part in trimmed.split('/') {
         if part.is_empty() || part == "." || part == ".." {
-            return Err(AppError::public("Invalid path"));
+            return Err(AppError::public(ErrorCode::InvalidPath));
         }
     }
     Ok(trimmed.to_string())

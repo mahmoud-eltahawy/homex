@@ -4,20 +4,19 @@ use leptos_outcome::ErrorView;
 use leptos_outcome::action_error;
 use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
 
-#[cfg(feature = "ssr")]
-use crate::app::constants::{auth as auth_consts, messages};
-
 #[server(endpoint = "login")]
 pub async fn login(token: String) -> Result<(), AppError> {
+    use crate::app::constants::auth as auth_consts;
+    use crate::app::error::ErrorCode;
     use crate::app::server::auth::expected_token;
     use axum::http::header;
     use leptos_axum::ResponseOptions;
 
     let Some(expected) = expected_token() else {
-        return Err(AppError::public("Authentication is disabled"));
+        return Err(AppError::detailed("Authentication is disabled"));
     };
     if token != expected {
-        return Err(AppError::public(messages::INVALID_TOKEN));
+        return Err(AppError::public(ErrorCode::InvalidToken));
     }
 
     let cookie = format!(

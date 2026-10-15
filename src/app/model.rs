@@ -23,34 +23,52 @@ where
 
 // ─── Search parsing (SSR only) ────────────────────────────────────────────────
 
-#[cfg(feature = "ssr")]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+// Remove `#[cfg(feature = "ssr")]` from SearchQuery's derives and from
+// `parse_search`; delete `parse_search` entirely.
+
+// ─── CollectionField ──────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CollectionField {
+    Title,
+    Description,
+    Poster,
+}
+
+// ─── SearchQuery ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchQuery {
     pub tags: Vec<String>,
     pub text: Option<String>,
 }
 
-#[cfg(feature = "ssr")]
-pub fn parse_search(raw: &str) -> SearchQuery {
-    let mut tags: Vec<String> = Vec::new();
-    let mut words: Vec<&str> = Vec::new();
+impl SearchQuery {
+    pub fn parse(raw: &str) -> Self {
+        let mut tags: Vec<String> = Vec::new();
+        let mut words: Vec<&str> = Vec::new();
 
-    for word in raw.split_whitespace() {
-        match word.strip_prefix('#') {
-            Some(tag) if !tag.is_empty() => tags.push(tag.to_string()),
-            _ => words.push(word),
+        for word in raw.split_whitespace() {
+            match word.strip_prefix('#') {
+                Some(tag) if !tag.is_empty() => tags.push(tag.to_string()),
+                _ => words.push(word),
+            }
         }
+
+        tags.sort();
+        tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+
+        let text = if words.is_empty() {
+            None
+        } else {
+            Some(words.join(" "))
+        };
+        SearchQuery { tags, text }
     }
 
-    tags.sort();
-    tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-
-    let text = if words.is_empty() {
-        None
-    } else {
-        Some(words.join(" "))
-    };
-    SearchQuery { tags, text }
+    pub fn is_empty(&self) -> bool {
+        self.tags.is_empty() && self.text.is_none()
+    }
 }
 
 // ─── MediaKind ────────────────────────────────────────────────────────────────

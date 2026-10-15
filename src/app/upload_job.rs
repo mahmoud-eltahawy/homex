@@ -79,7 +79,7 @@ async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
                 consecutive_errors += 1;
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                     signals.status.set(Some(ConversionStatus::Failed(
-                        AppError::public("Lost contact with the server").transient(),
+                        AppError::detailed("Lost contact with the server").transient(),
                     )));
                     break;
                 }
@@ -130,6 +130,7 @@ impl UploadJob {
         Self::build()
     }
 
+    #[doc(alias = "new")]
     pub fn new_for_new_collection() -> Self {
         Self::build()
     }
@@ -161,11 +162,7 @@ impl UploadJob {
         action_error(self.action)
     }
 
-    /// True when the upload finished successfully. For the new-collection
-    /// flow this drives the navigate-on-completion effect.
     pub fn is_terminal_success(&self) -> bool {
-        // Sync path: done_tick incremented on dispatch result Ok.
-        // Async path: polling sees ConversionStatus::Done and bumps done_tick.
         self.done_tick.get() > 0
     }
 }

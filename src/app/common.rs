@@ -1,7 +1,7 @@
 use crate::app::collections::{fetch_collections, fetch_collections_count};
 use crate::app::error::AppError;
 use crate::app::icons::EmptyStateIcon;
-use crate::app::model::Collection;
+use crate::app::model::{Collection, SearchQuery};
 use crate::app::tags::TagList;
 use leptos::prelude::*;
 use serde::Serialize;
@@ -117,7 +117,11 @@ pub fn collections_paginated(
             if skip_now {
                 Ok(Vec::new())
             } else {
-                fetch_collections(s, off, page_size, q).await
+                let parsed = q
+                    .as_deref()
+                    .map(SearchQuery::parse)
+                    .filter(|sq| !sq.is_empty());
+                fetch_collections(s, off, page_size, parsed).await
             }
         },
     );
@@ -125,7 +129,13 @@ pub fn collections_paginated(
     let slug_count = slug;
     let count = Resource::new(
         move || (slug_count(), search.get()),
-        |(s, q)| fetch_collections_count(s, q),
+        |(s, q)| async move {
+            let parsed = q
+                .as_deref()
+                .map(SearchQuery::parse)
+                .filter(|sq| !sq.is_empty());
+            fetch_collections_count(s, parsed).await
+        },
     );
 
     (items, count)

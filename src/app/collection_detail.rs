@@ -10,13 +10,6 @@ use web_sys::wasm_bindgen::JsCast;
 
 use leptos_media_player::{MediaItem, WatchPage};
 
-use crate::app::multipart;
-use crate::app::multipart::COLLECTION_ID;
-use crate::app::multipart::POSTER_FILE;
-use crate::app::multipart::POSTER_ID;
-use crate::app::multipart::POSTER_SECTION;
-use crate::app::multipart::SEASON_NUMBER;
-use crate::app::multipart::SECTION_SLUG;
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
@@ -29,18 +22,22 @@ use crate::app::{
     error::AppError,
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
-    model::{Collection, CollectionSummary, Item, MediaKind, Section},
+    model::{Collection, CollectionField, CollectionSummary, Item, MediaKind, Section},
     route_params::{use_optional_uuid_param, use_string_param, use_uuid_param},
     sections::fetch_section_by_slug,
     tags::TagEditor,
     unclassified::move_items_to_incoming,
     upload_job::{UploadJob, UploadProgress},
+    upload_types::{
+        FILE_FIELD, FORM_FIELD, POSTER_FIELD, PosterUploadForm, UploadFileMeta, UploadForm,
+        UploadTarget, audio_accept_attr, video_accept_attr,
+    },
 };
 use leptos_outcome::ErrorView;
 
 // ─── Action type aliases ──────────────────────────────────────────────────
 
-type PatchAction = Action<(Uuid, String, Option<String>), Result<(), AppError>>;
+type PatchAction = Action<(Uuid, CollectionField, Option<String>), Result<(), AppError>>;
 type PosterUploadAction = Action<web_sys::FormData, Result<String, AppError>>;
 type RegenerateAction = Action<(String, Uuid), Result<String, AppError>>;
 type RenameItemAction = Action<(Uuid, String), Result<(), AppError>>;
@@ -63,9 +60,11 @@ struct CollectionActions {
 
 impl CollectionActions {
     fn new(items: Resource<Result<Vec<Item>, AppError>>) -> Self {
-        let patch = Action::new_local(|(id, field, value): &(Uuid, String, Option<String>)| {
-            patch_collection_field(*id, field.clone(), value.clone())
-        });
+        let patch = Action::new_local(
+            |(id, field, value): &(Uuid, CollectionField, Option<String>)| {
+                patch_collection_field(*id, *field, value.clone())
+            },
+        );
         let poster_upload =
             Action::new_local(|fd: &web_sys::FormData| upload_collection_poster(fd.clone().into()));
         let regenerate = Action::new_local(|(slug, id): &(String, Uuid)| {
@@ -157,12 +156,12 @@ impl CollectionEditState {
 
         let commit_title = Callback::new(move |v: String| {
             title.set(v.clone());
-            patch.dispatch((collection_id, "title".into(), Some(v)));
+            patch.dispatch((collection_id, CollectionField::Title, Some(v)));
         });
         let commit_desc = Callback::new(move |v: String| {
             description.set(v.clone());
             let val = if v.is_empty() { None } else { Some(v) };
-            patch.dispatch((collection_id, "description".into(), val));
+            patch.dispatch((collection_id, CollectionField::Description, val));
         });
 
         Self {
@@ -185,9 +184,13 @@ fn use_poster_upload(
 ) -> Callback<web_sys::File> {
     let on_file = Callback::new(move |file: web_sys::File| {
         let fd = web_sys::FormData::new().unwrap();
-        let _ = fd.append_with_str(POSTER_SECTION, &section_slug);
-        let _ = fd.append_with_str(POSTER_ID, &collection_id.to_string());
-        let _ = fd.append_with_blob_and_filename(POSTER_FILE, &file, &file.name());
+        let form = PosterUploadForm {
+            section_slug: section_slug.clone(),
+            collection_id,
+        };
+        let json = serde_json::to_string(&form).expect("PosterUploadForm is serializable");
+        let _ = fd.append_with_str(FORM_FIELD, &json);
+        let _ = fd.append_with_blob_and_filename(POSTER_FIELD, &file, &file.name());
         poster_upload.dispatch(fd);
     });
 
@@ -339,7 +342,6 @@ fn CollectionContent(
     let slug_for_picker = section_slug.clone();
     let slug_for_append = section_slug;
 
-    // Audio: manual picker.
     let on_poster_file = use_poster_upload(
         slug_for_poster,
         collection_id,
@@ -347,7 +349,6 @@ fn CollectionContent(
         actions.poster_upload,
     );
 
-    // Video: regenerate.
     let on_regenerate = Callback::new(move |_: ()| {
         actions
             .regenerate
@@ -518,12 +519,18 @@ fn CollectionContent(
 
 // ─── Append items ─────────────────────────────────────────────────────────
 
-fn accept_for_kind(is_audio: bool) -> &'static str {
+fn accept_for_kind(is_audio: bool) -> String {
     if is_audio {
-        ".mp3,.m4a,.flac,.wav,.ogg,.opus,.aac"
+        audio_accept_attr()
     } else {
-        ".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts"
+        video_accept_attr()
     }
+}
+
+fn file_stem(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(s, _)| s.to_string())
+        .unwrap_or_else(|| name.to_string())
 }
 
 fn build_append_formdata(
@@ -533,21 +540,33 @@ fn build_append_formdata(
     season: Option<i64>,
 ) -> web_sys::FormData {
     let fd = web_sys::FormData::new().unwrap();
-    let _ = fd.append_with_str(SECTION_SLUG, section_slug);
-    let _ = fd.append_with_str(COLLECTION_ID, &collection_id.to_string());
 
-    if let Some(season) = season {
-        let _ = fd.append_with_str(SEASON_NUMBER, &season.to_string());
-    }
-
+    let mut metas: Vec<UploadFileMeta> = Vec::with_capacity(files.length() as usize);
+    let mut file_vec: Vec<web_sys::File> = Vec::with_capacity(files.length() as usize);
     for i in 0..files.length() {
         if let Some(f) = files.get(i) {
             let file: web_sys::File = f.unchecked_into();
             let name = file.name();
-            let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-            let _ = fd.append_with_blob_and_filename(&multipart::file(i as usize), &file, &name);
-            let _ = fd.append_with_str(&multipart::file_title(i as usize), &stem);
+            metas.push(UploadFileMeta {
+                filename: name.clone(),
+                title: file_stem(&name),
+            });
+            file_vec.push(file);
         }
+    }
+
+    let form = UploadForm {
+        section_slug: section_slug.to_string(),
+        target: UploadTarget::Existing { collection_id },
+        season_number: season,
+        files: metas,
+        has_poster: false,
+    };
+
+    let json = serde_json::to_string(&form).expect("UploadForm is serializable");
+    let _ = fd.append_with_str(FORM_FIELD, &json);
+    for file in &file_vec {
+        let _ = fd.append_with_blob_and_filename(FILE_FIELD, file, &file.name());
     }
     fd
 }
@@ -610,7 +629,7 @@ fn AppendItems(
     let upload_status = upload.status;
     let upload_error = upload.error();
 
-    let accept = accept_for_kind(is_audio);
+    let accept_sv = StoredValue::new(accept_for_kind(is_audio));
     let on_files = make_file_input_handler(
         upload,
         section_slug,
@@ -629,7 +648,7 @@ fn AppendItems(
                     id=input_id
                     class="hidden"
                     multiple
-                    accept=accept
+                    accept=move || accept_sv.get_value()
                     on:change=move |ev| on_files.run(ev)
                 />
                 <label
@@ -727,9 +746,6 @@ fn Playlist(
             })
             .collect();
 
-        // `WatchPage` collapses the playlist panel — and its download control
-        // — when there is a single entry. Render a download button ourselves
-        // in that case so the file is still reachable.
         let single_item_download = if filtered.len() == 1 {
             let item = &filtered[0];
             Some((item.file_path(), item.display_title()))
@@ -926,9 +942,8 @@ fn OrganizeItemsPanel(
     media_kind: MediaKind,
     on_close: Callback<()>,
 ) -> impl IntoView {
-    let kind_str = media_kind.as_str().to_string();
     let destinations: Resource<Result<Vec<CollectionSummary>, AppError>> =
-        Resource::new(move || kind_str.clone(), fetch_collection_summaries);
+        Resource::new(move || media_kind, fetch_collection_summaries);
 
     let selected: RwSignal<Vec<Uuid>> = RwSignal::new(Vec::new());
     let destination_id: RwSignal<Option<Uuid>> = RwSignal::new(None);
@@ -1012,7 +1027,7 @@ fn OrganizeItemsPanel(
                     }.into_any(),
                     Some(Err(e)) => view! {
                         <div class="py-8 text-center text-red-300 text-sm">
-                            {e.message}
+                            {e.user_message()}
                         </div>
                     }.into_any(),
                     Some(Ok(list)) if list.is_empty() => view! {

@@ -31,19 +31,15 @@ pub mod routes {
     pub fn section(slug: &str) -> String {
         format!("{SECTION_PREFIX}{slug}")
     }
-
     pub fn collection(slug: &str, id: Uuid) -> String {
         format!("{SECTION_PREFIX}{slug}/{id}")
     }
-
     pub fn item(slug: &str, collection_id: Uuid, item_id: Uuid) -> String {
         format!("{SECTION_PREFIX}{slug}/{collection_id}/item/{item_id}")
     }
-
     pub fn media(file_id: Uuid) -> String {
         format!("{MEDIA_URL_PREFIX}{file_id}")
     }
-
     pub fn poster(subdir: &str, filename: &str) -> String {
         format!("{POSTERS_URL_PREFIX}{subdir}/{filename}")
     }
@@ -92,29 +88,47 @@ pub const STATIC_ASSET_EXTS: &[&str] = &[
 ];
 
 // ─── Server messages ──────────────────────────────────────────────────────
+//
+// Every string here is the display text for exactly one `ErrorCode`. The
+// mapping lives in `crate::app::error::AppError::user_message`.
 
 pub mod messages {
     pub const INTERNAL_ERROR: &str = "Internal error";
 
-    pub const COLLECTION_NOT_FOUND: &str = "collection not found";
-    pub const SECTION_NOT_FOUND: &str = "section not found";
-    pub const JOB_NOT_FOUND: &str = "job not found";
-    pub const UNKNOWN_FIELD: &str = "unknown field";
+    // Resources
+    pub const COLLECTION_NOT_FOUND: &str = "Collection not found";
+    pub const SECTION_NOT_FOUND: &str = "Section not found";
+    pub const FILE_NOT_FOUND: &str = "File not found";
+    pub const JOB_NOT_FOUND: &str = "Job not found";
 
+    // Validation
     pub const TITLE_REQUIRED: &str = "Title is required";
     pub const NAME_REQUIRED: &str = "Name is required";
+    pub const INVALID_TOKEN: &str = "Invalid token";
+    pub const INVALID_PATH: &str = "Invalid path";
 
+    // Upload
     pub const NO_FILES_RECEIVED: &str = "No files were received";
     pub const NO_IMAGE_RECEIVED: &str = "No image was received";
     pub const SECTION_SLUG_MISSING: &str = "section_slug is missing";
-
-    pub const UNIQUE_SECTION_ID_FAILED: &str = "Could not generate a unique section identifier";
-
-    pub const INVALID_TOKEN: &str = "Invalid token";
-    pub const UPLOAD_STARTED_BG: &str = "Upload and conversion started in the background";
-    pub const SECTION_NOT_EMPTY: &str =
-        "Section is not empty — move or delete its collections first";
-
+    pub const UPLOAD_TARGET_MISSING: &str = "Either collection_id or collection_title is required";
     pub const MEDIA_KIND_MISMATCH: &str =
         "Cannot move a collection across media kinds (video ↔ audio)";
+    pub const UNSUPPORTED_FORMAT: &str = "Unsupported media format";
+
+    // Sections
+    pub const SECTION_NOT_EMPTY: &str =
+        "Section is not empty — move or delete its collections first";
+    pub const UNIQUE_SECTION_ID_FAILED: &str = "Could not generate a unique section identifier";
+
+    // Classify
+    pub const CLASSIFICATION_IN_PROGRESS: &str =
+        "A classification is already running for one of these paths";
+    pub const NO_FOLDERS_SELECTED: &str = "No folders selected";
+    pub const NO_FILES_FOUND: &str = "No media files found";
+    pub const NOT_A_FOLDER: &str = "Not a folder";
+    pub const NOT_A_FILE: &str = "Not a file";
+
+    // Upload progress
+    pub const UPLOAD_STARTED_BG: &str = "Upload and conversion started in the background";
 }

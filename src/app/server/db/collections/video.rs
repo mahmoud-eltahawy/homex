@@ -5,20 +5,20 @@ use super::super::err_not_found;
 use super::super::files::purge_orphan_files;
 use super::super::tags::{collection_ids_with_all_tags, fetch_collection_tags};
 use super::{CollectionDeletion, CollectionField, CollectionMove, MoveCollectionError};
-use crate::app::model::{Collection, CollectionSummary, MediaKind, SectionRow, VideoCollectionRow};
+use crate::app::model::{
+    Collection, CollectionSummary, MediaKind, SearchQuery, SectionRow, VideoCollectionRow,
+};
 
-// ─── Read ─────────────────────────────────────────────────────────────────────
+// ─── Read ─────────────────────────────────────────────────────────────────
 
 pub(super) async fn fetch(
     pool: &SqlitePool,
     section_slug: &str,
     offset: usize,
     size: usize,
-    search: Option<&str>,
+    search: Option<&SearchQuery>,
 ) -> sqlx::Result<Vec<Collection>> {
-    use crate::app::model::parse_search;
-
-    let parsed = search.map(parse_search).unwrap_or_default();
+    let parsed = search.cloned().unwrap_or_default();
 
     let tag_ids: Option<Vec<Uuid>> = if parsed.tags.is_empty() {
         None
@@ -65,11 +65,9 @@ pub(super) async fn fetch(
 pub(super) async fn count(
     pool: &SqlitePool,
     section_slug: &str,
-    search: Option<&str>,
+    search: Option<&SearchQuery>,
 ) -> sqlx::Result<i64> {
-    use crate::app::model::parse_search;
-
-    let parsed = search.map(parse_search).unwrap_or_default();
+    let parsed = search.cloned().unwrap_or_default();
 
     let tag_ids: Option<Vec<Uuid>> = if parsed.tags.is_empty() {
         None
@@ -173,7 +171,7 @@ pub(super) async fn summaries(
     Ok(out)
 }
 
-// ─── Insert ───────────────────────────────────────────────────────────────────
+// ─── Insert ───────────────────────────────────────────────────────────────
 
 async fn next_position(conn: &mut sqlx::SqliteConnection, section_id: Uuid) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
@@ -267,7 +265,7 @@ pub(super) async fn insert(
     Ok(())
 }
 
-// ─── Field / poster updates ───────────────────────────────────────────────────
+// ─── Field / poster updates ───────────────────────────────────────────────
 
 pub(super) async fn update_field(
     pool: &SqlitePool,
@@ -294,7 +292,6 @@ pub(super) async fn update_field(
             .execute(pool)
             .await?;
         }
-        // Unreachable: video posters are set only via `set_poster`.
         CollectionField::Poster => {}
     }
     Ok(())
@@ -311,7 +308,7 @@ pub(super) async fn set_poster(pool: &SqlitePool, id: Uuid, url: &str) -> sqlx::
     Ok(())
 }
 
-// ─── Delete ───────────────────────────────────────────────────────────────────
+// ─── Delete ───────────────────────────────────────────────────────────────
 
 pub(super) async fn delete_cascade(
     pool: &SqlitePool,
@@ -343,7 +340,7 @@ pub(super) async fn delete_cascade(
         .execute(&mut *tx)
         .await?;
 
-    let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
+    let media_paths = purge_orphan_files(&mut *tx, file_ids).await?;
 
     tx.commit().await?;
     Ok(CollectionDeletion {
@@ -352,7 +349,7 @@ pub(super) async fn delete_cascade(
     })
 }
 
-// ─── Move to another section ──────────────────────────────────────────────────
+// ─── Move to another section ──────────────────────────────────────────────
 
 pub(super) async fn move_to_section(
     pool: &SqlitePool,

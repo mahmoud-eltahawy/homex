@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::app::error::AppError;
+use crate::app::error::{AppError, ErrorCode};
 use crate::app::model::MediaKind;
 use crate::app::server::AppState;
 use crate::app::server::convert::{Job, JobPhase, job_set_phase};
@@ -62,9 +62,7 @@ pub fn acquire_classify_locks(paths: Vec<PathBuf>) -> Result<ClassifyLocks, AppE
         .unwrap_or_else(|p| p.into_inner());
     for p in &paths {
         if set.contains(p) {
-            return Err(AppError::public(
-                "A classification is already running for one of these paths",
-            ));
+            return Err(AppError::public(ErrorCode::ClassificationInProgress));
         }
     }
     for p in &paths {
@@ -115,7 +113,6 @@ pub fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
     tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))
 }
 
-/// A fully-prepared file job.
 pub struct PreparedJob {
     pub name: String,
     pub job_id: String,
@@ -222,7 +219,7 @@ fn spawn_job_worker(state: AppState, p: PreparedJob) {
             }
             Err(_) => {
                 cancel.cancel();
-                let e = AppError::public("Timed out").transient();
+                let e = AppError::detailed("Timed out").transient();
                 job_set_phase(&state.jobs, Some(&p.job_id), JobPhase::Failed(e)).await;
                 schedule_job_eviction(state.jobs.clone(), p.job_id);
             }

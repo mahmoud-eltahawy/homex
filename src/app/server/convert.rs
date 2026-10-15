@@ -10,6 +10,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app::error::AppError;
 
+// ─── Container classification (re-exported from shared module) ────────────
+
+pub use crate::app::upload_types::{
+    AUDIO_CONVERTIBLE_EXTS, AUDIO_SUPPORTED_EXTS, VIDEO_CONVERTIBLE_EXTS, VIDEO_SUPPORTED_EXTS,
+    is_audio_container_supported, is_convertible_audio, is_convertible_video,
+    is_video_container_supported,
+};
+
 // ─── Job state ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -68,35 +76,6 @@ impl TargetFormat {
             Self::Mp3 => "mp3",
         }
     }
-}
-
-// ─── Container classification ─────────────────────────────────────────────
-
-pub const VIDEO_SUPPORTED_EXTS: &[&str] = &["mp4", "m4v", "webm"];
-pub const AUDIO_SUPPORTED_EXTS: &[&str] = &["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus"];
-pub const VIDEO_CONVERTIBLE_EXTS: &[&str] = &[
-    "mkv", "mov", "avi", "wmv", "flv", "ts", "mpg", "mpeg", "3gp", "ogv",
-];
-pub const AUDIO_CONVERTIBLE_EXTS: &[&str] = &["flac", "wma", "aiff", "aif", "alac", "ape"];
-
-fn in_list(list: &[&str], ext: &str) -> bool {
-    list.iter().any(|e| e.eq_ignore_ascii_case(ext))
-}
-
-pub fn is_video_container_supported(ext: &str) -> bool {
-    in_list(VIDEO_SUPPORTED_EXTS, ext)
-}
-
-pub fn is_audio_container_supported(ext: &str) -> bool {
-    in_list(AUDIO_SUPPORTED_EXTS, ext)
-}
-
-pub fn is_convertible_video(ext: &str) -> bool {
-    in_list(VIDEO_CONVERTIBLE_EXTS, ext)
-}
-
-pub fn is_convertible_audio(ext: &str) -> bool {
-    in_list(AUDIO_CONVERTIBLE_EXTS, ext)
 }
 
 // ─── ffprobe ──────────────────────────────────────────────────────────────

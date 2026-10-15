@@ -1,5 +1,5 @@
 use crate::app::constants::{routes, storage};
-use crate::app::error::AppError;
+use crate::app::error::{AppError, ErrorCode};
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -159,11 +159,16 @@ fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, Ap
         Some(kind) => kind.extension().to_string(),
         None => client_ext.to_ascii_lowercase(),
     };
+
     ALLOWED_POSTER_EXTS
         .iter()
         .find(|allowed| allowed.eq_ignore_ascii_case(&candidate))
         .copied()
-        .ok_or_else(|| AppError::public(format!("Unsupported image format: .{candidate}")))
+        .ok_or_else(|| {
+            AppError::public(ErrorCode::Detailed(format!(
+                "Unsupported image format: .{candidate}"
+            )))
+        })
 }
 
 /// Write a manually-uploaded poster. Used only by the audio path — video
@@ -176,10 +181,9 @@ pub async fn write_poster(
     bytes: &[u8],
 ) -> Result<String, AppError> {
     if bytes.len() > MAX_POSTER_BYTES {
-        return Err(AppError::public(format!(
-            "Image size exceeds {} MB",
-            MAX_POSTER_BYTES / 1024 / 1024
-        )));
+        return Err(AppError::public(ErrorCode::ImageTooLarge {
+            mb: MAX_POSTER_BYTES / 1024 / 1024,
+        }));
     }
 
     let ext = resolve_poster_ext(client_ext, bytes)?;

@@ -7,7 +7,7 @@ use super::collections::decrement_or_delete;
 use super::files::purge_orphan_files;
 use crate::app::model::Item;
 
-// ─── Item queries ─────────────────────────────────────────────────────────────
+// ─── Item queries ─────────────────────────────────────────────────────────
 
 pub async fn fetch_items(pool: &SqlitePool, collection_id: Uuid) -> sqlx::Result<Vec<Item>> {
     sqlx::query_as!(
@@ -40,7 +40,7 @@ pub async fn update_item_title(
     Ok(())
 }
 
-// ─── Reordering ───────────────────────────────────────────────────────────────
+// ─── Reordering ───────────────────────────────────────────────────────────
 
 pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
@@ -148,7 +148,7 @@ pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::
     Ok(())
 }
 
-// ─── Move items between collections ───────────────────────────────────────────
+// ─── Move items between collections ───────────────────────────────────────
 
 pub async fn move_items_to_collection(
     pool: &SqlitePool,
@@ -162,13 +162,12 @@ pub async fn move_items_to_collection(
         return Ok(());
     }
 
-    let dest_kind = kind_of(pool, to_collection_id)
+    let dest_kind: CollectionKind = kind_of(pool, to_collection_id)
         .await?
         .ok_or_else(|| super::err_not_found("collection"))?;
 
     let mut tx = pool.begin().await?;
 
-    // Verify destination exists.
     match dest_kind {
         CollectionKind::Video => {
             sqlx::query!(
@@ -221,7 +220,7 @@ pub async fn move_items_to_collection(
             Some(s) => {
                 sqlx::query_scalar!(
                     r#"SELECT COALESCE(MAX(number), -1) + 1 AS "n!: i64"
-                   FROM items WHERE collection_id = ? AND season_number = ?"#,
+                       FROM items WHERE collection_id = ? AND season_number = ?"#,
                     to_collection_id,
                     s,
                 )
@@ -231,7 +230,7 @@ pub async fn move_items_to_collection(
             None => {
                 sqlx::query_scalar!(
                     r#"SELECT COALESCE(MAX(number), -1) + 1 AS "n!: i64"
-                   FROM items WHERE collection_id = ? AND season_number IS NULL"#,
+                       FROM items WHERE collection_id = ? AND season_number IS NULL"#,
                     to_collection_id,
                 )
                 .fetch_one(&mut *tx)
@@ -249,7 +248,6 @@ pub async fn move_items_to_collection(
         .await?;
     }
 
-    // Renumber sources per season.
     for &from_id in from_counts.keys() {
         let remaining = sqlx::query_as!(
             Item,
@@ -275,7 +273,6 @@ pub async fn move_items_to_collection(
         }
     }
 
-    // Bump items_count on both source and destination.
     async fn bump(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         kind: CollectionKind,
@@ -308,7 +305,7 @@ pub async fn move_items_to_collection(
     Ok(())
 }
 
-// ─── Cascade deletion ─────────────────────────────────────────────────────────
+// ─── Cascade deletion ─────────────────────────────────────────────────────
 
 pub struct ItemDeletion {
     pub media_paths: Vec<String>,
@@ -337,8 +334,8 @@ pub async fn delete_item_cascade(pool: &SqlitePool, id: Uuid) -> sqlx::Result<It
         .execute(&mut *tx)
         .await?;
 
-    let emptied_poster = decrement_or_delete(&mut tx, collection_id, 1).await?;
-    let media_paths = purge_orphan_files(&mut tx, [file_id]).await?;
+    let emptied_poster = decrement_or_delete(&mut *tx, collection_id, 1).await?;
+    let media_paths = purge_orphan_files(&mut *tx, [file_id]).await?;
 
     tx.commit().await?;
     Ok(ItemDeletion {
@@ -382,20 +379,18 @@ pub async fn delete_items_cascade(
 
     let mut emptied_posters: Vec<String> = Vec::new();
     for (collection_id, delta) in deltas {
-        if let Some(poster) = decrement_or_delete(&mut tx, collection_id, delta).await? {
+        if let Some(poster) = decrement_or_delete(&mut *tx, collection_id, delta).await? {
             emptied_posters.push(poster);
         }
     }
 
-    let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
+    let media_paths = purge_orphan_files(&mut *tx, file_ids).await?;
     tx.commit().await?;
     Ok(BulkItemDeletion {
         media_paths,
         emptied_posters,
     })
 }
-
-// ─── Private helper row for two-column selects ────────────────────────────────
 
 #[derive(sqlx::FromRow)]
 struct _CollectionRef {

@@ -5,9 +5,12 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use super::err_not_found;
-use crate::app::model::{Collection, CollectionKind, CollectionSummary, MediaKind};
+use crate::app::model::{Collection, CollectionKind, CollectionSummary, MediaKind, SearchQuery};
 
-// ─── Kind lookups ─────────────────────────────────────────────────────────────
+// Re-export the wire-shape enum so `db::CollectionField` keeps resolving.
+pub use crate::app::model::CollectionField;
+
+// ─── Kind lookups ─────────────────────────────────────────────────────────
 
 pub(crate) async fn kind_of(pool: &SqlitePool, id: Uuid) -> sqlx::Result<Option<CollectionKind>> {
     let video_hit: i64 = sqlx::query_scalar!(
@@ -72,14 +75,14 @@ pub(crate) async fn section_kind(pool: &SqlitePool, section_slug: &str) -> sqlx:
         .map_err(|e| sqlx::Error::Protocol(format!("section has invalid media_kind: {e}")))
 }
 
-// ─── Read entry points ────────────────────────────────────────────────────────
+// ─── Read entry points ────────────────────────────────────────────────────
 
 pub async fn fetch_collections(
     pool: &SqlitePool,
     section_slug: &str,
     offset: usize,
     size: usize,
-    search: Option<&str>,
+    search: Option<&SearchQuery>,
 ) -> sqlx::Result<Vec<Collection>> {
     match section_kind(pool, section_slug).await? {
         MediaKind::Video => video::fetch(pool, section_slug, offset, size, search).await,
@@ -90,7 +93,7 @@ pub async fn fetch_collections(
 pub async fn fetch_collections_count(
     pool: &SqlitePool,
     section_slug: &str,
-    search: Option<&str>,
+    search: Option<&SearchQuery>,
 ) -> sqlx::Result<i64> {
     match section_kind(pool, section_slug).await? {
         MediaKind::Video => video::count(pool, section_slug, search).await,
@@ -151,17 +154,15 @@ pub async fn fetch_collection_any(pool: &SqlitePool, id: Uuid) -> sqlx::Result<O
 
 pub async fn fetch_collection_summaries(
     pool: &SqlitePool,
-    media_kind: &str,
+    media_kind: MediaKind,
 ) -> sqlx::Result<Vec<CollectionSummary>> {
-    match MediaKind::try_from(media_kind)
-        .map_err(|e| sqlx::Error::Protocol(format!("bad media_kind: {e}")))?
-    {
-        MediaKind::Video => video::summaries(pool, media_kind).await,
-        MediaKind::Audio => audio::summaries(pool, media_kind).await,
+    match media_kind {
+        MediaKind::Video => video::summaries(pool, media_kind.as_str()).await,
+        MediaKind::Audio => audio::summaries(pool, media_kind.as_str()).await,
     }
 }
 
-// ─── Insert entry points ──────────────────────────────────────────────────────
+// ─── Insert entry points ──────────────────────────────────────────────────
 
 pub async fn insert_video_collection(
     pool: &SqlitePool,
@@ -187,7 +188,7 @@ pub async fn insert_audio_collection(
     audio::insert(pool, id, section_slug, title, description, tags, poster).await
 }
 
-// ─── Field / poster updates ───────────────────────────────────────────────────
+// ─── Field / poster updates ───────────────────────────────────────────────
 
 pub async fn update_collection_field(
     pool: &SqlitePool,
@@ -223,7 +224,7 @@ pub async fn set_collection_poster(
     }
 }
 
-// ─── Delete / move ────────────────────────────────────────────────────────────
+// ─── Delete / move ────────────────────────────────────────────────────────
 
 pub async fn delete_collection_cascade(
     pool: &SqlitePool,
@@ -253,7 +254,7 @@ pub async fn move_collection_to_section(
     }
 }
 
-// ─── Decrement-or-delete helper ───────────────────────────────────────────────
+// ─── Decrement-or-delete helper ───────────────────────────────────────────
 
 pub(crate) async fn decrement_or_delete(
     conn: &mut sqlx::SqliteConnection,
@@ -354,7 +355,7 @@ struct _AudioCount {
     poster: Option<String>,
 }
 
-// ─── Shared shapes ────────────────────────────────────────────────────────────
+// ─── Shared shapes ────────────────────────────────────────────────────────
 
 pub struct CollectionDeletion {
     pub media_paths: Vec<String>,
@@ -377,10 +378,4 @@ impl From<sqlx::Error> for MoveCollectionError {
     fn from(e: sqlx::Error) -> Self {
         MoveCollectionError::Db(e)
     }
-}
-
-pub enum CollectionField {
-    Title,
-    Description,
-    Poster,
 }

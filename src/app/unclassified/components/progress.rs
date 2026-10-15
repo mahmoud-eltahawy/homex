@@ -32,7 +32,7 @@ pub fn FileProgressBar(name: String, status: RwSignal<Option<ConversionStatus>>)
                          "bg-gradient-to-r from-emerald-400 to-green-500", false, "text-emerald-300"),
                 Some(ConversionStatus::Cancelled) => ("Cancelled".to_string(), 0.0,
                          "bg-gray-500/50", false, "text-gray-500"),
-                Some(ConversionStatus::Failed(e)) => (format!("Failed: {}", e.message), 0.0,
+                Some(ConversionStatus::Failed(e)) => (format!("Failed: {}", e.user_message()), 0.0,
                          "bg-red-500/60", false, "text-red-300"),
             };
 
@@ -124,7 +124,7 @@ pub fn FailedFilesList(tracker: BatchTracker) -> impl IntoView {
                 .into_iter()
                 .filter_map(|s| match s.status.get() {
                     Some(ConversionStatus::Failed(e)) => {
-                        Some((s.name.clone(), e.message, true))
+                        Some((s.name.clone(), e.user_message(), true))
                     }
                     Some(ConversionStatus::Cancelled) => {
                         Some((s.name.clone(), "cancelled".to_string(), false))
@@ -222,7 +222,7 @@ pub fn PhaseFinal(
                 {move || {
                     let (succeeded, failed, cancelled, first_error_msg) = match phase.get() {
                         BatchPhase::Partial { succeeded, failed, cancelled, first_error } => {
-                            (succeeded, failed, cancelled, first_error.map(|e| e.message))
+                            (succeeded, failed, cancelled, first_error.map(|e| e.user_message()))
                         }
                         _ => return ().into_any(),
                     };

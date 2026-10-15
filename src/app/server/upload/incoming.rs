@@ -1,15 +1,10 @@
 //! Read-only helpers for walking the incoming media tree.
-//!
-//! These are the server-side counterparts of the file staging path in
-//! `files.rs`: where `stage_files` moves bytes into `media_root`, this module
-//! reads what's already on disk under `unclassified_dir`.
 
 use std::path::{Path, PathBuf};
 
 use crate::app::error::{AppError, ErrorContext};
 use crate::app::model::MediaKind;
 
-/// A single file found during a tree walk.
 #[derive(Debug, Clone)]
 pub struct RawFile {
     pub abs: PathBuf,
@@ -21,7 +16,7 @@ pub struct RawFile {
 pub async fn read_immediate_subdirs(abs: &Path) -> Result<Vec<String>, AppError> {
     let mut rd = tokio::fs::read_dir(abs)
         .await
-        .map_err(|e| AppError::public(format!("Cannot read folder: {e}")))?;
+        .map_err(|e| AppError::detailed(format!("Cannot read folder: {e}")))?;
     let mut names = Vec::new();
     while let Some(entry) = rd.next_entry().await.context("read dir entry")? {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -36,9 +31,6 @@ pub async fn read_immediate_subdirs(abs: &Path) -> Result<Vec<String>, AppError>
     Ok(names)
 }
 
-/// Collect every media file under `abs`. When `recursive` is false, only the
-/// immediate directory is read — this is the "files-only folder" mode, where
-/// subdirectories would change the classification shape.
 pub async fn collect_files(
     root_canon: &Path,
     abs: &Path,
@@ -87,8 +79,6 @@ pub async fn collect_files(
     Ok(out)
 }
 
-/// The single media kind shared by every file, or `None` if the set is empty
-/// or mixes video and audio.
 pub fn dominant_kind(files: &[RawFile]) -> Option<MediaKind> {
     let first = files
         .first()
@@ -101,11 +91,10 @@ pub fn dominant_kind(files: &[RawFile]) -> Option<MediaKind> {
     Some(first)
 }
 
-/// Reject a set of files if any doesn't match `kind`.
 pub fn ensure_kind_matches(files: &[RawFile], kind: MediaKind) -> Result<(), AppError> {
     for f in files {
         if MediaKind::from_filename(&f.filename) != Some(kind) {
-            return Err(AppError::public(format!(
+            return Err(AppError::detailed(format!(
                 "File '{}' is not {} media",
                 f.filename,
                 kind.as_str()

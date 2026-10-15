@@ -3,10 +3,11 @@ use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 use uuid::Uuid;
 
-use crate::app::error::AppError;
-
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
+use crate::app::error::AppError;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
 
@@ -48,17 +49,13 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     };
     use crate::app::server::{AppState, db};
 
-    let state: AppState = expect_context();
+    let mut state: AppState = expect_context();
+    let payload = parse_upload_multipart(data).await?;
 
-    // Generate the id before parsing so a new-collection payload can
-    // reference it (the poster filename embeds it).
-    let next_id = Uuid::new_v4();
-    let payload = parse_upload_multipart(data, next_id).await?;
-
-    let kind_str = db::fetch_section_kind(&state.db, &payload.section_slug)
+    let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
         .await
         .context("fetch section kind for upload")?
-        .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
+        .ok_or_else(|| AppError::public(ErrorCode::SectionNotFound))?;
     let kind = MediaKind::try_from(kind_str.as_str())
         .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
 
@@ -69,7 +66,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
         UploadTarget::New { id, .. } => (*id, payload.section_slug.clone()),
     };
 
-    // ── Synchronous path ─────────────────────────────────────────────────
+    // ── Synchronous path ───────────────────────────────────────────────
     if !needs_conversion(&payload, kind) {
         let cancel = state.cancel.child_token();
         let msg = process_upload(payload, &state, kind, None, &cancel).await?;
@@ -82,8 +79,8 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
         });
     }
 
-    // ── Async path — conversion runs in the background ───────────────────
-    let job_id = uuid::Uuid::new_v4().to_string();
+    // ── Async path ─────────────────────────────────────────────────────
+    let job_id = Uuid::new_v4().to_string();
     let cancel = state.cancel.child_token();
     {
         let mut jobs = state.jobs.write().await;
@@ -133,7 +130,7 @@ pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, AppErro
     let jobs = state.jobs.read().await;
     let job = jobs
         .get(&job_id)
-        .ok_or_else(|| AppError::public(messages::JOB_NOT_FOUND))?;
+        .ok_or_else(|| AppError::public(ErrorCode::JobNotFound))?;
 
     Ok(match &job.phase {
         JobPhase::Writing => ConversionStatus::Writing,

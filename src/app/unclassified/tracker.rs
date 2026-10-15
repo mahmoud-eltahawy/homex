@@ -138,7 +138,7 @@ impl BatchTracker {
                 (_, 0, 0) => BatchPhase::Done,
                 (0, 0, _) => BatchPhase::Cancelled,
                 (0, _, 0) => BatchPhase::Failed(
-                    first_error.unwrap_or_else(|| AppError::public("Move failed")),
+                    first_error.unwrap_or_else(|| AppError::detailed("Move failed")),
                 ),
                 _ => BatchPhase::Partial {
                     succeeded,

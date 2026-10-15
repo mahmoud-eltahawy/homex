@@ -23,7 +23,6 @@ mod inline_edit;
 mod layout;
 mod login;
 mod model;
-mod multipart;
 mod new_collection;
 mod pagination;
 mod route_params;
@@ -36,6 +35,7 @@ mod tags;
 mod unclassified;
 mod upload_api;
 mod upload_job;
+pub mod upload_types;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {

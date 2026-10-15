@@ -1,14 +1,14 @@
 use crate::app::error::AppError;
-use crate::app::model::{Collection, CollectionSummary, Item};
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
+use crate::app::model::{
+    Collection, CollectionField, CollectionSummary, Item, MediaKind, SearchQuery,
+};
 use leptos::prelude::*;
 use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
-use crate::app::constants::messages;
-#[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
-#[cfg(feature = "ssr")]
-use crate::app::multipart::{POSTER_FILE, POSTER_ID, POSTER_SECTION};
 #[cfg(feature = "ssr")]
 use crate::app::server::db;
 
@@ -17,7 +17,7 @@ pub async fn fetch_collections(
     section_slug: String,
     offset: usize,
     size: usize,
-    search_query: Option<String>,
+    search_query: Option<SearchQuery>,
 ) -> Result<Vec<Collection>, AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
@@ -26,7 +26,7 @@ pub async fn fetch_collections(
         &section_slug,
         offset,
         size,
-        search_query.as_deref(),
+        search_query.as_ref(),
     )
     .await
     .context("fetch collections")
@@ -35,11 +35,11 @@ pub async fn fetch_collections(
 #[server]
 pub async fn fetch_collections_count(
     section_slug: String,
-    search_query: Option<String>,
+    search_query: Option<SearchQuery>,
 ) -> Result<usize, AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    let n = db::fetch_collections_count(&state.db, &section_slug, search_query.as_deref())
+    let n = db::fetch_collections_count(&state.db, &section_slug, search_query.as_ref())
         .await
         .context("fetch collections count")?;
     Ok(n as usize)
@@ -55,7 +55,7 @@ pub async fn fetch_collection_detail(
     db::fetch_collection_detail(&state.db, &section_slug, collection_id)
         .await
         .context("fetch collection detail")?
-        .ok_or_else(|| AppError::public(messages::COLLECTION_NOT_FOUND))
+        .ok_or_else(|| AppError::public(ErrorCode::CollectionNotFound))
 }
 
 #[server]
@@ -70,25 +70,20 @@ pub async fn fetch_items(collection_id: Uuid) -> Result<Vec<Item>, AppError> {
 #[server]
 pub async fn patch_collection_field(
     id: Uuid,
-    field: String,
+    field: CollectionField,
     value: Option<String>,
 ) -> Result<(), AppError> {
     use crate::app::server::AppState;
-    use crate::app::server::db::CollectionField;
 
     let state: AppState = expect_context();
 
-    if field == "title" && value.as_deref().map(str::trim).unwrap_or("").is_empty() {
-        return Err(AppError::validation(messages::TITLE_REQUIRED));
+    if matches!(field, CollectionField::Title)
+        && value.as_deref().map(str::trim).unwrap_or("").is_empty()
+    {
+        return Err(AppError::validation(ErrorCode::TitleRequired));
     }
 
-    let f = match field.as_str() {
-        "title" => CollectionField::Title,
-        "description" => CollectionField::Description,
-        _ => return Err(AppError::public(messages::UNKNOWN_FIELD)),
-    };
-
-    db::update_collection_field(&state.db, id, f, value.as_deref())
+    db::update_collection_field(&state.db, id, field, value.as_deref())
         .await
         .context("patch collection field")?;
     Ok(())
@@ -151,22 +146,22 @@ pub async fn upload_collection_poster(
     use crate::app::server::AppState;
     use crate::app::server::poster::write_poster;
     use crate::app::server::upload::extension_of;
+    use crate::app::upload_types::{FORM_FIELD, POSTER_FIELD, PosterUploadForm};
 
     let state: AppState = expect_context();
 
     let mut mp = data.into_inner().unwrap();
-    let mut section_slug = String::new();
-    let mut id: Uuid = Uuid::nil();
+    let mut form: Option<PosterUploadForm> = None;
     let mut bytes: Option<(String, Vec<u8>)> = None;
 
     while let Some(f) = mp.next_field().await? {
         match f.name().unwrap_or("") {
-            POSTER_SECTION => section_slug = f.text().await?,
-            POSTER_ID => {
-                id = Uuid::parse_str(&f.text().await?)
-                    .map_err(|e| AppError::hidden("Invalid request", "poster id parse", e))?;
+            FORM_FIELD => {
+                form = Some(serde_json::from_str(&f.text().await?).map_err(|e| {
+                    AppError::hidden(ErrorCode::InvalidPath, "poster form parse", e)
+                })?);
             }
-            POSTER_FILE => {
+            POSTER_FIELD => {
                 let fname = f.file_name().unwrap_or("").to_string();
                 let b = f.bytes().await?.to_vec();
                 if !b.is_empty() {
@@ -179,17 +174,18 @@ pub async fn upload_collection_poster(
         }
     }
 
-    let (ext, bytes) = bytes.ok_or_else(|| AppError::public(messages::NO_IMAGE_RECEIVED))?;
+    let form = form.ok_or_else(|| AppError::internal("multipart", "missing form"))?;
+    let (ext, bytes) = bytes.ok_or_else(|| AppError::public(ErrorCode::NoImageReceived))?;
 
-    let section = db::fetch_section_by_slug(&state.db, &section_slug)
+    let section = db::fetch_section_by_slug(&state.db, &form.section_slug)
         .await
         .context("fetch section for poster")?
-        .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
+        .ok_or_else(|| AppError::public(ErrorCode::SectionNotFound))?;
     if MediaKind::try_from(section.media_kind.as_str())
         .map_err(|e| AppError::internal("section has invalid media_kind", e))?
         != MediaKind::Audio
     {
-        return Err(AppError::public(
+        return Err(AppError::detailed(
             "This section's poster is generated automatically from its media",
         ));
     }
@@ -197,13 +193,13 @@ pub async fn upload_collection_poster(
     let url = write_poster(
         &state.config.storage.data_dir,
         &section.slug,
-        id,
+        form.collection_id,
         &ext,
         &bytes,
     )
     .await?;
 
-    db::set_collection_poster(&state.db, id, Some(&url))
+    db::set_collection_poster(&state.db, form.collection_id, Some(&url))
         .await
         .context("save regenerated poster")?;
 
@@ -225,12 +221,12 @@ pub async fn regenerate_collection_poster(
     let section = db::fetch_section_by_slug(&state.db, &section_slug)
         .await
         .context("fetch section for regenerate")?
-        .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
+        .ok_or_else(|| AppError::public(ErrorCode::SectionNotFound))?;
     if MediaKind::try_from(section.media_kind.as_str())
         .map_err(|e| AppError::internal("section has invalid media_kind", e))?
         != MediaKind::Video
     {
-        return Err(AppError::public(
+        return Err(AppError::detailed(
             "Only video sections have extractable posters",
         ));
     }
@@ -240,21 +236,21 @@ pub async fn regenerate_collection_poster(
         .context("fetch items for poster")?;
     let first = items
         .first()
-        .ok_or_else(|| AppError::public("Collection has no items yet"))?;
+        .ok_or_else(|| AppError::detailed("Collection has no items yet"))?;
 
     let rel = db::fetch_file_path(&state.db, first.file_id)
         .await
         .context("resolve first item file")?
-        .ok_or_else(|| AppError::not_found("file"))?;
+        .ok_or_else(|| AppError::public(ErrorCode::FileNotFound))?;
 
     let ext = rel.rsplit('.').next().unwrap_or("");
     if !is_video_container_supported(ext) {
-        return Err(AppError::public("Cannot extract a poster from this file"));
+        return Err(AppError::detailed("Cannot extract a poster from this file"));
     }
 
     let abs = state.config.storage.media_root.join(&rel);
     if tokio::fs::metadata(&abs).await.is_err() {
-        return Err(AppError::public("Source file is missing"));
+        return Err(AppError::detailed("Source file is missing"));
     }
 
     let previous = db::fetch_collection_detail(&state.db, &section_slug, collection_id)
@@ -309,9 +305,9 @@ pub async fn move_collection_to_section(
     let mv = sdb::move_collection_to_section(&state.db, collection_id, &to_section_slug)
         .await
         .map_err(|e| match e {
-            MoveCollectionError::SectionNotFound => AppError::public(messages::SECTION_NOT_FOUND),
+            MoveCollectionError::SectionNotFound => AppError::public(ErrorCode::SectionNotFound),
             MoveCollectionError::MediaKindMismatch => {
-                AppError::public(messages::MEDIA_KIND_MISMATCH)
+                AppError::public(ErrorCode::MediaKindMismatch)
             }
             MoveCollectionError::Db(e) => AppError::internal("move collection to section", e),
         })?;
@@ -335,11 +331,11 @@ pub async fn move_collection_to_section(
 
 #[server]
 pub async fn fetch_collection_summaries(
-    media_kind: String,
+    media_kind: MediaKind,
 ) -> Result<Vec<CollectionSummary>, AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    db::fetch_collection_summaries(&state.db, &media_kind)
+    db::fetch_collection_summaries(&state.db, media_kind)
         .await
         .context("fetch collection summaries")
 }

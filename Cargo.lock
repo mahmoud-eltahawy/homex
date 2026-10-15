@@ -1008,6 +1008,7 @@ dependencies = [
  "leptos_router",
  "multer",
  "serde",
+ "serde_json",
  "server_fn",
  "slug",
  "sqlx",

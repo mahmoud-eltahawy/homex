@@ -61,19 +61,14 @@ pub fn ClassifyModal(
     });
 
     let sections: Resource<Result<Vec<SectionWithCollections>, AppError>> = Resource::new(
-        move || {
-            open.get()
-                .then(|| file_kind.get().map(|k| k.as_str().to_string()))
-                .flatten()
-        },
+        move || open.get().then(|| file_kind.get()).flatten(),
         |k| async move {
             match k {
-                Some(s) => fetch_sections_with_collections(s).await,
+                Some(kind) => fetch_sections_with_collections(kind).await,
                 None => Ok(Vec::new()),
             }
         },
     );
-
     let form = FileFormState::new();
     let is_single = Signal::derive(move || selection.get().len() == 1);
 

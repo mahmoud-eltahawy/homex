@@ -21,7 +21,10 @@ use uuid::Uuid;
 use crate::app::constants::routes;
 use crate::app::error::AppError;
 #[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
+#[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
+use crate::app::model::MediaKind;
 use crate::app::upload_api::ConversionStatus;
 
 use components::breadcrumb::Breadcrumb;
@@ -32,9 +35,9 @@ use components::selection_bar::SelectionBar;
 use helpers::encode_query_path;
 use jobs::{ClassifyJob, FolderClassifyJob};
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 //  Server functions
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 
 #[server]
 pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry>, AppError> {
@@ -48,7 +51,7 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
         .storage
         .unclassified_dir
         .clone()
-        .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
+        .ok_or_else(|| AppError::detailed("Unclassified media folder is not configured"))?;
 
     let root_canon = tokio::fs::canonicalize(&root)
         .await
@@ -64,14 +67,14 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
 
     let abs_canon = tokio::fs::canonicalize(&abs)
         .await
-        .map_err(|e| AppError::public(format!("Cannot open folder: {e}")))?;
+        .map_err(|e| AppError::detailed(format!("Cannot open folder: {e}")))?;
     if !abs_canon.starts_with(&root_canon) {
-        return Err(AppError::public("Invalid path"));
+        return Err(AppError::public(ErrorCode::InvalidPath));
     }
 
     let mut rd = tokio::fs::read_dir(&abs_canon)
         .await
-        .map_err(|e| AppError::public(format!("Cannot read folder: {e}")))?;
+        .map_err(|e| AppError::detailed(format!("Cannot read folder: {e}")))?;
 
     let mut entries = Vec::new();
     while let Some(entry) = rd
@@ -116,7 +119,7 @@ fn ext_of(name: &str) -> Option<String> {
 
 #[server]
 pub async fn fetch_sections_with_collections(
-    media_kind: String,
+    media_kind: MediaKind,
 ) -> Result<Vec<SectionWithCollections>, AppError> {
     use crate::app::model::{AudioCollectionRow, SectionRow, VideoCollectionRow};
     use crate::app::server::AppState;
@@ -132,7 +135,7 @@ pub async fn fetch_sections_with_collections(
                   nested        AS "nested!: bool",
                   position      AS "position!: i64"
            FROM sections WHERE media_kind = ? ORDER BY title ASC"#,
-        media_kind,
+        media_kind.as_str(),
     )
     .fetch_all(&state.db)
     .await
@@ -140,8 +143,8 @@ pub async fn fetch_sections_with_collections(
 
     let mut out = Vec::with_capacity(sections.len());
     for s in sections {
-        let rows: Vec<CollectionSummary> = match media_kind.as_str() {
-            "video" => sqlx::query_as!(
+        let rows: Vec<CollectionSummary> = match media_kind {
+            MediaKind::Video => sqlx::query_as!(
                 VideoCollectionRow,
                 r#"SELECT id AS "id!: Uuid", section_id AS "section_id!: Uuid",
                           section_slug, title, poster, description, position,
@@ -161,7 +164,7 @@ pub async fn fetch_sections_with_collections(
                 nested: s.nested,
             })
             .collect(),
-            _ => sqlx::query_as!(
+            MediaKind::Audio => sqlx::query_as!(
                 AudioCollectionRow,
                 r#"SELECT id AS "id!: Uuid", section_id AS "section_id!: Uuid",
                           section_slug, title, poster, description, position,
@@ -196,9 +199,11 @@ pub async fn fetch_sections_with_collections(
 
 #[server]
 pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspection, AppError> {
-    inspect_folders(vec![rel_path])
-        .await
-        .and_then(|mut v| v.folders.pop().ok_or_else(|| AppError::public("No folder")))
+    inspect_folders(vec![rel_path]).await.and_then(|mut v| {
+        v.folders
+            .pop()
+            .ok_or_else(|| AppError::detailed("No folder"))
+    })
 }
 
 #[server]
@@ -217,7 +222,7 @@ async fn inspect_folders(rel_paths: Vec<String>) -> Result<FoldersInspection, Ap
     };
 
     if rel_paths.is_empty() {
-        return Err(AppError::public("No folders selected"));
+        return Err(AppError::public(ErrorCode::NoFoldersSelected));
     }
     let state: AppState = expect_context();
     let root = state
@@ -225,7 +230,7 @@ async fn inspect_folders(rel_paths: Vec<String>) -> Result<FoldersInspection, Ap
         .storage
         .unclassified_dir
         .clone()
-        .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
+        .ok_or_else(|| AppError::detailed("Unclassified media folder is not configured"))?;
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .map_err(|e| AppError::internal("canonicalize root", e))?;
@@ -235,20 +240,20 @@ async fn inspect_folders(rel_paths: Vec<String>) -> Result<FoldersInspection, Ap
     for rp in &rel_paths {
         let clean = sanitize_rel(rp)?;
         if clean.is_empty() {
-            return Err(AppError::public("Invalid folder"));
+            return Err(AppError::public(ErrorCode::InvalidPath));
         }
         let abs_canon = tokio::fs::canonicalize(root.join(&clean))
             .await
-            .map_err(|e| AppError::public(format!("Folder not found: {e}")))?;
+            .map_err(|e| AppError::detailed(format!("Folder not found: {e}")))?;
         if !abs_canon.starts_with(&root_canon) {
-            return Err(AppError::public("Invalid path"));
+            return Err(AppError::public(ErrorCode::InvalidPath));
         }
         if !tokio::fs::metadata(&abs_canon)
             .await
             .map_err(|e| AppError::internal("stat folder", e))?
             .is_dir()
         {
-            return Err(AppError::public("Not a folder"));
+            return Err(AppError::public(ErrorCode::NotAFolder));
         }
         let name = abs_canon
             .file_name()
@@ -343,7 +348,7 @@ pub async fn cancel_classify(job_ids: Vec<String>) -> Result<(), AppError> {
     Ok(())
 }
 
-// ─── Classify: files ──────────────────────────────────────────────────────────
+// ─── Classify: files ──────────────────────────────────────────────────────
 
 #[server]
 pub async fn classify_unclassified_files(
@@ -360,7 +365,7 @@ pub async fn classify_unclassified_files(
     use crate::app::server::{AppState, db};
 
     if files.is_empty() {
-        return Err(AppError::public("No files selected"));
+        return Err(AppError::public(ErrorCode::NoFilesReceived));
     }
 
     let state: AppState = expect_context();
@@ -369,7 +374,7 @@ pub async fn classify_unclassified_files(
         .storage
         .unclassified_dir
         .clone()
-        .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
+        .ok_or_else(|| AppError::detailed("Unclassified media folder is not configured"))?;
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .map_err(|e| AppError::internal("canonicalize root", e))?;
@@ -380,7 +385,7 @@ pub async fn classify_unclassified_files(
             let collection = db::fetch_collection_any(&state.db, *id)
                 .await
                 .map_err(|e| AppError::internal("load collection", e))?
-                .ok_or_else(|| AppError::not_found("collection"))?;
+                .ok_or_else(|| AppError::public(ErrorCode::CollectionNotFound))?;
             let section = sqlx::query_as!(
                 SectionRow,
                 r#"SELECT id            AS "id!: Uuid",
@@ -460,7 +465,7 @@ pub async fn classify_unclassified_files(
             MediaKind::Video => {
                 let first = upload_files
                     .first()
-                    .ok_or_else(|| AppError::public("No files selected"))?;
+                    .ok_or_else(|| AppError::public(ErrorCode::NoFilesReceived))?;
                 let url = extract_poster_for_new_video_collection(
                     &state,
                     &section_slug,
@@ -506,7 +511,7 @@ pub async fn classify_unclassified_files(
     Ok(handles)
 }
 
-// ─── Classify: folders ────────────────────────────────────────────────────────
+// ─── Classify: folders ────────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 const MAX_CLASSIFY_GROUPS: usize = 50;
@@ -536,7 +541,7 @@ pub async fn classify_unclassified_folders(
     use crate::app::server::{AppState, db};
 
     if rel_paths.is_empty() {
-        return Err(AppError::public("No folders selected"));
+        return Err(AppError::public(ErrorCode::NoFoldersSelected));
     }
 
     let state: AppState = expect_context();
@@ -545,7 +550,7 @@ pub async fn classify_unclassified_folders(
         .storage
         .unclassified_dir
         .clone()
-        .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
+        .ok_or_else(|| AppError::detailed("Unclassified media folder is not configured"))?;
     let root_canon = tokio::fs::canonicalize(&root)
         .await
         .map_err(|e| AppError::internal("canonicalize root", e))?;
@@ -555,20 +560,20 @@ pub async fn classify_unclassified_folders(
     for rp in &rel_paths {
         let clean = sanitize_rel(rp)?;
         if clean.is_empty() {
-            return Err(AppError::public("Invalid folder"));
+            return Err(AppError::public(ErrorCode::InvalidPath));
         }
         let abs_canon = tokio::fs::canonicalize(root.join(&clean))
             .await
-            .map_err(|e| AppError::public(format!("Folder not found: {e}")))?;
+            .map_err(|e| AppError::detailed(format!("Folder not found: {e}")))?;
         if !abs_canon.starts_with(&root_canon) {
-            return Err(AppError::public("Invalid path"));
+            return Err(AppError::public(ErrorCode::InvalidPath));
         }
         if !tokio::fs::metadata(&abs_canon)
             .await
             .map_err(|e| AppError::internal("stat folder", e))?
             .is_dir()
         {
-            return Err(AppError::public("Not a folder"));
+            return Err(AppError::public(ErrorCode::NotAFolder));
         }
         abs_canons.push(abs_canon);
     }
@@ -603,7 +608,7 @@ pub async fn classify_unclassified_folders(
             let collection = db::fetch_collection_any(&state.db, id)
                 .await
                 .map_err(|e| AppError::internal("load collection", e))?
-                .ok_or_else(|| AppError::not_found("collection"))?;
+                .ok_or_else(|| AppError::public(ErrorCode::CollectionNotFound))?;
             let section = sqlx::query_as!(
                 SectionRow,
                 r#"SELECT id            AS "id!: Uuid",
@@ -621,7 +626,7 @@ pub async fn classify_unclassified_folders(
             let kind = MediaKind::try_from(section.media_kind.as_str())
                 .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
             if any_has_subdirs && !section.nested {
-                return Err(AppError::public(
+                return Err(AppError::detailed(
                     "At least one folder contains subfolders — choose a nested section.",
                 ));
             }
@@ -637,7 +642,7 @@ pub async fn classify_unclassified_folders(
         } => {
             let title = title.trim().to_string();
             if title.is_empty() {
-                return Err(AppError::validation("Section title is required"));
+                return Err(AppError::validation(ErrorCode::TitleRequired));
             }
             let section = sqlx::query_as!(
                 SectionRow,
@@ -713,16 +718,13 @@ pub async fn classify_unclassified_folders(
     }
 
     if groups.is_empty() {
-        return Err(AppError::public(
-            "No media files found in the selected folders",
-        ));
+        return Err(AppError::public(ErrorCode::NoFilesFound));
     }
     if groups.len() > MAX_CLASSIFY_GROUPS {
-        return Err(AppError::public(format!(
-            "Too many folders selected ({}). Classify at most {} at a time.",
-            groups.len(),
-            MAX_CLASSIFY_GROUPS,
-        )));
+        return Err(AppError::public(ErrorCode::TooManyFolders {
+            count: groups.len(),
+            max: MAX_CLASSIFY_GROUPS,
+        }));
     }
 
     let existing = match &dest {
@@ -739,7 +741,7 @@ pub async fn classify_unclassified_folders(
     }
     let skipped = before - kept.len();
     if kept.is_empty() {
-        return Err(AppError::public(format!(
+        return Err(AppError::detailed(format!(
             "All {before} collection{} already exist in the destination section.",
             if before == 1 { "" } else { "s" },
         )));
@@ -774,7 +776,7 @@ pub async fn classify_unclassified_folders(
                 let first = group
                     .files
                     .first()
-                    .ok_or_else(|| AppError::public("Empty group"))?;
+                    .ok_or_else(|| AppError::detailed("Empty group"))?;
                 let url = extract_poster_for_new_video_collection(
                     &state,
                     &section_slug,
@@ -844,7 +846,7 @@ pub async fn classify_unclassified_folders(
     Ok(handles)
 }
 
-// ─── Move items back to incoming ──────────────────────────────────────────────
+// ─── Move items back to incoming ──────────────────────────────────────────
 
 #[server]
 pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError> {
@@ -863,7 +865,7 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
         .storage
         .unclassified_dir
         .clone()
-        .ok_or_else(|| AppError::public("Unclassified media folder is not configured"))?;
+        .ok_or_else(|| AppError::detailed("Unclassified media folder is not configured"))?;
     tokio::fs::create_dir_all(&incoming)
         .await
         .map_err(|e| AppError::internal("mkdir incoming", e))?;
@@ -919,9 +921,9 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
     Ok(())
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 //  SSR-only helpers
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 
 #[cfg(feature = "ssr")]
 async fn resolve_upload_file(
@@ -933,19 +935,19 @@ async fn resolve_upload_file(
 
     let clean = sanitize_rel(&input.rel_path)?;
     if clean.is_empty() {
-        return Err(AppError::public("Empty file path"));
+        return Err(AppError::detailed("Empty file path"));
     }
     let source_canon = tokio::fs::canonicalize(root.join(&clean))
         .await
-        .map_err(|e| AppError::public(format!("File not found: {e}")))?;
+        .map_err(|e| AppError::detailed(format!("File not found: {e}")))?;
     if !source_canon.starts_with(root_canon) {
-        return Err(AppError::public("Invalid path"));
+        return Err(AppError::public(ErrorCode::InvalidPath));
     }
     let meta = tokio::fs::metadata(&source_canon)
         .await
         .map_err(|e| AppError::internal("stat source file", e))?;
     if !meta.is_file() {
-        return Err(AppError::public("Not a file"));
+        return Err(AppError::public(ErrorCode::NotAFile));
     }
     let filename = source_canon
         .file_name()
@@ -1035,9 +1037,9 @@ async fn generate_unique_slug(
     ))
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 //  Entry list bridging
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone)]
 pub struct EntryListProps {
@@ -1118,9 +1120,9 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
     .into_any()
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 //  Page
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
 
 pub struct UnclassifiedPage {
     rel_path: Signal<String>,

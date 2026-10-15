@@ -1,10 +1,10 @@
 use crate::app::error::AppError;
-use crate::app::model::Section;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
+use crate::app::model::{MediaKind, Section};
 use leptos::prelude::*;
 use uuid::Uuid;
 
-#[cfg(feature = "ssr")]
-use crate::app::constants::messages;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
 #[cfg(feature = "ssr")]
@@ -16,7 +16,7 @@ pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError
     let state: AppState = expect_context();
     let t = title.trim();
     if t.is_empty() {
-        return Err(AppError::validation(messages::TITLE_REQUIRED));
+        return Err(AppError::validation(ErrorCode::TitleRequired));
     }
     db::update_section_title(&state.db, id, t)
         .await
@@ -50,12 +50,11 @@ pub async fn fetch_section_by_slug(slug: String) -> Result<Section, AppError> {
     db::fetch_section_by_slug(&state.db, &slug)
         .await
         .context("fetch section by slug")?
-        .ok_or_else(|| AppError::not_found("section"))
+        .ok_or_else(|| AppError::public(ErrorCode::SectionNotFound))
 }
 
 #[cfg(feature = "ssr")]
-pub fn prefix_for(kind: crate::app::model::MediaKind, nested: bool) -> &'static str {
-    use crate::app::model::MediaKind;
+pub fn prefix_for(kind: MediaKind, nested: bool) -> &'static str {
     match (kind, nested) {
         (MediaKind::Video, false) => "video",
         (MediaKind::Video, true) => "video-group",
@@ -81,21 +80,19 @@ pub fn short_hash() -> String {
 #[server]
 pub async fn create_section(
     title: String,
-    media_kind: String,
+    media_kind: MediaKind,
     nested: bool,
 ) -> Result<Uuid, AppError> {
-    use crate::app::model::MediaKind;
     use crate::app::server::AppState;
 
     let state: AppState = expect_context();
 
     let title = title.trim().to_string();
     if title.is_empty() {
-        return Err(AppError::validation(messages::NAME_REQUIRED));
+        return Err(AppError::validation(ErrorCode::NameRequired));
     }
 
-    let kind = MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
-    let prefix = prefix_for(kind, nested);
+    let prefix = prefix_for(media_kind, nested);
 
     for attempt in 0..4 {
         let slug = format!("{prefix}-{}", short_hash());
@@ -108,10 +105,7 @@ pub async fn create_section(
             if attempt < 3 {
                 continue;
             }
-            return Err(AppError::internal(
-                "create section",
-                messages::UNIQUE_SECTION_ID_FAILED,
-            ));
+            return Err(AppError::public(ErrorCode::UniqueSectionIdFailed));
         }
 
         match db::insert_section(&state.db, &slug, &title, media_kind.as_str(), nested).await {
@@ -125,24 +119,19 @@ pub async fn create_section(
             }
         }
     }
-    Err(AppError::internal(
-        "create section",
-        messages::UNIQUE_SECTION_ID_FAILED,
-    ))
+    Err(AppError::public(ErrorCode::UniqueSectionIdFailed))
 }
 
 #[server]
 pub async fn update_section(
     id: Uuid,
     title: String,
-    media_kind: String,
+    media_kind: MediaKind,
     nested: bool,
 ) -> Result<(), AppError> {
-    use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
-    db::update_section(&state.db, id, &title, &media_kind, nested)
+    db::update_section(&state.db, id, &title, media_kind.as_str(), nested)
         .await
         .context("update section")?;
     Ok(())
@@ -159,11 +148,10 @@ pub async fn delete_section(id: Uuid) -> Result<(), AppError> {
         .context("delete section")?
     {
         DeleteSectionOutcome::Deleted => Ok(()),
-        DeleteSectionOutcome::NotEmpty { collection_count } => Err(AppError::public(format!(
-            "{} ({} collection{})",
-            messages::SECTION_NOT_EMPTY,
-            collection_count,
-            if collection_count == 1 { "" } else { "s" },
-        ))),
+        DeleteSectionOutcome::NotEmpty { collection_count } => {
+            Err(AppError::public(ErrorCode::SectionNotEmpty {
+                collection_count: collection_count as usize,
+            }))
+        }
     }
 }

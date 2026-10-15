@@ -1,20 +1,18 @@
-//! Draft page for creating a new collection.
-//!
-//! Nothing is persisted on the server until the upload is submitted. The
-//! collection row is created inside `upload_media` after staging — for
-//! video, only after a poster frame is extracted.
-
 use crate::app::constants::routes;
 use crate::app::error::AppError;
 use crate::app::model::{MediaKind, Section, Tag};
-use crate::app::multipart;
 use crate::app::route_params::use_string_param;
 use crate::app::tags::TagEditor;
 use crate::app::upload_job::{UploadJob, UploadProgress};
+use crate::app::upload_types::{
+    FILE_FIELD, FORM_FIELD, POSTER_FIELD, UploadFileMeta, UploadForm, UploadTarget,
+    audio_accept_attr, video_accept_attr,
+};
 use leptos::prelude::*;
 use leptos_outcome::ErrorView;
 use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
+use uuid::Uuid;
 
 // ─── Page ─────────────────────────────────────────────────────────────────
 
@@ -92,8 +90,8 @@ impl LazyRoute for NewCollectionPage {
         });
 
         let accept = Signal::derive(move || match kind.get() {
-            Some(MediaKind::Audio) => ".mp3,.m4a,.flac,.wav,.ogg,.opus,.aac",
-            _ => ".mp4,.mkv,.mov,.webm,.avi,.m4v,.wmv,.flv,.ts",
+            Some(MediaKind::Audio) => audio_accept_attr(),
+            _ => video_accept_attr(),
         });
 
         let on_submit = move |ev: web_sys::SubmitEvent| {
@@ -119,19 +117,32 @@ impl LazyRoute for NewCollectionPage {
                 None
             };
 
-            let fd = build_formdata(
-                &slug,
-                &t,
-                if desc.trim().is_empty() {
-                    None
-                } else {
-                    Some(&desc)
+            let file_list = files.get_untracked();
+
+            let form = UploadForm {
+                section_slug: slug,
+                target: UploadTarget::New {
+                    id: Uuid::new_v4(),
+                    title: t,
+                    description: if desc.trim().is_empty() {
+                        None
+                    } else {
+                        Some(desc)
+                    },
+                    tags: tag_names,
                 },
-                &tag_names,
-                season_opt,
-                poster_opt.as_ref(),
-                &files.get_untracked(),
-            );
+                season_number: season_opt,
+                files: file_list
+                    .iter()
+                    .map(|f| UploadFileMeta {
+                        filename: f.name(),
+                        title: file_stem(&f.name()),
+                    })
+                    .collect(),
+                has_poster: poster_opt.is_some(),
+            };
+
+            let fd = build_formdata(&form, poster_opt.as_ref(), &file_list);
             upload.dispatch(fd);
         };
 
@@ -288,6 +299,12 @@ impl LazyRoute for NewCollectionPage {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+fn file_stem(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(s, _)| s.to_string())
+        .unwrap_or_else(|| name.to_string())
+}
+
 fn event_target_files(ev: &web_sys::Event) -> Vec<web_sys::File> {
     use web_sys::wasm_bindgen::JsCast;
     let Some(input) = ev
@@ -309,36 +326,19 @@ fn event_target_files(ev: &web_sys::Event) -> Vec<web_sys::File> {
     out
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_formdata(
-    section_slug: &str,
-    title: &str,
-    description: Option<&str>,
-    tags: &[String],
-    season: Option<i64>,
+    form: &UploadForm,
     poster: Option<&web_sys::File>,
     files: &[web_sys::File],
 ) -> web_sys::FormData {
     let fd = web_sys::FormData::new().unwrap();
-    let _ = fd.append_with_str(multipart::SECTION_SLUG, section_slug);
-    let _ = fd.append_with_str(multipart::COLLECTION_TITLE, title);
-    if let Some(d) = description {
-        let _ = fd.append_with_str(multipart::DESCRIPTION, d);
-    }
-    for (i, t) in tags.iter().enumerate() {
-        let _ = fd.append_with_str(&multipart::tag(i), t);
-    }
-    if let Some(s) = season {
-        let _ = fd.append_with_str(multipart::SEASON_NUMBER, &s.to_string());
-    }
+    let json = serde_json::to_string(form).expect("UploadForm is serializable");
+    let _ = fd.append_with_str(FORM_FIELD, &json);
     if let Some(p) = poster {
-        let _ = fd.append_with_blob_and_filename(multipart::POSTER_FILE, p, &p.name());
+        let _ = fd.append_with_blob_and_filename(POSTER_FIELD, p, &p.name());
     }
-    for (i, f) in files.iter().enumerate() {
-        let name = f.name();
-        let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-        let _ = fd.append_with_blob_and_filename(&multipart::file(i), f, &name);
-        let _ = fd.append_with_str(&multipart::file_title(i), &stem);
+    for f in files {
+        let _ = fd.append_with_blob_and_filename(FILE_FIELD, f, &f.name());
     }
     fd
 }

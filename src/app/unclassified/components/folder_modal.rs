@@ -37,7 +37,7 @@ pub fn FolderClassifyModal(
         |paths| async move {
             match paths {
                 Some(p) if !p.is_empty() => inspect_unclassified_folders(p).await,
-                _ => Err(AppError::public("No folder selected")),
+                _ => Err(AppError::detailed("No folder selected")),
             }
         },
     );
@@ -54,7 +54,7 @@ pub fn FolderClassifyModal(
             if !open.get() {
                 return None;
             }
-            let kind = common_kind.get().map(|k| k.as_str().to_string())?;
+            let kind = common_kind.get()?;
             Some((selection.get().first()?.rel_path.clone(), kind))
         },
         |input| async move {
@@ -64,7 +64,6 @@ pub fn FolderClassifyModal(
             }
         },
     );
-
     let mode = RwSignal::new(DestinationMode::New);
     let section_slug = RwSignal::new(String::new());
     let section_title = RwSignal::new(String::new());
@@ -321,6 +320,8 @@ fn FolderSetup(
             Some(Err(e)) => view! {
                 <div class="py-4">
                     <ErrorView
+
+
                         error=Signal::derive(move || Some(e.clone()))
                         banner=true
                         heading="Cannot classify"/>
@@ -329,7 +330,7 @@ fn FolderSetup(
             Some(Ok(insp)) if insp.common_kind.is_none() => view! {
                 <div class="py-4 space-y-3">
                     <ErrorView
-                        error=Signal::derive(|| Some(AppError::public(
+                        error=Signal::derive(|| Some(AppError::detailed(
                             "The selected folders are empty or mix video and audio. \
                                  Select folders of the same kind and try again."
                         )))
