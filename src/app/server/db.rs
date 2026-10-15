@@ -8,8 +8,9 @@ mod items;
 mod sections;
 mod tags;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::str::FromStr;
+use std::time::Duration;
 
 use super::Config;
 
@@ -43,7 +44,11 @@ pub async fn init(config: &Config) -> Result<sqlx::SqlitePool, Box<dyn std::erro
     let db_path = config.db_path();
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
-    let opts = SqliteConnectOptions::from_str(&url)?.create_if_missing(true);
+    let opts = SqliteConnectOptions::from_str(&url)?
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(5));
 
     let pool = SqlitePoolOptions::new()
         .max_connections(8)
@@ -51,6 +56,11 @@ pub async fn init(config: &Config) -> Result<sqlx::SqlitePool, Box<dyn std::erro
         .await?;
 
     sqlx::migrate!("./migrations").run(&pool).await?;
+
+    let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(&pool)
+        .await?;
+    leptos::logging::log!("[db] journal_mode = {mode}");
 
     Ok(pool)
 }
