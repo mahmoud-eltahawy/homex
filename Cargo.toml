@@ -14,31 +14,19 @@ console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = { version = "0.8.0" }
 tokio = { version = "1", features = ["rt-multi-thread","process","io-util","fs","signal"], optional = true }
-gloo-timers = { version = "0.4.0", features = ["futures"]}
+gloo-timers = { version = "0.4.0", features = ["futures"] }
 wasm-bindgen = { version = "0.2.106", optional = true }
 web-sys = { version = "0.3.103", features = [
-    "Blob",
-    "Document",
-    "Element",
-    "Event",
-    "File",
-    "FileList",
-    "FormData",
-    "HtmlFormElement",
-    "HtmlInputElement",
-    "HtmlSelectElement",
-    "HtmlVideoElement",
-    "MouseEvent",
-    "SubmitEvent",
-    "Url",
-]}
+    "Blob", "Document", "Element", "Event", "File", "FileList", "FormData",
+    "HtmlFormElement", "HtmlInputElement", "HtmlSelectElement",
+    "HtmlVideoElement", "MouseEvent", "SubmitEvent", "Url",
+] }
 serde = { version = "1.0.229", features = ["derive"] }
-tower-http = { version = "0.6.0",features = ["fs"], optional = true }
+tower-http = { version = "0.6.0", features = ["fs"], optional = true }
 leptos-use = "0.19"
 server_fn = { version = "0.8.13", features = ["multipart"] }
-toasty = { version = "0.10", features = ["sqlite"], optional = true }
-toml = { version = "1",optional = true}
-tower = { version = "0.5",optional = true}
+toml = { version = "1", optional = true }
+tower = { version = "0.5", optional = true }
 tokio-util = { version = "0.7", optional = true }
 http-body-util = { version = "0.1", optional = true }
 multer = { version = "3", optional = true }
@@ -46,8 +34,12 @@ infer = { version = "0.16", optional = true }
 slug = { version = "0.1", optional = true }
 tempfile = { version = "3", optional = true }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
-leptos_media_player = { git = "https://github.com/mahmoud-eltahawy/leptos_media_player.git"}
-leptos_outcome = { git = "https://github.com/mahmoud-eltahawy/leptos_outcome.git"}
+leptos_media_player = { git = "https://github.com/mahmoud-eltahawy/leptos_media_player.git" }
+leptos_outcome = { git = "https://github.com/mahmoud-eltahawy/leptos_outcome.git" }
+
+sqlx = { version = "0.9", default-features = false, features = [
+    "runtime-tokio", "sqlite", "uuid", "macros", "migrate",
+], optional = true }
 
 [features]
 hydrate = [
@@ -60,7 +52,7 @@ ssr = [
     "dep:axum",
     "dep:tower-http",
     "dep:tokio",
-    "dep:toasty",
+    "dep:sqlx",
     "dep:toml",
     "dep:tower",
     "dep:leptos_axum",
@@ -75,7 +67,6 @@ ssr = [
     "leptos-use/ssr",
 ]
 
-# Defines a size-optimized profile for the WASM bundle in release mode
 [profile.wasm-release]
 inherits = "release"
 opt-level = 'z'
@@ -84,58 +75,16 @@ codegen-units = 1
 panic = "abort"
 
 [package.metadata.leptos]
-# The name used by wasm-bindgen/cargo-leptos for the JS/WASM bundle. Defaults to the crate name
 output-name = "homex"
-
-# The site root folder is where cargo-leptos generate all output. WARNING: all content of this folder will be erased on a rebuild. Use it in your server setup.
 site-root = "target/site"
-
-
-# The tailwind input file.
-#
-# Optional, Activates the tailwind build
 tailwind-input-file = "style/tailwind.css"
-
-# The site-root relative folder where all compiled output (JS, WASM and CSS) is written
-# Defaults to pkg
 site-pkg-dir = "pkg"
-
-# Assets source dir. All files found here will be copied and synchronized to site-root.
-# The assets-dir cannot have a sub directory with the same name/path as site-pkg-dir.
-#
-# Optional. Env: LEPTOS_ASSETS_DIR.
 assets-dir = "public"
-
-# The IP and port (ex: 127.0.0.1:3000) where the server serves the content. Use it in your server setup.
 site-addr = "127.0.0.1:3000"
-
-# The port to use for automatic reload monitoring
 reload-port = 3001
-
-#  The browserlist query used for optimizing the CSS.
 browserquery = "defaults"
-
-# The features to use when compiling the bin target
-#
-# Optional. Can be over-ridden with the command line parameter --bin-features
 bin-features = ["ssr"]
-
-# If the --no-default-features flag should be used when compiling the bin target
-#
-# Optional. Defaults to false.
 bin-default-features = false
-
-# The features to use when compiling the lib target
-#
-# Optional. Can be over-ridden with the command line parameter --lib-features
 lib-features = ["hydrate"]
-
-# If the --no-default-features flag should be used when compiling the lib target
-#
-# Optional. Defaults to false.
 lib-default-features = false
-
-# The profile to use for the lib target when compiling for release
-#
-# Optional. Defaults to "release".
 lib-profile-release = "wasm-release"

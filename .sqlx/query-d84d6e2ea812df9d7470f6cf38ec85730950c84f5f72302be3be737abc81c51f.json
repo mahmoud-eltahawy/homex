@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT file_id AS \"file_id!: Uuid\", collection_id AS \"collection_id!: Uuid\"\n               FROM items WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "file_id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "items",
+            "name": "file_id"
+          }
+        }
+      },
+      {
+        "name": "collection_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "items",
+            "name": "collection_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d84d6e2ea812df9d7470f6cf38ec85730950c84f5f72302be3be737abc81c51f"
+}

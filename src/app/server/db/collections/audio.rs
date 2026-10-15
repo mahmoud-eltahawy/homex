@@ -1,23 +1,21 @@
-use toasty::Db;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use super::super::err_not_found;
 use super::super::files::purge_orphan_files;
 use super::super::tags::{collection_ids_with_all_tags, fetch_collection_tags};
 use super::{CollectionDeletion, CollectionField, CollectionMove, MoveCollectionError};
-use crate::app::model::{
-    AudioCollectionRow, Collection, CollectionSummary, CollectionTag, Item, MediaKind, SectionRow,
-};
+use crate::app::model::{AudioCollectionRow, Collection, CollectionSummary, MediaKind, SectionRow};
 
-// ─── Read ─────────────────────────────────────────────────────────────────
+// ─── Read ─────────────────────────────────────────────────────────────────────
 
 pub(super) async fn fetch(
-    db: &mut Db,
+    pool: &SqlitePool,
     section_slug: &str,
     offset: usize,
     size: usize,
     search: Option<&str>,
-) -> toasty::Result<Vec<Collection>> {
+) -> sqlx::Result<Vec<Collection>> {
     use crate::app::model::parse_search;
 
     let parsed = search.map(parse_search).unwrap_or_default();
@@ -25,67 +23,50 @@ pub(super) async fn fetch(
     let tag_ids: Option<Vec<Uuid>> = if parsed.tags.is_empty() {
         None
     } else {
-        Some(collection_ids_with_all_tags(db, &parsed.tags).await?)
+        Some(collection_ids_with_all_tags(pool, &parsed.tags).await?)
     };
     if tag_ids.as_ref().is_some_and(Vec::is_empty) {
         return Ok(Vec::new());
     }
 
-    let rows = if let Some(ids) = &tag_ids {
-        let mut q = AudioCollectionRow::filter(
-            AudioCollectionRow::fields()
-                .section_slug()
-                .eq(section_slug.to_string()),
-        );
-        if let Some(t) = &parsed.text {
-            q = q.filter(AudioCollectionRow::fields().title().like(format!("%{t}%")));
-        }
-        q.order_by((
-            AudioCollectionRow::fields().position().asc(),
-            AudioCollectionRow::fields().title().asc(),
-            AudioCollectionRow::fields().id().asc(),
-        ))
-        .exec(db)
-        .await?
-        .into_iter()
-        .filter(|r| ids.contains(&r.id))
-        .skip(offset)
-        .take(size)
-        .collect()
+    let rows = sqlx::query_as!(
+        AudioCollectionRow,
+        r#"SELECT id AS "id!: Uuid", section_id AS "section_id!: Uuid",
+                  section_slug, title, poster, description, position,
+                  items_count AS "items_count!: i64"
+           FROM audio_collections
+           WHERE section_slug = ?1
+             AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')
+           ORDER BY position ASC, title ASC, id ASC
+           LIMIT ?3 OFFSET ?4"#,
+        section_slug,
+        parsed.text,
+        size as i64,
+        offset as i64,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let rows: Vec<AudioCollectionRow> = if let Some(ids) = &tag_ids {
+        rows.into_iter().filter(|r| ids.contains(&r.id)).collect()
     } else {
-        let mut q = AudioCollectionRow::filter(
-            AudioCollectionRow::fields()
-                .section_slug()
-                .eq(section_slug.to_string()),
-        );
-        if let Some(t) = &parsed.text {
-            q = q.filter(AudioCollectionRow::fields().title().like(format!("%{t}%")));
-        }
-        q.order_by((
-            AudioCollectionRow::fields().position().asc(),
-            AudioCollectionRow::fields().title().asc(),
-            AudioCollectionRow::fields().id().asc(),
-        ))
-        .limit(size)
-        .offset(offset)
-        .exec(db)
-        .await?
+        rows
     };
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let mut c: Collection = row.into();
-        c.tags = fetch_collection_tags(db, c.id).await?;
+        c.tags = fetch_collection_tags(pool, c.id).await?;
         out.push(c);
     }
     Ok(out)
 }
 
 pub(super) async fn count(
-    db: &mut Db,
+    pool: &SqlitePool,
     section_slug: &str,
     search: Option<&str>,
-) -> toasty::Result<i64> {
+) -> sqlx::Result<i64> {
     use crate::app::model::parse_search;
 
     let parsed = search.map(parse_search).unwrap_or_default();
@@ -93,75 +74,92 @@ pub(super) async fn count(
     let tag_ids: Option<Vec<Uuid>> = if parsed.tags.is_empty() {
         None
     } else {
-        Some(collection_ids_with_all_tags(db, &parsed.tags).await?)
+        Some(collection_ids_with_all_tags(pool, &parsed.tags).await?)
     };
     if tag_ids.as_ref().is_some_and(Vec::is_empty) {
         return Ok(0);
     }
 
-    let mut q = AudioCollectionRow::filter(
-        AudioCollectionRow::fields()
-            .section_slug()
-            .eq(section_slug.to_string()),
-    );
-    if let Some(t) = &parsed.text {
-        q = q.filter(AudioCollectionRow::fields().title().like(format!("%{t}%")));
+    if let Some(ids) = &tag_ids {
+        let rows: Vec<Uuid> = sqlx::query_scalar!(
+            r#"SELECT id AS "id!: Uuid"
+               FROM audio_collections
+               WHERE section_slug = ?1
+                 AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')"#,
+            section_slug,
+            parsed.text,
+        )
+        .fetch_all(pool)
+        .await?;
+        return Ok(rows.into_iter().filter(|id| ids.contains(id)).count() as i64);
     }
 
-    match tag_ids {
-        None => Ok(q.count().exec(db).await? as i64),
-        Some(ids) => {
-            let n = q
-                .exec(db)
-                .await?
-                .into_iter()
-                .filter(|r| ids.contains(&r.id))
-                .count();
-            Ok(n as i64)
-        }
-    }
+    sqlx::query_scalar!(
+        r#"SELECT COUNT(*) AS "n!: i64"
+           FROM audio_collections
+           WHERE section_slug = ?1
+             AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')"#,
+        section_slug,
+        parsed.text,
+    )
+    .fetch_one(pool)
+    .await
 }
 
 pub(super) async fn detail(
-    db: &mut Db,
+    pool: &SqlitePool,
     section_slug: &str,
     collection_id: Uuid,
-) -> toasty::Result<Option<Collection>> {
-    let Some(row) = AudioCollectionRow::filter(
-        AudioCollectionRow::fields()
-            .section_slug()
-            .eq(section_slug.to_string())
-            .and(AudioCollectionRow::fields().id().eq(collection_id)),
+) -> sqlx::Result<Option<Collection>> {
+    let row = sqlx::query_as!(
+        AudioCollectionRow,
+        r#"SELECT id AS "id!: Uuid", section_id AS "section_id!: Uuid",
+                  section_slug, title, poster, description, position,
+                  items_count AS "items_count!: i64"
+           FROM audio_collections
+           WHERE section_slug = ? AND id = ?"#,
+        section_slug,
+        collection_id,
     )
-    .first()
-    .exec(db)
-    .await?
-    else {
-        return Ok(None);
-    };
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else { return Ok(None) };
     let mut c: Collection = row.into();
-    c.tags = fetch_collection_tags(db, c.id).await?;
+    c.tags = fetch_collection_tags(pool, c.id).await?;
     Ok(Some(c))
 }
 
 pub(super) async fn summaries(
-    db: &mut Db,
+    pool: &SqlitePool,
     media_kind: &str,
-) -> toasty::Result<Vec<CollectionSummary>> {
-    let sections = SectionRow::filter(SectionRow::fields().media_kind().eq(media_kind.to_string()))
-        .order_by(SectionRow::fields().title().asc())
-        .exec(db)
-        .await?;
+) -> sqlx::Result<Vec<CollectionSummary>> {
+    let sections = sqlx::query_as!(
+        SectionRow,
+        r#"SELECT id            AS "id!: Uuid",
+                  slug          AS "slug!: String",
+                  title         AS "title!: String",
+                  media_kind    AS "media_kind!: String",
+                  nested        AS "nested!: bool",
+                  position      AS "position!: i64"
+           FROM sections WHERE media_kind = ? ORDER BY title ASC"#,
+        media_kind,
+    )
+    .fetch_all(pool)
+    .await?;
 
     let mut out: Vec<CollectionSummary> = Vec::new();
-    for section in &sections {
-        let rows = AudioCollectionRow::filter(
-            AudioCollectionRow::fields()
-                .section_slug()
-                .eq(section.slug.clone()),
+    for section in sections {
+        let rows = sqlx::query_as!(
+            AudioCollectionRow,
+            r#"SELECT id AS "id!: Uuid", section_id AS "section_id!: Uuid",
+                      section_slug, title, poster, description, position,
+                      items_count AS "items_count!: i64"
+               FROM audio_collections WHERE section_slug = ?
+               ORDER BY title ASC"#,
+            section.slug,
         )
-        .order_by(AudioCollectionRow::fields().title().asc())
-        .exec(db)
+        .fetch_all(pool)
         .await?;
 
         out.extend(rows.into_iter().map(|c| CollectionSummary {
@@ -175,38 +173,46 @@ pub(super) async fn summaries(
     Ok(out)
 }
 
-// ─── Insert ───────────────────────────────────────────────────────────────
+// ─── Insert ───────────────────────────────────────────────────────────────────
 
-async fn next_position(db: &mut toasty::Transaction<'_>, section_id: Uuid) -> toasty::Result<i64> {
-    let last = AudioCollectionRow::filter(AudioCollectionRow::fields().section_id().eq(section_id))
-        .order_by(AudioCollectionRow::fields().position().desc())
-        .limit(1)
-        .exec(db)
-        .await?;
-    Ok(last.first().map(|c| c.position + 1).unwrap_or(0))
+async fn next_position(conn: &mut sqlx::SqliteConnection, section_id: Uuid) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT COALESCE(MAX(position), -1) + 1 AS "n!: i64"
+           FROM audio_collections WHERE section_id = ?"#,
+        section_id,
+    )
+    .fetch_one(conn)
+    .await
 }
 
 async fn write_tags(
-    tx: &mut toasty::Transaction<'_>,
+    conn: &mut sqlx::SqliteConnection,
     collection_id: Uuid,
     tags: &[String],
-) -> toasty::Result<()> {
-    use crate::app::model::{Tag, canonicalize_tags};
-
+) -> sqlx::Result<()> {
+    use crate::app::model::canonicalize_tags;
     for name in canonicalize_tags(tags) {
-        let tag = match Tag::filter(Tag::fields().name().eq(name.clone()))
-            .first()
-            .exec(tx)
-            .await?
-        {
-            Some(t) => t,
-            None => toasty::create!(Tag { name: name.clone() }).exec(tx).await?,
+        let existing: Option<Uuid> =
+            sqlx::query_scalar!(r#"SELECT id AS "id!: Uuid" FROM tags WHERE name = ?"#, name,)
+                .fetch_optional(&mut *conn)
+                .await?;
+        let tag_id = match existing {
+            Some(id) => id,
+            None => {
+                let id = Uuid::new_v4();
+                sqlx::query!(r#"INSERT INTO tags (id, name) VALUES (?, ?)"#, id, name)
+                    .execute(&mut *conn)
+                    .await?;
+                id
+            }
         };
-        toasty::create!(CollectionTag {
+        sqlx::query!(
+            r#"INSERT INTO collection_tags (id, collection_id, tag_id) VALUES (?, ?, ?)"#,
+            Uuid::new_v4(),
             collection_id,
-            tag_id: tag.id,
-        })
-        .exec(tx)
+            tag_id,
+        )
+        .execute(&mut *conn)
         .await?;
     }
     Ok(())
@@ -214,138 +220,198 @@ async fn write_tags(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn insert(
-    db: &mut Db,
+    pool: &SqlitePool,
     id: Uuid,
     section_slug: &str,
     title: &str,
     description: Option<&str>,
     tags: &[String],
     poster: Option<String>,
-) -> toasty::Result<()> {
-    let mut tx = db.transaction().await?;
+) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
 
-    let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.to_string()))
-        .first()
-        .exec(&mut tx)
-        .await?
-        .ok_or_else(|| err_not_found("section"))?;
+    let section = sqlx::query_as!(
+        SectionRow,
+        r#"SELECT id            AS "id!: Uuid",
+                  slug          AS "slug!: String",
+                  title         AS "title!: String",
+                  media_kind    AS "media_kind!: String",
+                  nested        AS "nested!: bool",
+                  position      AS "position!: i64"
+           FROM sections WHERE slug = ?"#,
+        section_slug,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| err_not_found("section"))?;
 
     let next = next_position(&mut tx, section.id).await?;
 
-    toasty::create!(AudioCollectionRow {
+    sqlx::query!(
+        r#"INSERT INTO audio_collections
+           (id, section_id, section_slug, title, poster, description, position, items_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0)"#,
         id,
-        section_id: section.id,
-        section_slug: section.slug.clone(),
-        title: title.to_string(),
+        section.id,
+        section.slug,
+        title,
         poster,
-        description: description.map(String::from),
-        position: next,
-        items_count: 0,
-    })
-    .exec(&mut tx)
+        description,
+        next,
+    )
+    .execute(&mut *tx)
     .await?;
 
     write_tags(&mut tx, id, tags).await?;
-
     tx.commit().await?;
     Ok(())
 }
 
-// ─── Field / poster updates ───────────────────────────────────────────────
+// ─── Field / poster updates ───────────────────────────────────────────────────
 
 pub(super) async fn update_field(
-    db: &mut Db,
+    pool: &SqlitePool,
     id: Uuid,
     field: CollectionField,
     value: Option<&str>,
-) -> toasty::Result<()> {
-    let mut row = AudioCollectionRow::get_by_id(db, &id).await?;
+) -> sqlx::Result<()> {
     match field {
         CollectionField::Title => {
-            row.update()
-                .title(value.unwrap_or_default().to_string())
-                .exec(db)
-                .await
+            sqlx::query!(
+                r#"UPDATE audio_collections SET title = ? WHERE id = ?"#,
+                value.unwrap_or_default(),
+                id,
+            )
+            .execute(pool)
+            .await?;
         }
         CollectionField::Description => {
-            row.update()
-                .description(value.map(String::from))
-                .exec(db)
-                .await
+            sqlx::query!(
+                r#"UPDATE audio_collections SET description = ? WHERE id = ?"#,
+                value,
+                id,
+            )
+            .execute(pool)
+            .await?;
         }
-        CollectionField::Poster => row.update().poster(value.map(String::from)).exec(db).await,
+        CollectionField::Poster => {
+            sqlx::query!(
+                r#"UPDATE audio_collections SET poster = ? WHERE id = ?"#,
+                value,
+                id,
+            )
+            .execute(pool)
+            .await?;
+        }
     }
+    Ok(())
 }
 
-pub(super) async fn set_poster(db: &mut Db, id: Uuid, url: Option<&str>) -> toasty::Result<()> {
-    let mut row = AudioCollectionRow::get_by_id(db, &id).await?;
-    row.update().poster(url.map(String::from)).exec(db).await
+pub(super) async fn set_poster(pool: &SqlitePool, id: Uuid, url: Option<&str>) -> sqlx::Result<()> {
+    sqlx::query!(
+        r#"UPDATE audio_collections SET poster = ? WHERE id = ?"#,
+        url,
+        id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
-// ─── Delete ───────────────────────────────────────────────────────────────
+// ─── Delete ───────────────────────────────────────────────────────────────────
 
-pub(super) async fn delete_cascade(db: &mut Db, id: Uuid) -> toasty::Result<CollectionDeletion> {
-    let mut tx = db.transaction().await?;
+pub(super) async fn delete_cascade(
+    pool: &SqlitePool,
+    id: Uuid,
+) -> sqlx::Result<CollectionDeletion> {
+    let mut tx = pool.begin().await?;
 
-    let collection = AudioCollectionRow::get_by_id(&mut tx, &id).await?;
-    let poster_url = collection.poster.clone();
+    let poster: Option<String> =
+        sqlx::query_scalar!(r#"SELECT poster FROM audio_collections WHERE id = ?"#, id,)
+            .fetch_one(&mut *tx)
+            .await?;
 
-    let items = Item::filter(Item::fields().collection_id().eq(id))
-        .exec(&mut tx)
+    let file_ids: Vec<Uuid> = sqlx::query_scalar!(
+        r#"SELECT file_id AS "file_id!: Uuid" FROM items WHERE collection_id = ?"#,
+        id,
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    sqlx::query!(r#"DELETE FROM collection_tags WHERE collection_id = ?"#, id)
+        .execute(&mut *tx)
         .await?;
-    let file_ids: Vec<Uuid> = items.iter().map(|i| i.file_id).collect();
-
-    for row in CollectionTag::filter(CollectionTag::fields().collection_id().eq(id))
-        .exec(&mut tx)
-        .await?
-    {
-        row.delete().exec(&mut tx).await?;
-    }
-
-    collection.clone().delete().exec(&mut tx).await?;
-    for item in items {
-        item.delete().exec(&mut tx).await?;
-    }
+    sqlx::query!(r#"DELETE FROM audio_collections WHERE id = ?"#, id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!(r#"DELETE FROM items WHERE collection_id = ?"#, id)
+        .execute(&mut *tx)
+        .await?;
 
     let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
 
     tx.commit().await?;
     Ok(CollectionDeletion {
         media_paths,
-        poster_url,
+        poster_url: poster,
     })
 }
 
-// ─── Move to another section ──────────────────────────────────────────────
+// ─── Move to another section ──────────────────────────────────────────────────
 
 pub(super) async fn move_to_section(
-    db: &mut Db,
+    pool: &SqlitePool,
     collection_id: Uuid,
     to_section_slug: &str,
 ) -> Result<CollectionMove, MoveCollectionError> {
-    let to_section =
-        SectionRow::filter(SectionRow::fields().slug().eq(to_section_slug.to_string()))
-            .first()
-            .exec(db)
-            .await?
-            .ok_or(MoveCollectionError::SectionNotFound)?;
+    let to_section = sqlx::query_as!(
+        SectionRow,
+        r#"SELECT id            AS "id!: Uuid",
+                  slug          AS "slug!: String",
+                  title         AS "title!: String",
+                  media_kind    AS "media_kind!: String",
+                  nested        AS "nested!: bool",
+                  position      AS "position!: i64"
+           FROM sections WHERE slug = ?"#,
+        to_section_slug,
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or(MoveCollectionError::SectionNotFound)?;
 
     if to_section.media_kind != MediaKind::Audio.as_str() {
         return Err(MoveCollectionError::MediaKindMismatch);
     }
 
-    let mut c = AudioCollectionRow::get_by_id(db, &collection_id).await?;
-    let from_slug = c.section_slug.clone();
-    let poster_url = c.poster.clone();
+    let (from_slug, poster): (String, Option<String>) = sqlx::query_as!(
+        _FromSlug,
+        r#"SELECT section_slug AS "section_slug!: String", poster
+           FROM audio_collections WHERE id = ?"#,
+        collection_id,
+    )
+    .fetch_one(pool)
+    .await
+    .map(|r| (r.section_slug, r.poster))?;
 
-    c.update()
-        .section_id(to_section.id)
-        .section_slug(to_section.slug.clone())
-        .exec(db)
-        .await?;
+    sqlx::query!(
+        r#"UPDATE audio_collections
+           SET section_id = ?, section_slug = ?
+           WHERE id = ?"#,
+        to_section.id,
+        to_section.slug,
+        collection_id,
+    )
+    .execute(pool)
+    .await?;
 
     Ok(CollectionMove {
         from_slug,
-        poster_url,
+        poster_url: poster,
     })
+}
+
+#[derive(sqlx::FromRow)]
+struct _FromSlug {
+    section_slug: String,
+    poster: Option<String>,
 }

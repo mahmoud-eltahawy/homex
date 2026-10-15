@@ -8,7 +8,8 @@ mod items;
 mod sections;
 mod tags;
 
-use toasty::Db;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use std::str::FromStr;
 
 use super::Config;
 
@@ -34,42 +35,29 @@ pub use tags::{
     set_section_tags,
 };
 
-// ─── Pool init ────────────────────────────────────────────────────────────
+// ─── Pool init ────────────────────────────────────────────────────────────────
 
-pub async fn init(config: &Config) -> Result<Db, Box<dyn std::error::Error>> {
+pub async fn init(config: &Config) -> Result<sqlx::SqlitePool, Box<dyn std::error::Error>> {
     tokio::fs::create_dir_all(&config.storage.data_dir).await?;
 
     let db_path = config.db_path();
-    let is_fresh = !db_path.exists();
-    let force_reset = std::env::var("HOMEX_RESET_SCHEMA").is_ok();
+    let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
-    let url = format!("sqlite:{}", db_path.display());
-    let db = toasty::Db::builder()
-        .models(toasty::models!(
-            crate::app::model::File,
-            crate::app::model::SectionRow,
-            crate::app::model::VideoCollectionRow,
-            crate::app::model::AudioCollectionRow,
-            crate::app::model::Item,
-            crate::app::model::Tag,
-            crate::app::model::SectionTag,
-            crate::app::model::CollectionTag,
-        ))
-        .connect(&url)
+    let opts = SqliteConnectOptions::from_str(&url)?.create_if_missing(true);
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(8)
+        .connect_with(opts)
         .await?;
 
-    if is_fresh || force_reset {
-        leptos::logging::log!("[db] pushing schema (fresh={is_fresh}, force={force_reset})");
-        db.push_schema().await?;
-    } else {
-        leptos::logging::log!("[db] schema exists, skipping push_schema");
-    }
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
-    Ok(db)
+    Ok(pool)
 }
 
-// ─── Shared helpers ───────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
-pub(crate) fn err_not_found(what: &str) -> toasty::Error {
-    toasty::Error::record_not_found(what)
+pub(crate) fn err_not_found(what: &str) -> sqlx::Error {
+    let _ = what;
+    sqlx::Error::RowNotFound
 }

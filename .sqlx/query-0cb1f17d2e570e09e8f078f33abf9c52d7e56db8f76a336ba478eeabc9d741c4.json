@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id            AS \"id!: Uuid\",\n                  slug          AS \"slug!: String\",\n                  title         AS \"title!: String\",\n                  media_kind    AS \"media_kind!: String\",\n                  nested        AS \"nested!: bool\",\n                  position      AS \"position!: i64\"\n           FROM sections WHERE media_kind = ? ORDER BY title ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "slug!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "name": "title!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "media_kind!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "media_kind"
+          }
+        }
+      },
+      {
+        "name": "nested!: bool",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "nested"
+          }
+        }
+      },
+      {
+        "name": "position!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "position"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0cb1f17d2e570e09e8f078f33abf9c52d7e56db8f76a336ba478eeabc9d741c4"
+}

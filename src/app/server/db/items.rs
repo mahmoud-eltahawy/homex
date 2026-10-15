@@ -1,111 +1,213 @@
 use std::collections::HashMap;
 
-use toasty::Db;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 use super::collections::decrement_or_delete;
 use super::files::purge_orphan_files;
 use crate::app::model::Item;
 
-// ─── Item queries ─────────────────────────────────────────────────────────
+// ─── Item queries ─────────────────────────────────────────────────────────────
 
-pub async fn fetch_items(db: &mut Db, collection_id: Uuid) -> toasty::Result<Vec<Item>> {
-    Item::filter(Item::fields().collection_id().eq(collection_id))
-        .order_by((
-            Item::fields().season_number().asc(),
-            Item::fields().number().asc(),
-            Item::fields().id().asc(),
-        ))
-        .exec(db)
-        .await
+pub async fn fetch_items(pool: &SqlitePool, collection_id: Uuid) -> sqlx::Result<Vec<Item>> {
+    sqlx::query_as!(
+        Item,
+        r#"SELECT id            AS "id!: Uuid",
+                  collection_id AS "collection_id!: Uuid",
+                  number        AS "number!: i64",
+                  season_number,
+                  title,
+                  poster,
+                  description,
+                  file_id       AS "file_id!: Uuid"
+           FROM items
+           WHERE collection_id = ?
+           ORDER BY season_number ASC, number ASC, id ASC"#,
+        collection_id,
+    )
+    .fetch_all(pool)
+    .await
 }
 
-pub async fn update_item_title(db: &mut Db, id: Uuid, title: Option<&str>) -> toasty::Result<()> {
-    let mut item = Item::get_by_id(db, &id).await?;
-    item.update().title(title.map(String::from)).exec(db).await
+pub async fn update_item_title(
+    pool: &SqlitePool,
+    id: Uuid,
+    title: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query!(r#"UPDATE items SET title = ? WHERE id = ?"#, title, id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
-// ─── Reordering ───────────────────────────────────────────────────────────
+// ─── Reordering ───────────────────────────────────────────────────────────────
 
-pub async fn swap_item_order(db: &mut Db, id: Uuid, is_up: bool) -> toasty::Result<()> {
-    let mut tx = db.transaction().await?;
+pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
 
-    let item = Item::get_by_id(&mut tx, &id).await?;
+    let item = sqlx::query_as!(
+        Item,
+        r#"SELECT id            AS "id!: Uuid",
+                  collection_id AS "collection_id!: Uuid",
+                  number        AS "number!: i64",
+                  season_number, title, poster, description,
+                  file_id       AS "file_id!: Uuid"
+           FROM items WHERE id = ?"#,
+        id,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
 
-    let mut q = Item::filter(Item::fields().collection_id().eq(item.collection_id));
-    q = match item.season_number {
-        Some(s) => q.filter(Item::fields().season_number().eq(s)),
-        None => q.filter(Item::fields().season_number().is_none()),
+    let neighbour = match (is_up, item.season_number) {
+        (true, Some(s)) => {
+            sqlx::query_as!(
+                Item,
+                r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
+                      number AS "number!: i64", season_number, title, poster,
+                      description, file_id AS "file_id!: Uuid"
+               FROM items
+               WHERE collection_id = ? AND season_number = ? AND number < ?
+               ORDER BY number DESC LIMIT 1"#,
+                item.collection_id,
+                s,
+                item.number,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+        }
+        (false, Some(s)) => {
+            sqlx::query_as!(
+                Item,
+                r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
+                      number AS "number!: i64", season_number, title, poster,
+                      description, file_id AS "file_id!: Uuid"
+               FROM items
+               WHERE collection_id = ? AND season_number = ? AND number > ?
+               ORDER BY number ASC LIMIT 1"#,
+                item.collection_id,
+                s,
+                item.number,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+        }
+        (true, None) => {
+            sqlx::query_as!(
+                Item,
+                r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
+                      number AS "number!: i64", season_number, title, poster,
+                      description, file_id AS "file_id!: Uuid"
+               FROM items
+               WHERE collection_id = ? AND season_number IS NULL AND number < ?
+               ORDER BY number DESC LIMIT 1"#,
+                item.collection_id,
+                item.number,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+        }
+        (false, None) => {
+            sqlx::query_as!(
+                Item,
+                r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
+                      number AS "number!: i64", season_number, title, poster,
+                      description, file_id AS "file_id!: Uuid"
+               FROM items
+               WHERE collection_id = ? AND season_number IS NULL AND number > ?
+               ORDER BY number ASC LIMIT 1"#,
+                item.collection_id,
+                item.number,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+        }
     };
-    q = if is_up {
-        q.filter(Item::fields().number().lt(item.number))
-            .order_by(Item::fields().number().desc())
-    } else {
-        q.filter(Item::fields().number().gt(item.number))
-            .order_by(Item::fields().number().asc())
-    };
 
-    let Some(neighbour) = q.limit(1).exec(&mut tx).await?.into_iter().next() else {
+    let Some(neighbour) = neighbour else {
+        tx.commit().await?;
         return Ok(());
     };
 
     let (a_number, b_number) = (item.number, neighbour.number);
-
-    let mut a = Item::get_by_id(&mut tx, &item.id).await?;
-    a.update().number(b_number).exec(&mut tx).await?;
-
-    let mut b = Item::get_by_id(&mut tx, &neighbour.id).await?;
-    b.update().number(a_number).exec(&mut tx).await?;
+    sqlx::query!(
+        r#"UPDATE items SET number = ? WHERE id = ?"#,
+        b_number,
+        item.id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        r#"UPDATE items SET number = ? WHERE id = ?"#,
+        a_number,
+        neighbour.id
+    )
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
     Ok(())
 }
 
-// ─── Move items between collections ───────────────────────────────────────
+// ─── Move items between collections ───────────────────────────────────────────
 
 pub async fn move_items_to_collection(
-    db: &mut Db,
+    pool: &SqlitePool,
     item_ids: &[Uuid],
     to_collection_id: Uuid,
-) -> toasty::Result<()> {
+) -> sqlx::Result<()> {
     use super::collections::kind_of;
-    use crate::app::model::{AudioCollectionRow, CollectionKind, VideoCollectionRow};
+    use crate::app::model::CollectionKind;
 
     if item_ids.is_empty() {
         return Ok(());
     }
 
-    let dest_kind = kind_of(db, to_collection_id)
+    let dest_kind = kind_of(pool, to_collection_id)
         .await?
         .ok_or_else(|| super::err_not_found("collection"))?;
 
-    let mut tx = db.transaction().await?;
+    let mut tx = pool.begin().await?;
 
     // Verify destination exists.
     match dest_kind {
         CollectionKind::Video => {
-            VideoCollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
+            sqlx::query!(
+                r#"SELECT id FROM video_collections WHERE id = ?"#,
+                to_collection_id
+            )
+            .fetch_one(&mut *tx)
+            .await?;
         }
         CollectionKind::Audio => {
-            AudioCollectionRow::get_by_id(&mut tx, &to_collection_id).await?;
+            sqlx::query!(
+                r#"SELECT id FROM audio_collections WHERE id = ?"#,
+                to_collection_id
+            )
+            .fetch_one(&mut *tx)
+            .await?;
         }
     }
 
     let mut moved: Vec<Item> = Vec::with_capacity(item_ids.len());
     for &id in item_ids {
-        let item = Item::filter(Item::fields().id().eq(id))
-            .first()
-            .exec(&mut tx)
-            .await?;
+        let item = sqlx::query_as!(
+            Item,
+            r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
+                      number AS "number!: i64", season_number, title, poster,
+                      description, file_id AS "file_id!: Uuid"
+               FROM items WHERE id = ?"#,
+            id,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
         match item {
             Some(i) if i.collection_id != to_collection_id => moved.push(i),
-            Some(_) => {} // already in destination — idempotent no-op
-            None => {
-                leptos::logging::warn!("[move_items] unknown item {id}");
-            }
+            Some(_) => {}
+            None => leptos::logging::warn!("[move_items] unknown item {id}"),
         }
     }
     if moved.is_empty() {
+        tx.commit().await?;
         return Ok(());
     }
 
@@ -115,45 +217,59 @@ pub async fn move_items_to_collection(
     }
 
     for item in &moved {
-        let mut q = Item::filter(Item::fields().collection_id().eq(to_collection_id));
-        q = match item.season_number {
-            Some(s) => q.filter(Item::fields().season_number().eq(s)),
-            None => q.filter(Item::fields().season_number().is_none()),
+        let next: i64 = match item.season_number {
+            Some(s) => {
+                sqlx::query_scalar!(
+                    r#"SELECT COALESCE(MAX(number), -1) + 1 AS "n!: i64"
+                   FROM items WHERE collection_id = ? AND season_number = ?"#,
+                    to_collection_id,
+                    s,
+                )
+                .fetch_one(&mut *tx)
+                .await?
+            }
+            None => {
+                sqlx::query_scalar!(
+                    r#"SELECT COALESCE(MAX(number), -1) + 1 AS "n!: i64"
+                   FROM items WHERE collection_id = ? AND season_number IS NULL"#,
+                    to_collection_id,
+                )
+                .fetch_one(&mut *tx)
+                .await?
+            }
         };
-        let next = q
-            .order_by(Item::fields().number().desc())
-            .limit(1)
-            .exec(&mut tx)
-            .await?
-            .first()
-            .map(|i| i.number + 1)
-            .unwrap_or(0);
 
-        let mut m = Item::get_by_id(&mut tx, &item.id).await?;
-        m.update()
-            .collection_id(to_collection_id)
-            .number(next)
-            .exec(&mut tx)
-            .await?;
+        sqlx::query!(
+            r#"UPDATE items SET collection_id = ?, number = ? WHERE id = ?"#,
+            to_collection_id,
+            next,
+            item.id,
+        )
+        .execute(&mut *tx)
+        .await?;
     }
 
     // Renumber sources per season.
     for &from_id in from_counts.keys() {
-        let remaining = Item::filter(Item::fields().collection_id().eq(from_id))
-            .order_by((
-                Item::fields().season_number().asc(),
-                Item::fields().number().asc(),
-                Item::fields().id().asc(),
-            ))
-            .exec(&mut tx)
-            .await?;
+        let remaining = sqlx::query_as!(
+            Item,
+            r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
+                      number AS "number!: i64", season_number, title, poster,
+                      description, file_id AS "file_id!: Uuid"
+               FROM items WHERE collection_id = ?
+               ORDER BY season_number ASC, number ASC, id ASC"#,
+            from_id,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
 
         let mut counters: HashMap<Option<i64>, i64> = HashMap::new();
         for item in remaining {
             let n = counters.entry(item.season_number).or_insert(0);
             if item.number != *n {
-                let mut m = Item::get_by_id(&mut tx, &item.id).await?;
-                m.update().number(*n).exec(&mut tx).await?;
+                sqlx::query!(r#"UPDATE items SET number = ? WHERE id = ?"#, *n, item.id)
+                    .execute(&mut *tx)
+                    .await?;
             }
             *n += 1;
         }
@@ -161,27 +277,29 @@ pub async fn move_items_to_collection(
 
     // Bump items_count on both source and destination.
     async fn bump(
-        tx: &mut toasty::Transaction<'_>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         kind: CollectionKind,
         id: Uuid,
         delta: i64,
-    ) -> toasty::Result<()> {
+    ) -> sqlx::Result<()> {
         match kind {
             CollectionKind::Video => {
-                let mut c = VideoCollectionRow::get_by_id(tx, &id).await?;
-                let n = (c.items_count + delta).max(0);
-                c.update().items_count(n).exec(tx).await
+                sqlx::query!(
+                    r#"UPDATE video_collections SET items_count = MAX(items_count + ?, 0) WHERE id = ?"#,
+                    delta, id,
+                ).execute(&mut **tx).await?;
             }
             CollectionKind::Audio => {
-                let mut c = AudioCollectionRow::get_by_id(tx, &id).await?;
-                let n = (c.items_count + delta).max(0);
-                c.update().items_count(n).exec(tx).await
+                sqlx::query!(
+                    r#"UPDATE audio_collections SET items_count = MAX(items_count + ?, 0) WHERE id = ?"#,
+                    delta, id,
+                ).execute(&mut **tx).await?;
             }
         }
+        Ok(())
     }
 
     for (&from_id, &count) in &from_counts {
-        // Sources are always the same kind as the destination.
         bump(&mut tx, dest_kind, from_id, -count).await?;
     }
     bump(&mut tx, dest_kind, to_collection_id, moved.len() as i64).await?;
@@ -190,7 +308,7 @@ pub async fn move_items_to_collection(
     Ok(())
 }
 
-// ─── Cascade deletion ─────────────────────────────────────────────────────
+// ─── Cascade deletion ─────────────────────────────────────────────────────────
 
 pub struct ItemDeletion {
     pub media_paths: Vec<String>,
@@ -202,15 +320,25 @@ pub struct BulkItemDeletion {
     pub emptied_posters: Vec<String>,
 }
 
-pub async fn delete_item_cascade(db: &mut Db, id: Uuid) -> toasty::Result<ItemDeletion> {
-    let mut tx = db.transaction().await?;
+pub async fn delete_item_cascade(pool: &SqlitePool, id: Uuid) -> sqlx::Result<ItemDeletion> {
+    let mut tx = pool.begin().await?;
 
-    let item = Item::get_by_id(&mut tx, &id).await?;
-    let (file_id, collection_id) = (item.file_id, item.collection_id);
-    item.delete().exec(&mut tx).await?;
+    let (file_id, collection_id): (Uuid, Uuid) = sqlx::query_as!(
+        _CollectionRef,
+        r#"SELECT file_id AS "file_id!: Uuid", collection_id AS "collection_id!: Uuid"
+           FROM items WHERE id = ?"#,
+        id,
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map(|r| (r.file_id, r.collection_id))?;
 
-    let emptied_poster = decrement_or_delete(&mut tx, collection_id, 1).await?;
-    let media_paths = purge_orphan_files(&mut tx, [file_id]).await?;
+    sqlx::query!(r#"DELETE FROM items WHERE id = ?"#, id)
+        .execute(&mut *tx)
+        .await?;
+
+    let emptied_poster = decrement_or_delete(&mut *tx, collection_id, 1).await?;
+    let media_paths = purge_orphan_files(&mut *tx, [file_id]).await?;
 
     tx.commit().await?;
     Ok(ItemDeletion {
@@ -220,9 +348,9 @@ pub async fn delete_item_cascade(db: &mut Db, id: Uuid) -> toasty::Result<ItemDe
 }
 
 pub async fn delete_items_cascade(
-    db: &mut Db,
+    pool: &SqlitePool,
     item_ids: &[Uuid],
-) -> toasty::Result<BulkItemDeletion> {
+) -> sqlx::Result<BulkItemDeletion> {
     if item_ids.is_empty() {
         return Ok(BulkItemDeletion {
             media_paths: Vec::new(),
@@ -230,35 +358,50 @@ pub async fn delete_items_cascade(
         });
     }
 
-    let mut tx = db.transaction().await?;
+    let mut tx = pool.begin().await?;
     let mut file_ids: Vec<Uuid> = Vec::with_capacity(item_ids.len());
     let mut deltas: HashMap<Uuid, i64> = HashMap::new();
 
     for &id in item_ids {
-        let item = match Item::filter(Item::fields().id().eq(id))
-            .first()
-            .exec(&mut tx)
-            .await?
-        {
-            Some(i) => i,
-            None => continue,
-        };
-        file_ids.push(item.file_id);
-        *deltas.entry(item.collection_id).or_insert(0) += 1;
-        item.delete().exec(&mut tx).await?;
+        let row: Option<_CollectionRef> = sqlx::query_as!(
+            _CollectionRef,
+            r#"SELECT file_id AS "file_id!: Uuid", collection_id AS "collection_id!: Uuid"
+               FROM items WHERE id = ?"#,
+            id,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(row) = row else { continue };
+        file_ids.push(row.file_id);
+        *deltas.entry(row.collection_id).or_insert(0) += 1;
+        sqlx::query!(r#"DELETE FROM items WHERE id = ?"#, id)
+            .execute(&mut *tx)
+            .await?;
     }
 
     let mut emptied_posters: Vec<String> = Vec::new();
     for (collection_id, delta) in deltas {
-        if let Some(poster) = decrement_or_delete(&mut tx, collection_id, delta).await? {
+        if let Some(poster) = decrement_or_delete(&mut *tx, collection_id, delta).await? {
             emptied_posters.push(poster);
         }
     }
 
-    let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
+    let media_paths = purge_orphan_files(&mut *tx, file_ids).await?;
     tx.commit().await?;
     Ok(BulkItemDeletion {
         media_paths,
         emptied_posters,
     })
 }
+
+// ─── Private helper row for two-column selects ────────────────────────────────
+
+#[derive(sqlx::FromRow)]
+struct _CollectionRef {
+    file_id: Uuid,
+    collection_id: Uuid,
+}
+
+#[allow(dead_code)]
+fn _touch(_: &mut SqliteConnection) {}

@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\", section_id AS \"section_id!: Uuid\",\n                          section_slug, title, poster, description, position,\n                          items_count AS \"items_count!: i64\"\n                   FROM audio_collections WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "section_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "section_id"
+          }
+        }
+      },
+      {
+        "name": "section_slug",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "section_slug"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "poster",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "poster"
+          }
+        }
+      },
+      {
+        "name": "description",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "name": "position",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "items_count!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "items_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2c7ffbcdd632b9ebf594ba51c984afb2336895b76294c64b352ed98cc732fcc6"
+}

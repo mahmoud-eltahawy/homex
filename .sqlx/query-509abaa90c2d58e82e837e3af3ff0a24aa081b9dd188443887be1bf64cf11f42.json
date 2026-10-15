@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO section_tags (id, section_id, tag_id) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "509abaa90c2d58e82e837e3af3ff0a24aa081b9dd188443887be1bf64cf11f42"
+}

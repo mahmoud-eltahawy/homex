@@ -1,58 +1,78 @@
-use toasty::Db;
+use sqlx::SqliteConnection;
 use uuid::Uuid;
 
-use crate::app::model::{File, Item};
+use crate::app::model::File;
 
-// ─── File operations ──────────────────────────────────────────────────────
+// ─── File operations ──────────────────────────────────────────────────────────
 
 pub async fn insert_file(
-    db: &mut Db,
+    conn: &mut SqliteConnection,
     relative_path: &str,
     size_bytes: i64,
     duration_secs: i64,
-) -> toasty::Result<Uuid> {
-    let f = toasty::create!(File {
-        relative_path: relative_path.to_string(),
+) -> sqlx::Result<Uuid> {
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        r#"INSERT INTO files (id, relative_path, size_bytes, duration_secs)
+           VALUES (?, ?, ?, ?)"#,
+        id,
+        relative_path,
         size_bytes,
         duration_secs,
-    })
-    .exec(db)
+    )
+    .execute(conn)
     .await?;
-    Ok(f.id)
+    Ok(id)
 }
 
-/// Look up a file's stored relative path. Returns `Ok(None)` when the row
-/// doesn't exist, and `Err(_)` for any actual DB failure. The distinction
-/// matters: `stream_media` turns `None` into a 404, and a DB error into a
-/// 500. The previous implementation used `.ok()`, which collapsed the two
-/// and turned every DB hiccup into a spurious "file not found".
-pub async fn fetch_file_path(db: &mut Db, file_id: Uuid) -> toasty::Result<Option<String>> {
-    let row = File::filter(File::fields().id().eq(file_id))
-        .first()
-        .exec(db)
-        .await?;
-    Ok(row.map(|f| f.relative_path))
+pub async fn fetch_file_path(
+    pool: &sqlx::SqlitePool,
+    file_id: Uuid,
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar!(
+        r#"SELECT relative_path AS "relative_path!: String"
+           FROM files WHERE id = ?"#,
+        file_id,
+    )
+    .fetch_optional(pool)
+    .await
 }
 
-// ─── Orphan cleanup ───────────────────────────────────────────────────────
+// ─── Orphan cleanup ───────────────────────────────────────────────────────────
 
 pub(crate) async fn purge_orphan_files(
-    tx: &mut toasty::Transaction<'_>,
+    conn: &mut SqliteConnection,
     file_ids: impl IntoIterator<Item = Uuid>,
-) -> toasty::Result<Vec<String>> {
+) -> sqlx::Result<Vec<String>> {
     let mut paths = Vec::new();
     for fid in file_ids {
-        let still_used = !Item::filter(Item::fields().file_id().eq(fid))
-            .limit(1)
-            .exec(tx)
-            .await?
-            .is_empty();
-        if still_used {
+        let still_used: i64 = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "n!: i64" FROM items WHERE file_id = ? LIMIT 1"#,
+            fid,
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if still_used > 0 {
             continue;
         }
-        if let Ok(f) = File::get_by_id(tx, &fid).await {
-            paths.push(f.relative_path.clone());
-            f.delete().exec(tx).await?;
+        let row: Option<(Uuid, String, i64, i64)> = sqlx::query_as!(
+            File,
+            r#"SELECT id AS "id!: Uuid",
+                      relative_path AS "relative_path!: String",
+                      size_bytes    AS "size_bytes!: i64",
+                      duration_secs AS "duration_secs!: i64"
+               FROM files WHERE id = ?"#,
+            fid,
+        )
+        .fetch_optional(&mut *conn)
+        .await
+        .map(|o| o.map(|f| (f.id, f.relative_path, f.size_bytes, f.duration_secs)))?;
+
+        if let Some((_, rel, _, _)) = row {
+            paths.push(rel);
+            sqlx::query!(r#"DELETE FROM files WHERE id = ?"#, fid)
+                .execute(&mut *conn)
+                .await?;
         }
     }
     Ok(paths)

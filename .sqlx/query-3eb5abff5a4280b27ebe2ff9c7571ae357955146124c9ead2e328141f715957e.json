@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\"\n               FROM audio_collections\n               WHERE section_slug = ?1\n                 AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3eb5abff5a4280b27ebe2ff9c7571ae357955146124c9ead2e328141f715957e"
+}

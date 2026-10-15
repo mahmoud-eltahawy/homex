@@ -7,19 +7,18 @@ use uuid::Uuid;
 use crate::app::constants::messages;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
-
 #[cfg(feature = "ssr")]
 use crate::app::server::db;
 
 #[server]
 pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
     let t = title.trim();
     if t.is_empty() {
         return Err(AppError::validation(messages::TITLE_REQUIRED));
     }
-    db::update_section_title(&mut state.db, id, t)
+    db::update_section_title(&state.db, id, t)
         .await
         .context("patch section title")?;
     Ok(())
@@ -28,8 +27,8 @@ pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError
 #[server]
 pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::set_section_tags(&mut state.db, id, &tags)
+    let state: AppState = expect_context();
+    db::set_section_tags(&state.db, id, &tags)
         .await
         .context("patch section tags")?;
     Ok(())
@@ -38,8 +37,8 @@ pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), AppEr
 #[server]
 pub async fn fetch_sections() -> Result<Vec<Section>, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::fetch_sections(&mut state.db)
+    let state: AppState = expect_context();
+    db::fetch_sections(&state.db)
         .await
         .context("fetch sections")
 }
@@ -47,8 +46,8 @@ pub async fn fetch_sections() -> Result<Vec<Section>, AppError> {
 #[server]
 pub async fn fetch_section_by_slug(slug: String) -> Result<Section, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::fetch_section_by_slug(&mut state.db, &slug)
+    let state: AppState = expect_context();
+    db::fetch_section_by_slug(&state.db, &slug)
         .await
         .context("fetch section by slug")?
         .ok_or_else(|| AppError::not_found("section"))
@@ -110,22 +109,20 @@ pub async fn create_section(
         format!("{hash:08x}")
     }
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
 
     let title = title.trim().to_string();
     if title.is_empty() {
         return Err(AppError::validation(messages::NAME_REQUIRED));
     }
 
-    // `media_kind` is a client parameter. A malformed value is a client bug
-    // and the user should see the constraint, not "Internal error".
     let kind = MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
     let prefix = prefix_for(kind, nested);
 
     for attempt in 0..4 {
         let slug = format!("{prefix}-{}", short_hash());
 
-        if db::fetch_section_by_slug(&mut state.db, &slug)
+        if db::fetch_section_by_slug(&state.db, &slug)
             .await
             .context("check slug uniqueness")?
             .is_some()
@@ -139,7 +136,7 @@ pub async fn create_section(
             ));
         }
 
-        match db::insert_section(&mut state.db, &slug, &title, media_kind.as_str(), nested).await {
+        match db::insert_section(&state.db, &slug, &title, media_kind.as_str(), nested).await {
             Ok(id) => return Ok(id),
             Err(e) => {
                 if attempt < 3 {
@@ -165,11 +162,9 @@ pub async fn update_section(
 ) -> Result<(), AppError> {
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    // Same reasoning as `create_section` — client-supplied enum, client
-    // error if malformed.
+    let state: AppState = expect_context();
     MediaKind::try_from(media_kind.as_str()).map_err(AppError::public)?;
-    db::update_section(&mut state.db, id, &title, &media_kind, nested)
+    db::update_section(&state.db, id, &title, &media_kind, nested)
         .await
         .context("update section")?;
     Ok(())
@@ -180,8 +175,8 @@ pub async fn delete_section(id: Uuid) -> Result<(), AppError> {
     use crate::app::server::AppState;
     use crate::app::server::db::DeleteSectionOutcome;
 
-    let mut state: AppState = expect_context();
-    match db::delete_section(&mut state.db, id)
+    let state: AppState = expect_context();
+    match db::delete_section(&state.db, id)
         .await
         .context("delete section")?
     {

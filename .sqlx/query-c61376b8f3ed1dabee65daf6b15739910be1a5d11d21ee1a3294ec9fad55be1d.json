@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM section_tags WHERE section_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c61376b8f3ed1dabee65daf6b15739910be1a5d11d21ee1a3294ec9fad55be1d"
+}

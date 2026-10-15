@@ -121,24 +121,35 @@ pub async fn fetch_sections_with_collections(
     use crate::app::model::{AudioCollectionRow, SectionRow, VideoCollectionRow};
     use crate::app::server::AppState;
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
 
-    let sections = SectionRow::filter(SectionRow::fields().media_kind().eq(media_kind.clone()))
-        .order_by(SectionRow::fields().title().asc())
-        .exec(&mut state.db)
-        .await
-        .map_err(|e| AppError::internal("fetch sections", e))?;
+    let sections = sqlx::query_as!(
+        SectionRow,
+        r#"SELECT id            AS "id!: Uuid",
+                  slug          AS "slug!: String",
+                  title         AS "title!: String",
+                  media_kind    AS "media_kind!: String",
+                  nested        AS "nested!: bool",
+                  position      AS "position!: i64"
+           FROM sections WHERE media_kind = ? ORDER BY title ASC"#,
+        media_kind,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| AppError::internal("fetch sections", e))?;
 
     let mut out = Vec::with_capacity(sections.len());
     for s in sections {
         let rows: Vec<CollectionSummary> = match media_kind.as_str() {
-            "video" => VideoCollectionRow::filter(
-                VideoCollectionRow::fields()
-                    .section_slug()
-                    .eq(s.slug.clone()),
+            "video" => sqlx::query_as!(
+                VideoCollectionRow,
+                r#"SELECT id AS "id!: Uuid", section_id AS "section_id!: Uuid",
+                          section_slug, title, poster, description, position,
+                          items_count AS "items_count!: i64"
+                   FROM video_collections WHERE section_slug = ? ORDER BY title ASC"#,
+                s.slug,
             )
-            .order_by(VideoCollectionRow::fields().title().asc())
-            .exec(&mut state.db)
+            .fetch_all(&state.db)
             .await
             .map_err(|e| AppError::internal("fetch video collections", e))?
             .into_iter()
@@ -150,13 +161,15 @@ pub async fn fetch_sections_with_collections(
                 nested: s.nested,
             })
             .collect(),
-            _ => AudioCollectionRow::filter(
-                AudioCollectionRow::fields()
-                    .section_slug()
-                    .eq(s.slug.clone()),
+            _ => sqlx::query_as!(
+                AudioCollectionRow,
+                r#"SELECT id AS "id!: Uuid", section_id AS "section_id!: Uuid",
+                          section_slug, title, poster, description, position,
+                          items_count AS "items_count!: i64"
+                   FROM audio_collections WHERE section_slug = ? ORDER BY title ASC"#,
+                s.slug,
             )
-            .order_by(AudioCollectionRow::fields().title().asc())
-            .exec(&mut state.db)
+            .fetch_all(&state.db)
             .await
             .map_err(|e| AppError::internal("fetch audio collections", e))?
             .into_iter()
@@ -330,7 +343,7 @@ pub async fn cancel_classify(job_ids: Vec<String>) -> Result<(), AppError> {
     Ok(())
 }
 
-// ─── Classify: files ──────────────────────────────────────────────────────
+// ─── Classify: files ──────────────────────────────────────────────────────────
 
 #[server]
 pub async fn classify_unclassified_files(
@@ -362,25 +375,26 @@ pub async fn classify_unclassified_files(
         .map_err(|e| AppError::internal("canonicalize root", e))?;
     ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
-    // Resolve the destination section (needed for kind).
-    let mut db = state.db.clone();
-
     let (target, section_slug, section_kind, section_nested) = match &destination {
         ClassifyDestination::Existing(id) => {
-            let collection = db::fetch_collection_any(&mut db, *id)
+            let collection = db::fetch_collection_any(&state.db, *id)
                 .await
                 .map_err(|e| AppError::internal("load collection", e))?
                 .ok_or_else(|| AppError::not_found("collection"))?;
-            let section = SectionRow::filter(
-                SectionRow::fields()
-                    .slug()
-                    .eq(collection.section_slug.clone()),
+            let section = sqlx::query_as!(
+                SectionRow,
+                r#"SELECT id            AS "id!: Uuid",
+                          slug          AS "slug!: String",
+                          title         AS "title!: String",
+                          media_kind    AS "media_kind!: String",
+                          nested        AS "nested!: bool",
+                          position      AS "position!: i64"
+                   FROM sections WHERE slug = ?"#,
+                collection.section_slug,
             )
-            .first()
-            .exec(&mut db)
+            .fetch_one(&state.db)
             .await
-            .map_err(|e| AppError::internal("load section", e))?
-            .ok_or_else(|| AppError::not_found("section"))?;
+            .map_err(|e| AppError::internal("load section", e))?;
             let kind = MediaKind::try_from(section.media_kind.as_str())
                 .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
             (
@@ -394,12 +408,20 @@ pub async fn classify_unclassified_files(
             section_slug,
             title,
         } => {
-            let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
-                .first()
-                .exec(&mut db)
-                .await
-                .map_err(|e| AppError::internal("load section", e))?
-                .ok_or_else(|| AppError::not_found("section"))?;
+            let section = sqlx::query_as!(
+                SectionRow,
+                r#"SELECT id            AS "id!: Uuid",
+                          slug          AS "slug!: String",
+                          title         AS "title!: String",
+                          media_kind    AS "media_kind!: String",
+                          nested        AS "nested!: bool",
+                          position      AS "position!: i64"
+                   FROM sections WHERE slug = ?"#,
+                section_slug,
+            )
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| AppError::internal("load section", e))?;
             let kind = MediaKind::try_from(section.media_kind.as_str())
                 .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
             let id = Uuid::new_v4();
@@ -417,7 +439,6 @@ pub async fn classify_unclassified_files(
         }
     };
 
-    // Resolve source files.
     let mut upload_files = Vec::with_capacity(files.len());
     for input in &files {
         upload_files.push(resolve_upload_file(&root, &root_canon, input).await?);
@@ -433,7 +454,6 @@ pub async fn classify_unclassified_files(
             season_number
         };
 
-    // If new: extract the poster before dispatching.
     if let UploadTarget::New { id, title, .. } = &target {
         let id = *id;
         match section_kind {
@@ -449,22 +469,18 @@ pub async fn classify_unclassified_files(
                     true,
                 )
                 .await?;
-                db::insert_video_collection(&mut db, id, &section_slug, title, None, &[], &url)
+                db::insert_video_collection(&state.db, id, &section_slug, title, None, &[], &url)
                     .await
                     .map_err(|e| AppError::internal("insert video collection", e))?;
             }
             MediaKind::Audio => {
-                db::insert_audio_collection(&mut db, id, &section_slug, title, None, &[], None)
+                db::insert_audio_collection(&state.db, id, &section_slug, title, None, &[], None)
                     .await
                     .map_err(|e| AppError::internal("insert audio collection", e))?;
             }
         }
     }
 
-    // The collection row was inserted above, before dispatching, so its
-    // poster could be extracted. Jobs must reference it as existing —
-    // otherwise `execute_upload` will try to insert it again and fail the
-    // UNIQUE constraint on `id`.
     let collection_id = match &target {
         UploadTarget::Existing { collection_id } => *collection_id,
         UploadTarget::New { id, .. } => *id,
@@ -490,7 +506,7 @@ pub async fn classify_unclassified_files(
     Ok(handles)
 }
 
-// ─── Classify: folders ────────────────────────────────────────────────────
+// ─── Classify: folders ────────────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 const MAX_CLASSIFY_GROUPS: usize = 50;
@@ -558,8 +574,6 @@ pub async fn classify_unclassified_folders(
     }
     let lock = acquire_classify_locks(abs_canons.clone())?;
 
-    let mut db = state.db.clone();
-
     let any_has_subdirs = {
         let mut any = false;
         for abs in &abs_canons {
@@ -571,7 +585,6 @@ pub async fn classify_unclassified_folders(
         any
     };
 
-    // Resolve the destination section.
     enum Dest {
         Existing {
             slug: String,
@@ -587,20 +600,24 @@ pub async fn classify_unclassified_folders(
 
     let dest = match destination.clone() {
         ClassifyDestination::Existing(id) => {
-            let collection = db::fetch_collection_any(&mut db, id)
+            let collection = db::fetch_collection_any(&state.db, id)
                 .await
                 .map_err(|e| AppError::internal("load collection", e))?
                 .ok_or_else(|| AppError::not_found("collection"))?;
-            let section = SectionRow::filter(
-                SectionRow::fields()
-                    .slug()
-                    .eq(collection.section_slug.clone()),
+            let section = sqlx::query_as!(
+                SectionRow,
+                r#"SELECT id            AS "id!: Uuid",
+                          slug          AS "slug!: String",
+                          title         AS "title!: String",
+                          media_kind    AS "media_kind!: String",
+                          nested        AS "nested!: bool",
+                          position      AS "position!: i64"
+                   FROM sections WHERE slug = ?"#,
+                collection.section_slug,
             )
-            .first()
-            .exec(&mut db)
+            .fetch_one(&state.db)
             .await
-            .map_err(|e| AppError::internal("load section", e))?
-            .ok_or_else(|| AppError::not_found("section"))?;
+            .map_err(|e| AppError::internal("load section", e))?;
             let kind = MediaKind::try_from(section.media_kind.as_str())
                 .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
             if any_has_subdirs && !section.nested {
@@ -622,12 +639,20 @@ pub async fn classify_unclassified_folders(
             if title.is_empty() {
                 return Err(AppError::validation("Section title is required"));
             }
-            let section = SectionRow::filter(SectionRow::fields().slug().eq(section_slug.clone()))
-                .first()
-                .exec(&mut db)
-                .await
-                .map_err(|e| AppError::internal("load section", e))?
-                .ok_or_else(|| AppError::not_found("section"))?;
+            let section = sqlx::query_as!(
+                SectionRow,
+                r#"SELECT id            AS "id!: Uuid",
+                          slug          AS "slug!: String",
+                          title         AS "title!: String",
+                          media_kind    AS "media_kind!: String",
+                          nested        AS "nested!: bool",
+                          position      AS "position!: i64"
+                   FROM sections WHERE slug = ?"#,
+                section_slug,
+            )
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| AppError::internal("load section", e))?;
             let kind = MediaKind::try_from(section.media_kind.as_str())
                 .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
             Dest::New {
@@ -700,9 +725,8 @@ pub async fn classify_unclassified_folders(
         )));
     }
 
-    // For existing sections, skip groups whose title already exists.
     let existing = match &dest {
-        Dest::Existing { slug, .. } => existing_collection_titles(&mut db, slug, kind).await?,
+        Dest::Existing { slug, .. } => existing_collection_titles(&state.db, slug, kind).await?,
         Dest::New { .. } => Default::default(),
     };
     let before = groups.len();
@@ -731,8 +755,8 @@ pub async fn classify_unclassified_folders(
     let section_slug = match &dest {
         Dest::Existing { slug, .. } => slug.clone(),
         Dest::New { title, .. } => {
-            let slug = generate_unique_slug(&mut db, kind, nested).await?;
-            db::insert_section(&mut db, &slug, title, kind.as_str(), nested)
+            let slug = generate_unique_slug(&state.db, kind, nested).await?;
+            db::insert_section(&state.db, &slug, title, kind.as_str(), nested)
                 .await
                 .map_err(|e| AppError::internal("insert section", e))?;
             slug
@@ -745,7 +769,6 @@ pub async fn classify_unclassified_folders(
     for group in groups {
         let collection_id = Uuid::new_v4();
 
-        // Extract the poster (or insert audio collection) before dispatching.
         match kind {
             MediaKind::Video => {
                 let first = group
@@ -761,7 +784,7 @@ pub async fn classify_unclassified_folders(
                 )
                 .await?;
                 db::insert_video_collection(
-                    &mut db,
+                    &state.db,
                     collection_id,
                     &section_slug,
                     &group.title,
@@ -774,7 +797,7 @@ pub async fn classify_unclassified_folders(
             }
             MediaKind::Audio => {
                 db::insert_audio_collection(
-                    &mut db,
+                    &state.db,
                     collection_id,
                     &section_slug,
                     &group.title,
@@ -821,7 +844,7 @@ pub async fn classify_unclassified_folders(
     Ok(handles)
 }
 
-// ─── Move items back to incoming ──────────────────────────────────────────
+// ─── Move items back to incoming ──────────────────────────────────────────────
 
 #[server]
 pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError> {
@@ -849,17 +872,34 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
         .map_err(|e| AppError::internal("canonicalize incoming", e))?;
     let media_canon = canonical_media_root(&state.config.storage.media_root)?;
 
-    let mut db = state.db.clone();
     let mut moved: Vec<Uuid> = Vec::new();
 
     for item_id in item_ids {
-        let item = match Item::get_by_id(&mut db, &item_id).await {
-            Ok(i) => i,
-            Err(_) => continue,
+        let item = match sqlx::query_as!(
+            Item,
+            r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
+                      number AS "number!: i64", season_number, title, poster,
+                      description, file_id AS "file_id!: Uuid"
+               FROM items WHERE id = ?"#,
+            item_id,
+        )
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(i)) => i,
+            _ => continue,
         };
-        let file = match File::get_by_id(&mut db, &item.file_id).await {
-            Ok(f) => f,
-            Err(_) => continue,
+        let file = match sqlx::query_as!(
+            File,
+            r#"SELECT id AS "id!: Uuid", relative_path, size_bytes, duration_secs
+               FROM files WHERE id = ?"#,
+            item.file_id,
+        )
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(f)) => f,
+            _ => continue,
         };
         match move_file_to_incoming(media_canon, &incoming_canon, &file.relative_path).await {
             Ok(Some(_)) => moved.push(item_id),
@@ -869,7 +909,7 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
     }
 
     if !moved.is_empty() {
-        let del = db::delete_items_cascade(&mut db, &moved)
+        let del = db::delete_items_cascade(&state.db, &moved)
             .await
             .map_err(|e| AppError::internal("delete items cascade", e))?;
         for poster in &del.emptied_posters {
@@ -929,31 +969,32 @@ async fn resolve_upload_file(
 
 #[cfg(feature = "ssr")]
 async fn existing_collection_titles(
-    db: &mut toasty::Db,
+    db: &sqlx::SqlitePool,
     section_slug: &str,
     kind: crate::app::model::MediaKind,
 ) -> Result<std::collections::HashMap<String, Uuid>, AppError> {
-    use crate::app::model::{AudioCollectionRow, VideoCollectionRow};
     use std::collections::HashMap;
 
     let rows: Vec<(String, Uuid)> = match kind {
-        crate::app::model::MediaKind::Video => VideoCollectionRow::filter(
-            VideoCollectionRow::fields()
-                .section_slug()
-                .eq(section_slug.to_string()),
+        crate::app::model::MediaKind::Video => sqlx::query_as!(
+            _TitleId,
+            r#"SELECT title AS "title!: String", id AS "id!: Uuid"
+               FROM video_collections WHERE section_slug = ?"#,
+            section_slug,
         )
-        .exec(db)
+        .fetch_all(db)
         .await
         .map_err(|e| AppError::internal("load existing collections", e))?
         .into_iter()
         .map(|r| (r.title, r.id))
         .collect(),
-        crate::app::model::MediaKind::Audio => AudioCollectionRow::filter(
-            AudioCollectionRow::fields()
-                .section_slug()
-                .eq(section_slug.to_string()),
+        crate::app::model::MediaKind::Audio => sqlx::query_as!(
+            _TitleId,
+            r#"SELECT title AS "title!: String", id AS "id!: Uuid"
+               FROM audio_collections WHERE section_slug = ?"#,
+            section_slug,
         )
-        .exec(db)
+        .fetch_all(db)
         .await
         .map_err(|e| AppError::internal("load existing collections", e))?
         .into_iter()
@@ -964,8 +1005,15 @@ async fn existing_collection_titles(
 }
 
 #[cfg(feature = "ssr")]
+#[derive(sqlx::FromRow)]
+struct _TitleId {
+    title: String,
+    id: Uuid,
+}
+
+#[cfg(feature = "ssr")]
 async fn generate_unique_slug(
-    db: &mut toasty::Db,
+    db: &sqlx::SqlitePool,
     kind: crate::app::model::MediaKind,
     nested: bool,
 ) -> Result<String, AppError> {

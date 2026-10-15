@@ -1,9 +1,37 @@
-#!/usr/bin/sh
+#!/usr/bin/env nu
 
-export HOMEX_TOKEN="0000"
-export HOMEX_CONFIG="$(pwd)/homex.dev.toml"
-export HOMEX_UNCLASSIFIED_DIR=/home/eltahawy/Downloads
+# HomeX dev launcher.
+#
+# Usage:
+#   ./run.nu
+#
+# Reset dev DB after a model/migration change:
+#   rm Downloads/homex.db
+
+$env.HOMEX_TOKEN = "0000"
+$env.HOMEX_CONFIG = ($env.PWD | path join "homex.dev.toml")
+$env.HOMEX_UNCLASSIFIED_DIR = "/home/eltahawy/Downloads"
+$env.DATABASE_URL = "sqlite://Downloads/homex.db"
+# $env.SQLX_OFFLINE = "true"
+
+sqlx database create
+sqlx migrate run
+
 cargo leptos watch --split --hot-reload
 
-# To reset the dev DB after a model change:
-#   HOMEX_RESET_SCHEMA=1 ./run
+# #!/usr/bin/sh
+
+# export HOMEX_TOKEN="0000"
+# export HOMEX_CONFIG="$(pwd)/homex.dev.toml"
+# export HOMEX_UNCLASSIFIED_DIR=/home/eltahawy/Downloads
+# cargo leptos watch --split --hot-reload
+
+# # To reset the dev DB after a model change:
+# #   HOMEX_RESET_SCHEMA=1 ./run
+# #
+# # 
+# # cargo install sqlx-cli --no-default-features --features sqlite
+# # sqlx database create
+# # sqlx migrate run
+# # cargo sqlx prepare -- --features ssr
+# # git add .sqlx

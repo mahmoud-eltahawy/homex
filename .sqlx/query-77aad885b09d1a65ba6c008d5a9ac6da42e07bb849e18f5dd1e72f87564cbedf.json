@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT title AS \"title!: String\", id AS \"id!: Uuid\"\n               FROM audio_collections WHERE section_slug = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "title!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "77aad885b09d1a65ba6c008d5a9ac6da42e07bb849e18f5dd1e72f87564cbedf"
+}

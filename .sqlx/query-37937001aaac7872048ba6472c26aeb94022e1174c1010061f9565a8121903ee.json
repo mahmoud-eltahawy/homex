@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT tag_id AS \"tag_id!: Uuid\"\n           FROM section_tags WHERE section_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "tag_id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "section_tags",
+            "name": "tag_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "37937001aaac7872048ba6472c26aeb94022e1174c1010061f9565a8121903ee"
+}

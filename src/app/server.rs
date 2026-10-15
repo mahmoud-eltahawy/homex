@@ -1,5 +1,4 @@
 use crate::app::constants::{self, protocols, storage};
-use toasty::Db;
 use tokio_util::sync::CancellationToken;
 
 pub mod auth;
@@ -14,12 +13,11 @@ pub mod upload;
 pub use config::Config;
 pub use convert::Jobs;
 
-// Re-export the centralized error API.
 pub use crate::app::error::{AppError, ErrorContext};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: Db,
+    pub db: sqlx::SqlitePool,
     pub config: Config,
     pub jobs: Jobs,
     pub cancel: CancellationToken,
@@ -37,7 +35,6 @@ pub async fn remove_media_files(state: &AppState, rel_paths: &[String]) {
     }
 }
 
-/// Unlink a poster file. `None` is a no-op.
 pub async fn remove_poster(state: &AppState, url: Option<&str>) {
     let Some(url) = url else { return };
     let Some(rest) = url.strip_prefix(constants::routes::POSTERS_URL_PREFIX) else {

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE video_collections SET items_count = MAX(items_count + ?, 0) WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ebc13700c9b3bb160a484d7714bebe94519959720ba5f6ff2b4c95cf51af1e56"
+}

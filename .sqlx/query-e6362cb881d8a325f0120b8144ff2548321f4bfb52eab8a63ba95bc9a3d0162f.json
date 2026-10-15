@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT poster FROM audio_collections WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "poster",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "poster"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e6362cb881d8a325f0120b8144ff2548321f4bfb52eab8a63ba95bc9a3d0162f"
+}

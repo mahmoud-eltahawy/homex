@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT media_kind AS \"media_kind!: String\" FROM sections WHERE slug = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "media_kind!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "media_kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d92848b235d17a0ea3ac1e266aa88c5e75756c77b18fdad18d9f29978d6c650b"
+}

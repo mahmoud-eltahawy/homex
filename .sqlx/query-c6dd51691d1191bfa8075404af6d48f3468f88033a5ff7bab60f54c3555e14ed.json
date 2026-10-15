@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE audio_collections\n           SET section_id = ?, section_slug = ?\n           WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c6dd51691d1191bfa8075404af6d48f3468f88033a5ff7bab60f54c3555e14ed"
+}

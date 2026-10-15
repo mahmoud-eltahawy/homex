@@ -20,9 +20,9 @@ pub async fn fetch_collections(
     search_query: Option<String>,
 ) -> Result<Vec<Collection>, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
     db::fetch_collections(
-        &mut state.db,
+        &state.db,
         &section_slug,
         offset,
         size,
@@ -38,8 +38,8 @@ pub async fn fetch_collections_count(
     search_query: Option<String>,
 ) -> Result<usize, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    let n = db::fetch_collections_count(&mut state.db, &section_slug, search_query.as_deref())
+    let state: AppState = expect_context();
+    let n = db::fetch_collections_count(&state.db, &section_slug, search_query.as_deref())
         .await
         .context("fetch collections count")?;
     Ok(n as usize)
@@ -51,8 +51,8 @@ pub async fn fetch_collection_detail(
     collection_id: Uuid,
 ) -> Result<Collection, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::fetch_collection_detail(&mut state.db, &section_slug, collection_id)
+    let state: AppState = expect_context();
+    db::fetch_collection_detail(&state.db, &section_slug, collection_id)
         .await
         .context("fetch collection detail")?
         .ok_or_else(|| AppError::public(messages::COLLECTION_NOT_FOUND))
@@ -61,8 +61,8 @@ pub async fn fetch_collection_detail(
 #[server]
 pub async fn fetch_items(collection_id: Uuid) -> Result<Vec<Item>, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::fetch_items(&mut state.db, collection_id)
+    let state: AppState = expect_context();
+    db::fetch_items(&state.db, collection_id)
         .await
         .context("fetch items")
 }
@@ -76,7 +76,7 @@ pub async fn patch_collection_field(
     use crate::app::server::AppState;
     use crate::app::server::db::CollectionField;
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
 
     if field == "title" && value.as_deref().map(str::trim).unwrap_or("").is_empty() {
         return Err(AppError::validation(messages::TITLE_REQUIRED));
@@ -88,7 +88,7 @@ pub async fn patch_collection_field(
         _ => return Err(AppError::public(messages::UNKNOWN_FIELD)),
     };
 
-    db::update_collection_field(&mut state.db, id, f, value.as_deref())
+    db::update_collection_field(&state.db, id, f, value.as_deref())
         .await
         .context("patch collection field")?;
     Ok(())
@@ -97,8 +97,8 @@ pub async fn patch_collection_field(
 #[server]
 pub async fn patch_collection_tags(id: Uuid, tags: Vec<String>) -> Result<(), AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::set_collection_tags(&mut state.db, id, &tags)
+    let state: AppState = expect_context();
+    db::set_collection_tags(&state.db, id, &tags)
         .await
         .context("patch collection tags")?;
     Ok(())
@@ -107,13 +107,13 @@ pub async fn patch_collection_tags(id: Uuid, tags: Vec<String>) -> Result<(), Ap
 #[server]
 pub async fn patch_item_title(id: Uuid, title: String) -> Result<(), AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
     let t = if title.trim().is_empty() {
         None
     } else {
         Some(title)
     };
-    db::update_item_title(&mut state.db, id, t.as_deref())
+    db::update_item_title(&state.db, id, t.as_deref())
         .await
         .context("patch item title")?;
     Ok(())
@@ -122,8 +122,8 @@ pub async fn patch_item_title(id: Uuid, title: String) -> Result<(), AppError> {
 #[server]
 pub async fn delete_collection(id: Uuid) -> Result<(), AppError> {
     use crate::app::server::{AppState, remove_media_files, remove_poster};
-    let mut state: AppState = expect_context();
-    let del = db::delete_collection_cascade(&mut state.db, id)
+    let state: AppState = expect_context();
+    let del = db::delete_collection_cascade(&state.db, id)
         .await
         .context("delete collection cascade")?;
     remove_media_files(&state, &del.media_paths).await;
@@ -134,8 +134,8 @@ pub async fn delete_collection(id: Uuid) -> Result<(), AppError> {
 #[server]
 pub async fn delete_item(id: Uuid) -> Result<(), AppError> {
     use crate::app::server::{AppState, remove_media_files, remove_poster};
-    let mut state: AppState = expect_context();
-    let del = db::delete_item_cascade(&mut state.db, id)
+    let state: AppState = expect_context();
+    let del = db::delete_item_cascade(&state.db, id)
         .await
         .context("delete item cascade")?;
     remove_media_files(&state, &del.media_paths).await;
@@ -152,7 +152,7 @@ pub async fn upload_collection_poster(
     use crate::app::server::poster::write_poster;
     use crate::app::server::upload::extension_of;
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
 
     let mut mp = data.into_inner().unwrap();
     let mut section_slug = String::new();
@@ -181,7 +181,7 @@ pub async fn upload_collection_poster(
 
     let (ext, bytes) = bytes.ok_or_else(|| AppError::public(messages::NO_IMAGE_RECEIVED))?;
 
-    let section = db::fetch_section_by_slug(&mut state.db, &section_slug)
+    let section = db::fetch_section_by_slug(&state.db, &section_slug)
         .await
         .context("fetch section for poster")?
         .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
@@ -203,7 +203,7 @@ pub async fn upload_collection_poster(
     )
     .await?;
 
-    db::set_collection_poster(&mut state.db, id, Some(&url))
+    db::set_collection_poster(&state.db, id, Some(&url))
         .await
         .context("save regenerated poster")?;
 
@@ -220,9 +220,9 @@ pub async fn regenerate_collection_poster(
     use crate::app::server::convert::{ffprobe_duration, is_video_container_supported};
     use crate::app::server::poster::{extract_and_save_poster, pick_timestamp};
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
 
-    let section = db::fetch_section_by_slug(&mut state.db, &section_slug)
+    let section = db::fetch_section_by_slug(&state.db, &section_slug)
         .await
         .context("fetch section for regenerate")?
         .ok_or_else(|| AppError::public(messages::SECTION_NOT_FOUND))?;
@@ -235,14 +235,14 @@ pub async fn regenerate_collection_poster(
         ));
     }
 
-    let items = db::fetch_items(&mut state.db, collection_id)
+    let items = db::fetch_items(&state.db, collection_id)
         .await
         .context("fetch items for poster")?;
     let first = items
         .first()
         .ok_or_else(|| AppError::public("Collection has no items yet"))?;
 
-    let rel = db::fetch_file_path(&mut state.db, first.file_id)
+    let rel = db::fetch_file_path(&state.db, first.file_id)
         .await
         .context("resolve first item file")?
         .ok_or_else(|| AppError::not_found("file"))?;
@@ -257,7 +257,7 @@ pub async fn regenerate_collection_poster(
         return Err(AppError::public("Source file is missing"));
     }
 
-    let previous = db::fetch_collection_detail(&mut state.db, &section_slug, collection_id)
+    let previous = db::fetch_collection_detail(&state.db, &section_slug, collection_id)
         .await
         .context("fetch collection for poster regen")?
         .and_then(|c| c.poster);
@@ -279,7 +279,7 @@ pub async fn regenerate_collection_poster(
         crate::app::server::remove_poster(&state, Some(old)).await;
     }
 
-    db::set_collection_poster(&mut state.db, collection_id, Some(&url))
+    db::set_collection_poster(&state.db, collection_id, Some(&url))
         .await
         .context("save regenerated poster")?;
 
@@ -289,8 +289,8 @@ pub async fn regenerate_collection_poster(
 #[server]
 pub async fn move_item(id: Uuid, is_up: bool) -> Result<(), AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::swap_item_order(&mut state.db, id, is_up)
+    let state: AppState = expect_context();
+    db::swap_item_order(&state.db, id, is_up)
         .await
         .context("swap item order")?;
     Ok(())
@@ -301,12 +301,12 @@ pub async fn move_collection_to_section(
     collection_id: Uuid,
     to_section_slug: String,
 ) -> Result<(), AppError> {
-    use crate::app::server::db::{self, MoveCollectionError};
+    use crate::app::server::db::{self as sdb, MoveCollectionError};
     use crate::app::server::{AppState, poster};
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
 
-    let mv = db::move_collection_to_section(&mut state.db, collection_id, &to_section_slug)
+    let mv = sdb::move_collection_to_section(&state.db, collection_id, &to_section_slug)
         .await
         .map_err(|e| match e {
             MoveCollectionError::SectionNotFound => AppError::public(messages::SECTION_NOT_FOUND),
@@ -325,7 +325,7 @@ pub async fn move_collection_to_section(
         )
         .await
     {
-        db::set_collection_poster(&mut state.db, collection_id, Some(&new_url))
+        sdb::set_collection_poster(&state.db, collection_id, Some(&new_url))
             .await
             .context("save regenerated poster")?;
     }
@@ -338,8 +338,8 @@ pub async fn fetch_collection_summaries(
     media_kind: String,
 ) -> Result<Vec<CollectionSummary>, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::fetch_collection_summaries(&mut state.db, &media_kind)
+    let state: AppState = expect_context();
+    db::fetch_collection_summaries(&state.db, &media_kind)
         .await
         .context("fetch collection summaries")
 }
@@ -350,8 +350,8 @@ pub async fn move_items_to_collection(
     to_collection_id: Uuid,
 ) -> Result<(), AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::move_items_to_collection(&mut state.db, &item_ids, to_collection_id)
+    let state: AppState = expect_context();
+    db::move_items_to_collection(&state.db, &item_ids, to_collection_id)
         .await
         .context("move items to collection")?;
     Ok(())

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT section_slug AS \"section_slug!: String\", poster AS \"poster!: String\"\n           FROM video_collections WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "section_slug!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "section_slug"
+          }
+        }
+      },
+      {
+        "name": "poster!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "poster"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6049f6ee3fb23812cc7d7ffaf86389174dbe9611b75f5e39a89d5257f1566658"
+}

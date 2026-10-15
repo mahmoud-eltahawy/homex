@@ -56,9 +56,8 @@ async fn persist_phase(
     job_id: Option<&str>,
 ) -> Result<(), AppError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
-    let mut db = state.db.clone();
-    let file_rows = persist::insert_files(&mut db, staged).await?;
-    persist::insert_items_and_poster(&mut db, payload, &file_rows).await
+    let file_rows = persist::insert_files(&state.db, staged).await?;
+    persist::insert_items_and_poster(&state.db, payload, &file_rows).await
 }
 
 async fn finish_job(state: &AppState, job_id: Option<&str>) {

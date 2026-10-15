@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO video_collections\n           (id, section_id, section_slug, title, poster, description, position, items_count)\n           VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "4eb21891aa24d3035b9a3f828426d55cb6ca153f16ab789dc85440404e145890"
+}

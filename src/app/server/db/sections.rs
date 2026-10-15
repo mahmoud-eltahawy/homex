@@ -1,145 +1,167 @@
-use toasty::Db;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 use super::tags::fetch_section_tags;
-use crate::app::model::{AudioCollectionRow, Section, SectionRow, SectionTag, VideoCollectionRow};
+use crate::app::model::{AudioCollectionRow, Section, SectionRow, VideoCollectionRow};
 
-// ─── Section queries ──────────────────────────────────────────────────────
+// ─── Section queries ──────────────────────────────────────────────────────────
 
-pub async fn fetch_sections(db: &mut Db) -> toasty::Result<Vec<Section>> {
-    let rows = SectionRow::all()
-        .order_by((
-            SectionRow::fields().position().asc(),
-            SectionRow::fields().id().asc(),
-        ))
-        .exec(db)
-        .await?;
+pub async fn fetch_sections(pool: &SqlitePool) -> sqlx::Result<Vec<Section>> {
+    let rows = sqlx::query_as!(
+        SectionRow,
+        r#"SELECT id            AS "id!: Uuid",
+                  slug          AS "slug!: String",
+                  title         AS "title!: String",
+                  media_kind    AS "media_kind!: String",
+                  nested        AS "nested!: bool",
+                  position      AS "position!: i64"
+           FROM sections
+           ORDER BY position ASC, id ASC"#,
+    )
+    .fetch_all(pool)
+    .await?;
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let mut s: Section = row.into();
-        s.tags = fetch_section_tags(db, s.id).await?;
+        s.tags = fetch_section_tags(pool, s.id).await?;
         out.push(s);
     }
     Ok(out)
 }
 
-pub async fn fetch_section_by_slug(db: &mut Db, slug: &str) -> toasty::Result<Option<Section>> {
-    let Some(row) = SectionRow::filter(SectionRow::fields().slug().eq(slug.to_string()))
-        .first()
-        .exec(db)
-        .await?
-    else {
-        return Ok(None);
-    };
+pub async fn fetch_section_by_slug(pool: &SqlitePool, slug: &str) -> sqlx::Result<Option<Section>> {
+    let row = sqlx::query_as!(
+        SectionRow,
+        r#"SELECT id            AS "id!: Uuid",
+                  slug          AS "slug!: String",
+                  title         AS "title!: String",
+                  media_kind    AS "media_kind!: String",
+                  nested        AS "nested!: bool",
+                  position      AS "position!: i64"
+           FROM sections WHERE slug = ?"#,
+        slug,
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else { return Ok(None) };
     let mut s: Section = row.into();
-    s.tags = fetch_section_tags(db, s.id).await?;
+    s.tags = fetch_section_tags(pool, s.id).await?;
     Ok(Some(s))
 }
 
 pub async fn insert_section(
-    db: &mut Db,
+    pool: &SqlitePool,
     slug: &str,
     title: &str,
     media_kind: &str,
     nested: bool,
-) -> toasty::Result<Uuid> {
-    let next = next_position(db).await?;
-    let row = toasty::create!(SectionRow {
-        slug: slug.to_string(),
-        title: title.to_string(),
-        media_kind: media_kind.to_string(),
-        nested,
-        position: next,
-    })
-    .exec(db)
+) -> sqlx::Result<Uuid> {
+    let next: i64 = sqlx::query_scalar!(
+        r#"SELECT COALESCE(MAX(position), -1) + 1 AS "n!: i64" FROM sections"#,
+    )
+    .fetch_one(pool)
     .await?;
-    Ok(row.id)
-}
 
-async fn next_position(db: &mut Db) -> toasty::Result<i64> {
-    let last = SectionRow::all()
-        .order_by(SectionRow::fields().position().desc())
-        .limit(1)
-        .exec(db)
-        .await?;
-    Ok(last.first().map(|s| s.position + 1).unwrap_or(0))
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        r#"INSERT INTO sections (id, slug, title, media_kind, nested, position)
+           VALUES (?, ?, ?, ?, ?, ?)"#,
+        id,
+        slug,
+        title,
+        media_kind,
+        nested,
+        next,
+    )
+    .execute(pool)
+    .await?;
+    Ok(id)
 }
 
 pub async fn update_section(
-    db: &mut Db,
+    pool: &SqlitePool,
     id: Uuid,
     title: &str,
     media_kind: &str,
     nested: bool,
-) -> toasty::Result<()> {
-    let mut row = SectionRow::get_by_id(db, &id).await?;
-    row.update()
-        .title(title.to_string())
-        .media_kind(media_kind.to_string())
-        .nested(nested)
-        .exec(db)
-        .await
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        r#"UPDATE sections SET title = ?, media_kind = ?, nested = ? WHERE id = ?"#,
+        title,
+        media_kind,
+        nested,
+        id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
-pub async fn update_section_title(db: &mut Db, id: Uuid, title: &str) -> toasty::Result<()> {
-    let mut row = SectionRow::get_by_id(db, &id).await?;
-    row.update().title(title.to_string()).exec(db).await
+pub async fn update_section_title(pool: &SqlitePool, id: Uuid, title: &str) -> sqlx::Result<()> {
+    sqlx::query!(r#"UPDATE sections SET title = ? WHERE id = ?"#, title, id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
-// ─── Section deletion ─────────────────────────────────────────────────────
+// ─── Section deletion ─────────────────────────────────────────────────────────
 
 pub enum DeleteSectionOutcome {
     Deleted,
     NotEmpty { collection_count: i64 },
 }
 
-pub async fn delete_section(db: &mut Db, id: Uuid) -> toasty::Result<DeleteSectionOutcome> {
-    let section = SectionRow::get_by_id(db, &id).await?;
-
-    let video_count = VideoCollectionRow::filter(
-        VideoCollectionRow::fields()
-            .section_slug()
-            .eq(section.slug.clone()),
+pub async fn delete_section(pool: &SqlitePool, id: Uuid) -> sqlx::Result<DeleteSectionOutcome> {
+    let slug: String = sqlx::query_scalar!(
+        r#"SELECT slug AS "slug!: String" FROM sections WHERE id = ?"#,
+        id,
     )
-    .count()
-    .exec(db)
-    .await? as i64;
+    .fetch_one(pool)
+    .await?;
 
-    let audio_count = AudioCollectionRow::filter(
-        AudioCollectionRow::fields()
-            .section_slug()
-            .eq(section.slug.clone()),
+    let video_count: i64 = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) AS "n!: i64" FROM video_collections WHERE section_slug = ?"#,
+        slug,
     )
-    .count()
-    .exec(db)
-    .await? as i64;
+    .fetch_one(pool)
+    .await?;
+
+    let audio_count: i64 = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) AS "n!: i64" FROM audio_collections WHERE section_slug = ?"#,
+        slug,
+    )
+    .fetch_one(pool)
+    .await?;
 
     let collection_count = video_count + audio_count;
-
     if collection_count > 0 {
         return Ok(DeleteSectionOutcome::NotEmpty { collection_count });
     }
 
-    for row in SectionTag::filter(SectionTag::fields().section_id().eq(id))
-        .exec(db)
-        .await?
-    {
-        row.delete().exec(db).await?;
-    }
-
-    section.delete().exec(db).await?;
+    let mut tx = pool.begin().await?;
+    sqlx::query!(r#"DELETE FROM section_tags WHERE section_id = ?"#, id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!(r#"DELETE FROM sections WHERE id = ?"#, id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(DeleteSectionOutcome::Deleted)
 }
 
-// ─── Upload-support ───────────────────────────────────────────────────────
+// ─── Upload-support ───────────────────────────────────────────────────────────
 
-pub async fn fetch_section_kind(db: &mut Db, slug: &str) -> toasty::Result<Option<String>> {
-    Ok(
-        SectionRow::filter(SectionRow::fields().slug().eq(slug.to_string()))
-            .first()
-            .exec(db)
-            .await?
-            .map(|s| s.media_kind),
+pub async fn fetch_section_kind(pool: &SqlitePool, slug: &str) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar!(
+        r#"SELECT media_kind AS "media_kind!: String" FROM sections WHERE slug = ?"#,
+        slug,
     )
+    .fetch_optional(pool)
+    .await
 }
+
+// silence unused import if row types go unused
+#[allow(dead_code)]
+fn _unused(_: &VideoCollectionRow, _: &AudioCollectionRow, _: &mut SqliteConnection) {}

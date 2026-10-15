@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT slug AS \"slug!: String\" FROM sections WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "slug!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sections",
+            "name": "slug"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "09b3652439be03f1f8ffea32fbbe52e89c1c9c1169d07fca2ceea553bcd2ca5e"
+}

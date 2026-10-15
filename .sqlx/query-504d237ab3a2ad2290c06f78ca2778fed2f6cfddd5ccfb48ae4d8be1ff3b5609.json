@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\", section_id AS \"section_id!: Uuid\",\n                          section_slug, title, poster, description, position,\n                          items_count AS \"items_count!: i64\"\n                   FROM video_collections WHERE section_slug = ? ORDER BY title ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "section_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "section_id"
+          }
+        }
+      },
+      {
+        "name": "section_slug",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "section_slug"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "poster",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "poster"
+          }
+        }
+      },
+      {
+        "name": "description",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "name": "position",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "items_count!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "items_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "504d237ab3a2ad2290c06f78ca2778fed2f6cfddd5ccfb48ae4d8be1ff3b5609"
+}

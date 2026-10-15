@@ -37,7 +37,7 @@ fn load_config_or_exit() -> homex::app::server::Config {
 }
 
 #[cfg(feature = "ssr")]
-async fn init_db_or_exit(config: &homex::app::server::Config) -> toasty::Db {
+async fn init_db_or_exit(config: &homex::app::server::Config) -> sqlx::SqlitePool {
     use leptos::logging::error;
     match homex::app::server::db::init(config).await {
         Ok(p) => p,
@@ -78,7 +78,7 @@ fn log_boot_info(config: &homex::app::server::Config) {
 
 #[cfg(feature = "ssr")]
 fn build_app_state(
-    db: toasty::Db,
+    db: sqlx::SqlitePool,
     config: homex::app::server::Config,
     cancel: tokio_util::sync::CancellationToken,
 ) -> homex::app::server::AppState {
@@ -119,7 +119,6 @@ fn build_router(
             },
             {
                 use homex::app::shell;
-
                 let leptos_options = leptos_options.clone();
                 move || shell(leptos_options.clone())
             },
@@ -139,7 +138,6 @@ async fn run_server(
     cancel: tokio_util::sync::CancellationToken,
 ) {
     use leptos::logging::log;
-
     let shutdown = shutdown_future(cancel);
     log!("listening on http://{}", &addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
@@ -163,7 +161,6 @@ async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
     };
-
     #[cfg(unix)]
     let term = async {
         use tokio::signal::unix::{SignalKind, signal};
@@ -176,11 +173,7 @@ async fn shutdown_signal() {
     };
     #[cfg(not(unix))]
     let term = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = term => {}
-    }
+    tokio::select! { _ = ctrl_c => {} _ = term => {} }
 }
 
 #[cfg(not(feature = "ssr"))]

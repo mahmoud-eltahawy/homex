@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"n!: i64\"\n           FROM audio_collections\n           WHERE section_slug = ?1\n             AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4d06749328c90bbbad0775f387e3869bff03a85b3c9e83db62b98a02dd1f58a4"
+}

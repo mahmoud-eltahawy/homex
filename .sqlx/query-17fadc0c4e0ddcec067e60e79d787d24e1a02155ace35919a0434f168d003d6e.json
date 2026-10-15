@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE video_collections\n           SET section_id = ?, section_slug = ?\n           WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "17fadc0c4e0ddcec067e60e79d787d24e1a02155ace35919a0434f168d003d6e"
+}

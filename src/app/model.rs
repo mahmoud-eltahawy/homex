@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::app::constants::routes;
 
-// ─── Tag canonicalization (SSR only) ──────────────────────────────────────
+// ─── Tag canonicalization (SSR only) ──────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 pub fn canonicalize_tags<I, S>(tags: I) -> Vec<String>
@@ -21,7 +21,7 @@ where
     v
 }
 
-// ─── Search parsing (SSR only) ────────────────────────────────────────────
+// ─── Search parsing (SSR only) ────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -37,9 +37,7 @@ pub fn parse_search(raw: &str) -> SearchQuery {
 
     for word in raw.split_whitespace() {
         match word.strip_prefix('#') {
-            Some(tag) if !tag.is_empty() => {
-                tags.push(tag.to_string());
-            }
+            Some(tag) if !tag.is_empty() => tags.push(tag.to_string()),
             _ => words.push(word),
         }
     }
@@ -52,11 +50,10 @@ pub fn parse_search(raw: &str) -> SearchQuery {
     } else {
         Some(words.join(" "))
     };
-
     SearchQuery { tags, text }
 }
 
-// ─── MediaKind ────────────────────────────────────────────────────────────
+// ─── MediaKind ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MediaKind {
@@ -114,9 +111,7 @@ impl TryFrom<&str> for MediaKind {
     }
 }
 
-// ─── CollectionKind (SSR only) ────────────────────────────────────────────
-//
-// Internal to the db dispatcher. Never crosses the wire.
+// ─── CollectionKind (SSR only) ────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,64 +120,48 @@ pub enum CollectionKind {
     Audio,
 }
 
-// ─── Tag ──────────────────────────────────────────────────────────────────
+// ─── Tag ──────────────────────────────────────────────────────────────────────
+// Wire + row. `FromRow` derive uses field names as column names.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(toasty::Model))]
-#[cfg_attr(feature = "ssr", table = "tags")]
+#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct Tag {
-    #[cfg_attr(feature = "ssr", key)]
-    #[cfg_attr(feature = "ssr", auto)]
     pub id: Uuid,
-    #[cfg_attr(feature = "ssr", unique)]
     pub name: String,
 }
 
-// ─── File (SSR only) ──────────────────────────────────────────────────────
+// ─── File (SSR only) ──────────────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
-#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
-#[table = "files"]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct File {
-    #[key]
-    #[auto]
     pub id: Uuid,
-    #[unique]
     pub relative_path: String,
     pub size_bytes: i64,
     pub duration_secs: i64,
 }
 
-// ─── Item (wire + toasty model) ───────────────────────────────────────────
+// ─── Item (wire + row) ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(toasty::Model))]
-#[cfg_attr(feature = "ssr", table = "items")]
+#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct Item {
-    #[cfg_attr(feature = "ssr", key)]
-    #[cfg_attr(feature = "ssr", auto)]
     pub id: Uuid,
-    #[cfg_attr(feature = "ssr", index)]
     pub collection_id: Uuid,
     pub number: i64,
     pub season_number: Option<i64>,
     pub title: Option<String>,
     pub poster: Option<String>,
     pub description: Option<String>,
-    #[cfg_attr(feature = "ssr", index)]
     pub file_id: Uuid,
 }
 
-// ─── Row types (SSR-only Toasty models) ───────────────────────────────────
+// ─── Row types (SSR-only) ─────────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
-#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
-#[table = "sections"]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SectionRow {
-    #[key]
-    #[auto]
     pub id: Uuid,
-    #[unique]
     pub slug: String,
     pub title: String,
     pub media_kind: String,
@@ -190,21 +169,11 @@ pub struct SectionRow {
     pub position: i64,
 }
 
-/// A collection belonging to a video section.
-///
-/// A row can only exist because a video was uploaded into it and a poster
-/// frame was extracted from that video. `poster` is therefore `String`, not
-/// `Option<String>` — the invariant is enforced by the server function that
-/// inserts the row (`extract_and_insert_new_collection`).
 #[cfg(feature = "ssr")]
-#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
-#[table = "video_collections"]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct VideoCollectionRow {
-    #[key]
     pub id: Uuid,
-    #[index]
     pub section_id: Uuid,
-    #[index]
     pub section_slug: String,
     pub title: String,
     pub poster: String,
@@ -213,19 +182,11 @@ pub struct VideoCollectionRow {
     pub items_count: i64,
 }
 
-/// A collection belonging to an audio section.
-///
-/// Audio has no frame to extract, so the poster is user-supplied and
-/// genuinely optional.
 #[cfg(feature = "ssr")]
-#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
-#[table = "audio_collections"]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AudioCollectionRow {
-    #[key]
     pub id: Uuid,
-    #[index]
     pub section_id: Uuid,
-    #[index]
     pub section_slug: String,
     pub title: String,
     pub poster: Option<String>,
@@ -234,35 +195,7 @@ pub struct AudioCollectionRow {
     pub items_count: i64,
 }
 
-// ─── Join tables (SSR-only) ───────────────────────────────────────────────
-
-#[cfg(feature = "ssr")]
-#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
-#[table = "section_tags"]
-pub struct SectionTag {
-    #[key]
-    #[auto]
-    pub id: Uuid,
-    #[index]
-    pub section_id: Uuid,
-    #[index]
-    pub tag_id: Uuid,
-}
-
-#[cfg(feature = "ssr")]
-#[derive(Debug, Clone, Serialize, Deserialize, toasty::Model)]
-#[table = "collection_tags"]
-pub struct CollectionTag {
-    #[key]
-    #[auto]
-    pub id: Uuid,
-    #[index]
-    pub collection_id: Uuid,
-    #[index]
-    pub tag_id: Uuid,
-}
-
-// ─── Domain models (wire types) ───────────────────────────────────────────
+// ─── Domain models (wire types) ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
@@ -276,10 +209,6 @@ pub struct Section {
     pub tags: Vec<Tag>,
 }
 
-/// Read model for grids, cards, listings. The DB stores video and audio
-/// collections in separate tables; this type lets the shared UI treat them
-/// uniformly. `poster` is `Option` because audio collections may never get
-/// one — for video collections it is always `Some` in practice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
     pub id: Uuid,
@@ -303,7 +232,7 @@ pub struct CollectionSummary {
     pub nested: bool,
 }
 
-// ─── Row → domain conversions ─────────────────────────────────────────────
+// ─── Row → domain conversions ─────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 impl From<SectionRow> for Section {
@@ -354,7 +283,7 @@ impl From<AudioCollectionRow> for Collection {
     }
 }
 
-// ─── Domain methods ───────────────────────────────────────────────────────
+// ─── Domain methods ───────────────────────────────────────────────────────────
 
 impl Section {
     pub fn media_kind(&self) -> MediaKind {

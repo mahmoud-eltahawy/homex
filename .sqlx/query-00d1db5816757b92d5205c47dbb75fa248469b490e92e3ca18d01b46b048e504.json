@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT items_count AS \"items_count!: i64\", poster\n                   FROM audio_collections WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "items_count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "items_count"
+          }
+        }
+      },
+      {
+        "name": "poster",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audio_collections",
+            "name": "poster"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "00d1db5816757b92d5205c47dbb75fa248469b490e92e3ca18d01b46b048e504"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT poster AS \"poster!: String\" FROM video_collections WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "poster!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "poster"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e6288bae61ee1508e8709b8d14ec3ef3c09653b3126424a364ebf65aac1a74ae"
+}

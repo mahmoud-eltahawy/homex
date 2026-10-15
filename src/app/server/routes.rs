@@ -18,9 +18,7 @@ pub async fn stream_media(
     Path(file_id): Path<Uuid>,
     req: Request<Body>,
 ) -> Response {
-    let mut db = state.db.clone();
-
-    let rel: Option<String> = match db::fetch_file_path(&mut db, file_id).await {
+    let rel: Option<String> = match db::fetch_file_path(&state.db, file_id).await {
         Ok(r) => r,
         Err(e) => {
             leptos::logging::error!("[stream] db error: {e}");

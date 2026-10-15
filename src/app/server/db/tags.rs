@@ -1,111 +1,120 @@
-use toasty::Db;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
-use crate::app::model::{CollectionTag, SectionTag, Tag, canonicalize_tags};
+use crate::app::model::{Tag, canonicalize_tags};
 
-// ─── Tag loaders / writers ────────────────────────────────────────────────
+// ─── Tag loaders / writers ────────────────────────────────────────────────────
 
-pub async fn fetch_all_tags(db: &mut Db) -> toasty::Result<Vec<Tag>> {
-    Tag::all()
-        .order_by(Tag::fields().name().asc())
-        .exec(db)
-        .await
-}
-
-/// Case-insensitive lookup of a tag by name. Returns `None` if absent.
-async fn find_tag_id_by_name(db: &mut Db, name: &str) -> toasty::Result<Option<Uuid>> {
-    let candidates = Tag::filter(Tag::fields().name().like(name.to_string()))
-        .exec(db)
-        .await?;
-    Ok(candidates
-        .into_iter()
-        .find(|t| t.name.eq_ignore_ascii_case(name))
-        .map(|t| t.id))
-}
-
-/// Find-or-create a tag inside a transaction.
-async fn upsert_tag_tx(tx: &mut toasty::Transaction<'_>, name: &str) -> toasty::Result<Tag> {
-    if let Some(t) = Tag::filter(Tag::fields().name().eq(name.to_string()))
-        .first()
-        .exec(tx)
-        .await?
-    {
-        return Ok(t);
-    }
-    toasty::create!(Tag {
-        name: name.to_string(),
-    })
-    .exec(tx)
+pub async fn fetch_all_tags(pool: &SqlitePool) -> sqlx::Result<Vec<Tag>> {
+    sqlx::query_as!(
+        Tag,
+        r#"SELECT id AS "id!: Uuid", name AS "name!: String"
+           FROM tags ORDER BY name ASC"#,
+    )
+    .fetch_all(pool)
     .await
 }
 
-/// Resolve a set of tag ids to sorted `Tag` rows.
-///
-/// Uses `.filter().first()` rather than `get_by_id` so that a missing tag
-/// (dangling join row) is distinguishable from a DB failure. The former is
-/// logged and skipped — the join table is inconsistent but the rest of the
-/// fetch is still useful. The latter aborts.
-async fn tags_for_joins(db: &mut Db, tag_ids: &[Uuid]) -> toasty::Result<Vec<Tag>> {
+async fn find_tag_id_by_name(pool: &SqlitePool, name: &str) -> sqlx::Result<Option<Uuid>> {
+    sqlx::query_scalar!(
+        r#"SELECT id AS "id!: Uuid" FROM tags WHERE name = ? COLLATE NOCASE"#,
+        name,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+async fn upsert_tag_tx(conn: &mut SqliteConnection, name: &str) -> sqlx::Result<Tag> {
+    if let Some(t) = sqlx::query_as!(
+        Tag,
+        r#"SELECT id AS "id!: Uuid", name AS "name!: String"
+           FROM tags WHERE name = ?"#,
+        name,
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    {
+        return Ok(t);
+    }
+    let id = Uuid::new_v4();
+    sqlx::query!(r#"INSERT INTO tags (id, name) VALUES (?, ?)"#, id, name)
+        .execute(&mut *conn)
+        .await?;
+    Ok(Tag {
+        id,
+        name: name.to_string(),
+    })
+}
+
+async fn tags_for_joins(pool: &SqlitePool, tag_ids: &[Uuid]) -> sqlx::Result<Vec<Tag>> {
     let mut out = Vec::with_capacity(tag_ids.len());
     for id in tag_ids {
-        let tag = Tag::filter(Tag::fields().id().eq(*id))
-            .first()
-            .exec(db)
-            .await?;
-        match tag {
+        let row = sqlx::query_as!(
+            Tag,
+            r#"SELECT id AS "id!: Uuid", name AS "name!: String"
+               FROM tags WHERE id = ?"#,
+            id,
+        )
+        .fetch_optional(pool)
+        .await?;
+        match row {
             Some(t) => out.push(t),
-            None => {
-                leptos::logging::warn!("[tags] dangling tag_id {id}");
-            }
+            None => leptos::logging::warn!("[tags] dangling tag_id {id}"),
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
 
-pub async fn fetch_section_tags(db: &mut Db, section_id: Uuid) -> toasty::Result<Vec<Tag>> {
-    let ids: Vec<Uuid> = SectionTag::filter(SectionTag::fields().section_id().eq(section_id))
-        .exec(db)
-        .await?
-        .into_iter()
-        .map(|j| j.tag_id)
-        .collect();
-    tags_for_joins(db, &ids).await
+pub async fn fetch_section_tags(pool: &SqlitePool, section_id: Uuid) -> sqlx::Result<Vec<Tag>> {
+    let ids: Vec<Uuid> = sqlx::query_scalar!(
+        r#"SELECT tag_id AS "tag_id!: Uuid"
+           FROM section_tags WHERE section_id = ?"#,
+        section_id,
+    )
+    .fetch_all(pool)
+    .await?;
+    tags_for_joins(pool, &ids).await
 }
 
-pub async fn fetch_collection_tags(db: &mut Db, collection_id: Uuid) -> toasty::Result<Vec<Tag>> {
-    let ids: Vec<Uuid> =
-        CollectionTag::filter(CollectionTag::fields().collection_id().eq(collection_id))
-            .exec(db)
-            .await?
-            .into_iter()
-            .map(|j| j.tag_id)
-            .collect();
-    tags_for_joins(db, &ids).await
+pub async fn fetch_collection_tags(
+    pool: &SqlitePool,
+    collection_id: Uuid,
+) -> sqlx::Result<Vec<Tag>> {
+    let ids: Vec<Uuid> = sqlx::query_scalar!(
+        r#"SELECT tag_id AS "tag_id!: Uuid"
+           FROM collection_tags WHERE collection_id = ?"#,
+        collection_id,
+    )
+    .fetch_all(pool)
+    .await?;
+    tags_for_joins(pool, &ids).await
 }
 
 pub async fn set_section_tags(
-    db: &mut Db,
+    pool: &SqlitePool,
     section_id: Uuid,
     names: &[String],
-) -> toasty::Result<()> {
+) -> sqlx::Result<()> {
     let normalized = canonicalize_tags(names);
-    let mut tx = db.transaction().await?;
+    let mut tx = pool.begin().await?;
 
-    for row in SectionTag::filter(SectionTag::fields().section_id().eq(section_id))
-        .exec(&mut tx)
-        .await?
-    {
-        row.delete().exec(&mut tx).await?;
-    }
+    sqlx::query!(
+        r#"DELETE FROM section_tags WHERE section_id = ?"#,
+        section_id
+    )
+    .execute(&mut *tx)
+    .await?;
 
     for name in &normalized {
         let tag = upsert_tag_tx(&mut tx, name).await?;
-        toasty::create!(SectionTag {
+        sqlx::query!(
+            r#"INSERT INTO section_tags (id, section_id, tag_id) VALUES (?, ?, ?)"#,
+            Uuid::new_v4(),
             section_id,
-            tag_id: tag.id,
-        })
-        .exec(&mut tx)
+            tag.id,
+        )
+        .execute(&mut *tx)
         .await?;
     }
 
@@ -114,27 +123,29 @@ pub async fn set_section_tags(
 }
 
 pub async fn set_collection_tags(
-    db: &mut Db,
+    pool: &SqlitePool,
     collection_id: Uuid,
     names: &[String],
-) -> toasty::Result<()> {
+) -> sqlx::Result<()> {
     let normalized = canonicalize_tags(names);
-    let mut tx = db.transaction().await?;
+    let mut tx = pool.begin().await?;
 
-    for row in CollectionTag::filter(CollectionTag::fields().collection_id().eq(collection_id))
-        .exec(&mut tx)
-        .await?
-    {
-        row.delete().exec(&mut tx).await?;
-    }
+    sqlx::query!(
+        r#"DELETE FROM collection_tags WHERE collection_id = ?"#,
+        collection_id
+    )
+    .execute(&mut *tx)
+    .await?;
 
     for name in &normalized {
         let tag = upsert_tag_tx(&mut tx, name).await?;
-        toasty::create!(CollectionTag {
+        sqlx::query!(
+            r#"INSERT INTO collection_tags (id, collection_id, tag_id) VALUES (?, ?, ?)"#,
+            Uuid::new_v4(),
             collection_id,
-            tag_id: tag.id,
-        })
-        .exec(&mut tx)
+            tag.id,
+        )
+        .execute(&mut *tx)
         .await?;
     }
 
@@ -142,26 +153,25 @@ pub async fn set_collection_tags(
     Ok(())
 }
 
-// ─── Tag-driven collection filtering ──────────────────────────────────────
+// ─── Tag-driven collection filtering ──────────────────────────────────────────
 
-/// Collection ids carrying **every** tag in `tag_names` (case-insensitive).
-/// Returns empty if any listed tag doesn't exist.
 pub(crate) async fn collection_ids_with_all_tags(
-    db: &mut Db,
+    pool: &SqlitePool,
     tag_names: &[String],
-) -> toasty::Result<Vec<Uuid>> {
+) -> sqlx::Result<Vec<Uuid>> {
     let mut intersection: Option<Vec<Uuid>> = None;
 
     for name in tag_names {
-        let Some(tag_id) = find_tag_id_by_name(db, name).await? else {
+        let Some(tag_id) = find_tag_id_by_name(pool, name).await? else {
             return Ok(Vec::new());
         };
-        let ids: Vec<Uuid> = CollectionTag::filter(CollectionTag::fields().tag_id().eq(tag_id))
-            .exec(db)
-            .await?
-            .into_iter()
-            .map(|j| j.collection_id)
-            .collect();
+        let ids: Vec<Uuid> = sqlx::query_scalar!(
+            r#"SELECT collection_id AS "collection_id!: Uuid"
+               FROM collection_tags WHERE tag_id = ?"#,
+            tag_id,
+        )
+        .fetch_all(pool)
+        .await?;
 
         intersection = Some(match intersection {
             None => ids,

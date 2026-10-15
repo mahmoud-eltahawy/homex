@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: Uuid\"\n               FROM video_collections\n               WHERE section_slug = ?1\n                 AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "video_collections",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "39f6172658e009244b55096cd6913481006614780c6b95f8d0a8680d9124574c"
+}

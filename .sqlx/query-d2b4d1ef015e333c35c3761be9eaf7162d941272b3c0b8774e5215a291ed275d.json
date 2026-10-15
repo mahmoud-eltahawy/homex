@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO sections (id, slug, title, media_kind, nested, position)\n           VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "d2b4d1ef015e333c35c3761be9eaf7162d941272b3c0b8774e5215a291ed275d"
+}

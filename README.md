@@ -1,19 +1,34 @@
 ## Schema
 
-The schema is derived from the `#[derive(toasty::Model)]` structs in
-`src/app/model.rs`. Video and audio collections are stored in separate
-tables (`video_collections` and `audio_collections`) because they diverge
-in how their posters are produced.
+The schema is defined in `migrations/`. On startup the server runs
+`sqlx::migrate!()`, which applies any pending migrations.
 
-On startup the server calls `push_schema` on a fresh DB; if the DB already
-has tables it leaves them alone.
+After changing a model or a migration, either drop the dev DB
+(`rm Downloads/homex.db`) or add a new migration file. Never edit a
+migration that has already been applied to a shared DB.
 
-After changing a model, reset the dev DB:
+## Compile-time SQL
 
-    HOMEX_RESET_SCHEMA=1 ./run
+`sqlx::query_as!` and `sqlx::query!` verify every statement against a live
+schema at compile time. Two ways to build:
 
-That deletes `Downloads/homex.db` before boot, then recreates it from the
-current model.
+### With a live schema DB
+
+    $env.DATABASE_URL = "sqlite:///tmp/homex-schema.db"
+    cargo leptos watch --split --hot-reload
+
+### With the offline cache (recommended, no DB needed)
+
+    $env.SQLX_OFFLINE = "true"
+    cargo leptos watch --split --hot-reload
+
+The offline cache lives in `.sqlx/` and is committed. Regenerate it after
+any change to a query or a migration:
+
+    $env.DATABASE_URL = "sqlite:///tmp/homex-schema.db"
+    sqlx migrate run
+    cargo sqlx prepare -- --features ssr
+    git add .sqlx
 
 ## Dependencies
 

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT tag_id AS \"tag_id!: Uuid\"\n           FROM collection_tags WHERE collection_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "tag_id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "collection_tags",
+            "name": "tag_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1e45317a2df77023ad43191d28d159b59e3948418f040b4d3df974b53b490df8"
+}

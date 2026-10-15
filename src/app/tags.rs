@@ -10,7 +10,7 @@ use crate::app::error::ErrorContext;
 #[cfg(feature = "ssr")]
 use crate::app::server::db;
 
-// ─── Tag pill ─────────────────────────────────────────────────────────────
+// ─── Tag pill ─────────────────────────────────────────────────────────────────
 
 #[component]
 pub fn TagPill(#[prop(into)] name: String) -> impl IntoView {
@@ -23,7 +23,7 @@ pub fn TagPill(#[prop(into)] name: String) -> impl IntoView {
     }
 }
 
-// ─── Tag list (read-only, truncating) ─────────────────────────────────────
+// ─── Tag list (read-only, truncating) ─────────────────────────────────────────
 
 #[component]
 pub fn TagList(tags: Vec<Tag>, #[prop(optional)] max: Option<usize>) -> impl IntoView {
@@ -59,18 +59,18 @@ pub fn TagList(tags: Vec<Tag>, #[prop(optional)] max: Option<usize>) -> impl Int
     }
 }
 
-// ─── Server fn ────────────────────────────────────────────────────────────
+// ─── Server fn ────────────────────────────────────────────────────────────────
 
 #[server]
 pub async fn fetch_all_tags() -> Result<Vec<Tag>, AppError> {
     use crate::app::server::AppState;
-    let mut state: AppState = expect_context();
-    db::fetch_all_tags(&mut state.db)
+    let state: AppState = expect_context();
+    db::fetch_all_tags(&state.db)
         .await
         .context("fetch all tags")
 }
 
-// ─── Shared tag cache ─────────────────────────────────────────────────────
+// ─── Shared tag cache ─────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 pub struct TagsCache {
@@ -98,7 +98,7 @@ pub fn use_tags_cache() -> TagsCache {
     use_context::<TagsCache>().unwrap_or_else(TagsCache::new)
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 fn ci_eq(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
@@ -108,7 +108,7 @@ fn ci_contains(haystack: &str, needle: &str) -> bool {
     haystack.to_lowercase().contains(&needle.to_lowercase())
 }
 
-// ─── Tag editor with autocomplete ─────────────────────────────────────────
+// ─── Tag editor with autocomplete ─────────────────────────────────────────────
 
 #[component]
 pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> impl IntoView {
@@ -258,23 +258,17 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
                                          bg-cyan-500/15 border border-cyan-400/25 text-cyan-300 \
                                          text-[10px] font-medium tracking-wide">
                                 {name}
-                                <button
-                                    type="button"
+                                <button type="button"
                                     on:click=move |_| remove.run(name_for_remove.clone())
                                     class="text-cyan-300/70 hover:text-white transition-colors leading-none"
-                                    aria-label="Remove tag"
-                                >
-                                    "×"
-                                </button>
+                                    aria-label="Remove tag">"×"</button>
                             </span>
                         }
                     }
                 </For>
 
                 <div class="relative">
-                    <input
-                        type="text"
-                        placeholder="add tag..."
+                    <input type="text" placeholder="add tag..."
                         prop:value=move || input.get()
                         on:input=move |ev| input.set(event_target_value(&ev))
                         on:keydown=move |ev| on_keydown.run(ev)
@@ -282,8 +276,7 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
                         on:blur=move |_| focused.set(false)
                         class="bg-white/5 border border-white/10 rounded-full px-2 py-0.5 \
                                text-[10px] text-white placeholder:text-gray-500 \
-                               focus:outline-none focus:border-cyan-400/40 w-28"
-                    />
+                               focus:outline-none focus:border-cyan-400/40 w-28"/>
 
                     <Show when=move || focused.get() && !input.get().trim().is_empty()>
                         <div class="absolute top-full left-0 mt-1 min-w-[180px] max-w-[260px] z-30 \
@@ -293,22 +286,16 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
                                 {
                                     let name_for_add = name.clone();
                                     view! {
-                                        <button
-                                            type="button"
+                                        <button type="button"
                                             on:mousedown=move |ev| {
                                                 ev.prevent_default();
                                                 add_name.run(name_for_add.clone());
                                             }
                                             class="w-full text-left px-2 py-1 flex items-center gap-2 \
-                                                   hover:bg-white/10 transition-colors"
-                                        >
+                                                   hover:bg-white/10 transition-colors">
                                             <span class="text-cyan-400 text-[10px] leading-none">"✓"</span>
-                                            <span class="text-white text-xs truncate flex-1">
-                                                {name.clone()}
-                                            </span>
-                                            <span class="text-[9px] text-gray-500 ml-auto shrink-0">
-                                                "existing"
-                                            </span>
+                                            <span class="text-white text-xs truncate flex-1">{name.clone()}</span>
+                                            <span class="text-[9px] text-gray-500 ml-auto shrink-0">"existing"</span>
                                         </button>
                                     }
                                 }
@@ -324,23 +311,19 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
                             </Show>
 
                             <Show when=move || show_create.get()>
-                                <button
-                                    type="button"
+                                <button type="button"
                                     on:mousedown=move |ev| {
                                         ev.prevent_default();
                                         let q = input.get_untracked();
                                         add_name.run(q);
                                     }
                                     class="w-full text-left px-2 py-1 flex items-center gap-2 \
-                                           hover:bg-emerald-500/10 transition-colors border-t border-white/5"
-                                >
+                                           hover:bg-emerald-500/10 transition-colors border-t border-white/5">
                                     <span class="text-emerald-400 text-[10px] leading-none">"+"</span>
                                     <span class="text-white text-xs truncate flex-1">
                                         {move || input.get().trim().to_string()}
                                     </span>
-                                    <span class="text-[9px] text-emerald-400 ml-auto shrink-0">
-                                        "new tag"
-                                    </span>
+                                    <span class="text-[9px] text-emerald-400 ml-auto shrink-0">"new tag"</span>
                                 </button>
                             </Show>
 
@@ -353,11 +336,8 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
                     </Show>
                 </div>
             </div>
-        }
-        .into_any()
+        }.into_any()
     };
 
-    view! {
-        {render}
-    }
+    view! { {render} }
 }

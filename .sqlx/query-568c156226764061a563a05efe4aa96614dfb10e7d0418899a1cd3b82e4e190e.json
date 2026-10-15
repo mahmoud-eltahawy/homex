@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE audio_collections SET items_count = MAX(items_count + ?, 0) WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "568c156226764061a563a05efe4aa96614dfb10e7d0418899a1cd3b82e4e190e"
+}
