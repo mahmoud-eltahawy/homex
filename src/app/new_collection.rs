@@ -1,8 +1,9 @@
 use crate::app::constants::routes;
 use crate::app::error::AppError;
-use crate::app::ids::Slug;
+use crate::app::ids::{Slug, SlugError};
 use crate::app::model::{MediaKind, Section, Tag};
-use crate::app::route_params::use_string_param;
+use crate::app::page::{Page, PageContent};
+use crate::app::route_params::use_slug_param;
 use crate::app::tags::TagEditor;
 use crate::app::upload_job::{UploadJob, UploadProgress};
 use crate::app::upload_types::{
@@ -12,39 +13,30 @@ use crate::app::upload_types::{
 use leptos::prelude::*;
 use leptos_outcome::ErrorView;
 use leptos_router::hooks::use_navigate;
-use leptos_router::{LazyRoute, lazy_route};
 use uuid::Uuid;
 
-// ─── Page ─────────────────────────────────────────────────────────────────
-
-pub struct NewCollectionPage {
-    section_slug: Signal<String>,
+pub struct NewCollectionContent {
+    slug: Slug,
     sections: Resource<Result<Vec<Section>, AppError>>,
 }
 
-#[lazy_route]
-impl LazyRoute for NewCollectionPage {
-    fn data() -> Self {
-        let slug_fn = use_string_param("slug");
-        let section_slug: Signal<String> = Signal::derive(slug_fn);
+impl PageContent<SlugError> for NewCollectionContent {
+    fn load() -> Result<Self, SlugError> {
+        let slug = use_slug_param("slug")?;
         let sections: Resource<Result<Vec<Section>, AppError>> = expect_context();
-        Self {
-            section_slug,
-            sections,
-        }
+        Ok(Self { slug, sections })
     }
 
-    fn view(this: Self) -> AnyView {
-        let section_slug = this.section_slug;
-        let sections = this.sections;
+    fn render(self) -> AnyView {
+        let Self { slug, sections } = self;
         let navigate = use_navigate();
 
+        let slug_for_lookup = slug.clone();
         let section: Signal<Option<Section>> = Signal::derive(move || {
-            let slug = section_slug.get();
             sections
                 .get()
                 .and_then(|r| r.ok())
-                .and_then(|v| v.into_iter().find(|s| s.slug.as_str() == slug))
+                .and_then(|v| v.into_iter().find(|s| s.slug == slug_for_lookup))
         });
 
         let kind = Signal::derive(move || section.get().map(|s| s.media_kind));
@@ -69,7 +61,7 @@ impl LazyRoute for NewCollectionPage {
         let upload_error = upload.error();
 
         let navigate_for_effect = navigate.clone();
-        let slug_for_effect = section_slug;
+        let slug_for_effect = slug.clone();
         Effect::new(move |_| {
             if !upload.is_terminal_success() {
                 return;
@@ -77,13 +69,10 @@ impl LazyRoute for NewCollectionPage {
             let Some(id) = upload.collection_id.get() else {
                 return;
             };
-            let Some(slug) = upload.section_slug.get().or_else(|| {
-                let s = slug_for_effect.get();
-                if s.is_empty() { None } else { Some(s) }
-            }) else {
-                return;
-            };
-            navigate_for_effect(&routes::collection(&slug, id), Default::default());
+            navigate_for_effect(
+                &routes::collection(slug_for_effect.as_str(), id),
+                Default::default(),
+            );
         });
 
         let can_submit = Signal::derive(move || {
@@ -95,13 +84,9 @@ impl LazyRoute for NewCollectionPage {
             _ => video_accept_attr(),
         });
 
+        let slug_for_submit = slug;
         let on_submit = move |ev: web_sys::SubmitEvent| {
             ev.prevent_default();
-            let slug = section_slug.get_untracked();
-            let slug = Slug::new(slug);
-            let Ok(slug) = slug else {
-                return;
-            };
             let t = title.get_untracked().trim().to_string();
             if t.is_empty() {
                 return;
@@ -118,11 +103,10 @@ impl LazyRoute for NewCollectionPage {
             } else {
                 None
             };
-
             let file_list = files.get_untracked();
 
             let form = UploadForm {
-                section_slug: slug,
+                section_slug: slug_for_submit.clone(),
                 target: UploadTarget::New {
                     id: Uuid::new_v4(),
                     title: t,
@@ -165,7 +149,7 @@ impl LazyRoute for NewCollectionPage {
                                     "The collection is created once the upload succeeds."
                                 </p>
 
-                                <form on:submit=on_submit class="space-y-4">
+                                <form on:submit=on_submit.clone() class="space-y-4">
                                     <div>
                                         <label class="text-xs text-gray-500 uppercase tracking-wider">
                                             "Title"
@@ -299,7 +283,7 @@ impl LazyRoute for NewCollectionPage {
     }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+pub type NewCollectionPage = Page<NewCollectionContent, SlugError>;
 
 fn file_stem(name: &str) -> String {
     name.rsplit_once('.')

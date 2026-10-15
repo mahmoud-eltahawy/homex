@@ -16,7 +16,6 @@ pub struct UploadJob {
     pub done_tick: RwSignal<u32>,
     pub pending: Signal<bool>,
     pub collection_id: RwSignal<Option<Uuid>>,
-    pub section_slug: RwSignal<Option<String>>,
 }
 
 #[derive(Clone, Copy)]
@@ -150,7 +149,6 @@ impl UploadJob {
             done_tick: signals.done_tick,
             pending,
             collection_id: signals.collection_id,
-            section_slug: signals.section_slug,
         }
     }
 

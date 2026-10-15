@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::app::constants::routes;
 use crate::app::error::{AppError, ErrorCode};
+#[cfg(feature = "ssr")]
 use crate::app::ids::Slug;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;

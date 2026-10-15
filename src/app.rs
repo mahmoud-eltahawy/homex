@@ -1,7 +1,7 @@
 use crate::app::constants::{APP_TITLE, HTML_DIR, HTML_LANG, STYLESHEET_URL};
 use crate::app::{
-    collection_detail::CollectionDetailPage, home::HomePage, layout::Layout, login::LoginPage,
-    new_collection::NewCollectionPage, section_listing::SectionListingPage,
+    collection_detail::CollectionDetailPage, error_page::ErrorPage, home::HomePage, layout::Layout,
+    login::LoginPage, new_collection::NewCollectionPage, section_listing::SectionListingPage,
 };
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
@@ -17,6 +17,7 @@ mod common;
 pub mod constants;
 pub mod detail;
 pub mod error;
+mod error_page;
 mod home;
 mod icons;
 pub mod ids;
@@ -25,6 +26,7 @@ mod layout;
 mod login;
 mod model;
 mod new_collection;
+mod page;
 mod pagination;
 mod route_params;
 mod search;
@@ -66,12 +68,18 @@ pub fn App() -> impl IntoView {
             <Routes fallback=|| "Page not found.".into_view()>
                 <Route path=path!("/login") view={Lazy::<LoginPage>::new()}/>
                 <ParentRoute path=path!("") view=Layout>
+                    <Route path=path!("/error") view={Lazy::<ErrorPage>::new()}/>
                     <Route path=path!("/") view={Lazy::<HomePage>::new()}/>
-                    <Route path=path!("/new-collection/:slug") view={Lazy::<NewCollectionPage>::new()}/>
-                    <Route path=path!("/s/:slug") view={Lazy::<SectionListingPage>::new()}/>
-                    <Route path=path!("/s/:slug/:id") view={Lazy::<CollectionDetailPage>::new()}/>
-                    <Route path=path!("/s/:slug/:id/item/:item_id") view={Lazy::<CollectionDetailPage>::new()}/>
-                    <Route path=path!("/unclassified") view={Lazy::<unclassified::UnclassifiedPage>::new()}/>
+                    <Route path=path!("/new-collection/:slug")
+                           view={Lazy::<NewCollectionPage>::new()}/>
+                    <Route path=path!("/s/:slug")
+                           view={Lazy::<SectionListingPage>::new()}/>
+                    <Route path=path!("/s/:slug/:id")
+                           view={Lazy::<CollectionDetailPage>::new()}/>
+                    <Route path=path!("/s/:slug/:id/item/:item_id")
+                           view={Lazy::<CollectionDetailPage>::new()}/>
+                    <Route path=path!("/unclassified")
+                           view={Lazy::<unclassified::UnclassifiedPage>::new()}/>
                 </ParentRoute>
             </Routes>
         </Router>

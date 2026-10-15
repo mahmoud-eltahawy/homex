@@ -4,14 +4,16 @@ use std::sync::Arc;
 use leptos::{either::Either, prelude::*};
 use leptos_outcome::ResourceView;
 use leptos_outcome::action_error;
-use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
+use leptos_router::hooks::use_navigate;
 use uuid::Uuid;
 use web_sys::wasm_bindgen::JsCast;
 
 use leptos_media_player::{MediaItem, WatchPage};
 
-use crate::app::error::{AppError, ErrorCode};
-use crate::app::ids::Slug;
+use crate::app::error::AppError;
+use crate::app::ids::{Slug, SlugError};
+use crate::app::page::{Page, PageContent};
+use crate::app::route_params::{use_optional_uuid_param, use_slug_param, use_uuid_param};
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
@@ -24,7 +26,6 @@ use crate::app::{
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
     model::{Collection, CollectionField, CollectionSummary, Item, MediaKind, Section},
-    route_params::{use_optional_uuid_param, use_string_param, use_uuid_param},
     sections::fetch_section_by_slug,
     tags::TagEditor,
     unclassified::move_items_to_incoming,
@@ -242,51 +243,50 @@ fn make_playlist_adapter(
     }
 }
 
-// ─── Page structure ───────────────────────────────────────────────────────
+// ─── Page content ─────────────────────────────────────────────────────────
 
-pub struct CollectionDetailPage {
+pub struct CollectionDetailContent {
     section: Resource<Result<Section, AppError>>,
     collection: Resource<Result<Collection, AppError>>,
     items: Resource<Result<Vec<Item>, AppError>>,
     initial_item_id: Option<Uuid>,
 }
 
-#[lazy_route]
-impl LazyRoute for CollectionDetailPage {
-    fn data() -> Self {
-        let slug_str = use_string_param("slug");
-        let id = use_uuid_param("id");
-        let item_id_fn = use_optional_uuid_param("item_id");
+impl PageContent<SlugError> for CollectionDetailContent {
+    fn load() -> Result<Self, SlugError> {
+        let slug = use_slug_param("slug")?;
+        let id = use_uuid_param("id")();
+        let initial_item_id = use_optional_uuid_param("item_id")();
 
-        let section = Resource::new(slug_str, |s: String| async move {
-            match Slug::new(s) {
-                Ok(slug) => fetch_section_by_slug(slug).await,
-                Err(e) => Err(AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)),
-            }
-        });
-
-        let collection = Resource::new(
-            move || (slug_str(), id()),
-            |(s, i): (String, Uuid)| async move {
-                match Slug::new(s) {
-                    Ok(slug) => fetch_collection_detail(slug, i).await,
-                    Err(e) => Err(AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)),
-                }
-            },
+        let slug_for_section = slug.clone();
+        let section = Resource::new(
+            move || slug_for_section.clone(),
+            |s: Slug| async move { fetch_section_by_slug(s).await },
         );
 
-        Self {
+        let slug_for_collection = slug;
+        let collection = Resource::new(
+            move || (slug_for_collection.clone(), id),
+            |(s, i): (Slug, Uuid)| async move { fetch_collection_detail(s, i).await },
+        );
+
+        let items = Resource::new(move || id, fetch_items);
+
+        Ok(Self {
             section,
             collection,
-            items: Resource::new(id, fetch_items),
-            initial_item_id: item_id_fn(),
-        }
+            items,
+            initial_item_id,
+        })
     }
 
-    fn view(this: Self) -> AnyView {
-        let collection = this.collection;
-        let items = this.items;
-        let initial_item_id = this.initial_item_id;
+    fn render(self) -> AnyView {
+        let Self {
+            section,
+            collection,
+            items,
+            initial_item_id,
+        } = self;
         let adapter = move |section: Section| CollectionDetailBodyProps {
             section,
             collection,
@@ -294,11 +294,15 @@ impl LazyRoute for CollectionDetailPage {
             initial_item_id,
         };
         view! {
-            <ResourceView resource=this.section view_fn=CollectionDetailBody adapter=adapter/>
+            <ResourceView resource=section view_fn=CollectionDetailBody adapter=adapter/>
         }
         .into_any()
     }
 }
+
+pub type CollectionDetailPage = Page<CollectionDetailContent, SlugError>;
+
+// ─── Body / hero / playlist (unchanged) ───────────────────────────────────
 
 #[component]
 fn CollectionDetailBody(

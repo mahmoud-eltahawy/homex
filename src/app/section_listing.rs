@@ -4,25 +4,22 @@ use crate::app::{
         collections_paginated,
     },
     error::AppError,
-    ids::Slug,
+    ids::{Slug, SlugError},
     inline_edit::use_edit_mode,
     model::{Collection, Section},
+    page::{Page, PageContent},
     pagination::{PaginationControls, PaginationControlsProps},
-    route_params::use_string_param,
+    route_params::use_slug_param,
     search::SearchBar,
     sections::fetch_section_by_slug,
 };
 use leptos::prelude::*;
 use leptos_outcome::ResourceView;
 use leptos_router::hooks::use_navigate;
-use leptos_router::{LazyRoute, lazy_route};
-
-#[cfg(feature = "ssr")]
-use crate::app::error::ErrorCode;
 
 const LISTING_PAGE_SIZE: usize = 18;
 
-pub struct SectionListingPage {
+pub struct SectionListingContent {
     section: Resource<Result<Section, AppError>>,
     collections: CollectionPage,
     count: CollectionCount,
@@ -30,47 +27,46 @@ pub struct SectionListingPage {
     search_query: RwSignal<Option<String>>,
 }
 
-#[lazy_route]
-impl LazyRoute for SectionListingPage {
-    fn data() -> Self {
-        let slug = use_string_param("slug");
+impl PageContent<SlugError> for SectionListingContent {
+    fn load() -> Result<Self, SlugError> {
+        let slug = use_slug_param("slug")?;
+
         let offset = RwSignal::new(0);
         let search_query = RwSignal::new(None);
 
-        let slug_for_section = slug;
-        let section = Resource::new(slug_for_section, |s: String| async move {
-            match Slug::new(s) {
-                #[cfg(feature = "ssr")]
-                Ok(slug) => fetch_section_by_slug(slug).await,
-                #[cfg(not(feature = "ssr"))]
-                Ok(_) => unreachable!("server fn stub returns directly"),
-                Err(e) => Err(parse_slug_error(e)),
-            }
-        });
+        let slug_for_section = slug.clone();
+        let section = Resource::new(
+            move || slug_for_section.clone(),
+            |s: Slug| async move { fetch_section_by_slug(s).await },
+        );
 
         let slug_for_fetch = slug;
         let (collections, count) = collections_paginated(
-            slug_for_fetch,
+            move || slug_for_fetch.clone(),
             offset,
             search_query,
             || false,
             LISTING_PAGE_SIZE,
         );
 
-        Self {
+        Ok(Self {
             section,
             collections,
             count,
             offset,
             search_query,
-        }
+        })
     }
 
-    fn view(this: Self) -> AnyView {
-        let offset = this.offset;
-        let search_query = this.search_query;
-        let collections = this.collections;
-        let count = this.count;
+    fn render(self) -> AnyView {
+        let Self {
+            section,
+            collections,
+            count,
+            offset,
+            search_query,
+        } = self;
+
         let adapter = move |section: Section| SectionListingBodyProps {
             section,
             collections,
@@ -79,22 +75,13 @@ impl LazyRoute for SectionListingPage {
             search_query,
         };
         view! {
-            <ResourceView resource=this.section view_fn=SectionListingBody adapter=adapter/>
+            <ResourceView resource=section view_fn=SectionListingBody adapter=adapter/>
         }
         .into_any()
     }
 }
 
-fn parse_slug_error(e: crate::app::ids::SlugError) -> AppError {
-    #[cfg(feature = "ssr")]
-    {
-        AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)
-    }
-    #[cfg(not(feature = "ssr"))]
-    {
-        AppError::detailed(format!("Invalid slug: {e}"))
-    }
-}
+pub type SectionListingPage = Page<SectionListingContent, SlugError>;
 
 #[component]
 fn SectionListingBody(

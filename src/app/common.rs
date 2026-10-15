@@ -5,11 +5,9 @@ use crate::app::ids::Slug;
 use crate::app::model::{Collection, SearchQuery};
 use crate::app::tags::TagList;
 use leptos::prelude::*;
+use leptos_router::hooks::use_navigate;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-
-#[cfg(feature = "ssr")]
-use crate::app::error::ErrorCode;
 
 #[component]
 pub fn CardsLoading() -> impl IntoView {
@@ -91,6 +89,26 @@ pub fn EmptyState(#[prop(into)] label: String) -> impl IntoView {
     }
 }
 
+/// Replace the current view's subtree with a brief "Redirecting…"
+/// placeholder and schedule a navigation to `/error`.
+///
+/// Rendered by [`Page::into_view`](crate::app::page::Page::into_view) when
+/// a URL parameter failed to parse. The redirect happens inside an
+/// `Effect`, so the placeholder paints for a frame before the router
+/// swaps the page.
+#[component]
+pub fn RedirectToError() -> impl IntoView {
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        navigate("/error", Default::default());
+    });
+    view! {
+        <div class="min-h-[40vh] flex items-center justify-center text-gray-500 text-sm">
+            "Redirecting…"
+        </div>
+    }
+}
+
 pub fn refetch_on_success<V, A, R>(action: Action<A, Result<V, AppError>>, resource: Resource<R>)
 where
     A: Send + Sync + 'static + Clone,
@@ -107,8 +125,13 @@ where
 pub type CollectionPage = Resource<Result<Vec<Collection>, AppError>>;
 pub type CollectionCount = Resource<Result<usize, AppError>>;
 
+/// Paginated collections for a section, keyed on the section's `Slug`.
+///
+/// Callers supply a `Slug` — never a `String`. The parse happens upstream
+/// in `PageContent::load`; this function's contract is that its input is
+/// already a concrete domain value.
 pub fn collections_paginated(
-    slug: impl Fn() -> String + Clone + Send + Sync + 'static,
+    slug: impl Fn() -> Slug + Clone + Send + Sync + 'static,
     offset: RwSignal<usize>,
     search: RwSignal<Option<String>>,
     skip: impl Fn() -> bool + Copy + Send + Sync + 'static,
@@ -117,44 +140,29 @@ pub fn collections_paginated(
     let slug_items = slug.clone();
     let items = Resource::new(
         move || (skip(), slug_items(), offset.get(), search.get()),
-        move |(skip_now, s, off, q)| async move {
+        move |(skip_now, s, off, q): (bool, Slug, usize, Option<String>)| async move {
             if skip_now {
                 return Ok(Vec::new());
             }
-            let slug = parse_slug_for_resource(s)?;
             let parsed = q
                 .as_deref()
                 .map(SearchQuery::parse)
                 .filter(|sq| !sq.is_empty());
-            fetch_collections(slug, off, page_size, parsed).await
+            fetch_collections(s, off, page_size, parsed).await
         },
     );
 
     let slug_count = slug;
     let count = Resource::new(
         move || (slug_count(), search.get()),
-        |(s, q)| async move {
-            let slug = parse_slug_for_resource(s)?;
+        |(s, q): (Slug, Option<String>)| async move {
             let parsed = q
                 .as_deref()
                 .map(SearchQuery::parse)
                 .filter(|sq| !sq.is_empty());
-            fetch_collections_count(slug, parsed).await
+            fetch_collections_count(s, parsed).await
         },
     );
 
     (items, count)
-}
-
-fn parse_slug_for_resource(raw: String) -> Result<Slug, AppError> {
-    Slug::new(raw).map_err(|e| {
-        #[cfg(feature = "ssr")]
-        {
-            AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)
-        }
-        #[cfg(not(feature = "ssr"))]
-        {
-            AppError::detailed(format!("Invalid slug: {e}"))
-        }
-    })
 }

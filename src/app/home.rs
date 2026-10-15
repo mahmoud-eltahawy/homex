@@ -113,7 +113,7 @@ fn use_section_teaser_state(
 
     let slug_for_fetch = slug;
     let (items, count) = collections_paginated(
-        move || slug_for_fetch.to_string(),
+        move || slug_for_fetch.clone(),
         offset,
         search_query,
         move || folded.get(),
@@ -305,7 +305,7 @@ fn SectionHeaderViewMode(
             href=href
             class="group flex items-center gap-3 min-w-0"
         >
-            <span class="flex items-center shrink-0">{icon_for(kind,nested)}</span>
+            <span class="flex items-center shrink-0">{icon_for(kind, nested)}</span>
             <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
                 {move || title.get()}
             </span>
@@ -326,7 +326,7 @@ fn SectionHeaderEditMode(
 ) -> impl IntoView {
     view! {
         <div class="flex items-center gap-3 min-w-0">
-            <span class="flex items-center shrink-0">{icon_for(kind,nested)}</span>
+            <span class="flex items-center shrink-0">{icon_for(kind, nested)}</span>
             <EditableText
                 value=Signal::derive(move || title.get())
                 on_commit=on_commit
