@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    ".",
+    "crates/leptos_media_player",
+    "crates/leptos_outcome",
+]
+resolver = "3"
+
 [package]
 name = "homex"
 version = "0.1.0"
@@ -7,40 +15,42 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-leptos = { version = "0.8.0" }
-leptos_router = { version = "0.8.0" }
-axum = { version = "0.8.0", optional = true }
+leptos                 = { version = "0.8.0" }
+leptos_router          = { version = "0.8.0" }
+leptos_meta            = { version = "0.8.0" }
+axum                   = { version = "0.8.0", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
-leptos_axum = { version = "0.8.0", optional = true }
-leptos_meta = { version = "0.8.0" }
-tokio = { version = "1", features = ["rt-multi-thread","process","io-util","fs","signal"], optional = true }
-gloo-timers = { version = "0.4.0", features = ["futures"] }
-wasm-bindgen = { version = "0.2.106", optional = true }
-web-sys = { version = "0.3.103", features = [
+leptos_axum            = { version = "0.8.0", optional = true }
+tokio                  = { version = "1", features = ["rt-multi-thread","process","io-util","fs","signal"], optional = true }
+gloo-timers            = { version = "0.4.0", features = ["futures"] }
+wasm-bindgen           = { version = "0.2.106", optional = true }
+web-sys                = { version = "0.3.103", features = [
     "Blob", "Document", "Element", "Event", "File", "FileList", "FormData",
     "HtmlFormElement", "HtmlInputElement", "HtmlSelectElement",
     "HtmlVideoElement", "MouseEvent", "SubmitEvent", "Url",
 ] }
-serde = { version = "1.0.229", features = ["derive"] }
-tower-http = { version = "0.6.0", features = ["fs"], optional = true }
-leptos-use = "0.19"
-server_fn = { version = "0.8.13", features = ["multipart"] }
-toml = { version = "1", optional = true }
-tower = { version = "0.5", optional = true }
-tokio-util = { version = "0.7", optional = true }
-http-body-util = { version = "0.1", optional = true }
-multer = { version = "3", optional = true }
-infer = { version = "0.16", optional = true }
-slug = { version = "0.1", optional = true }
-tempfile = { version = "3", optional = true }
-uuid = { version = "1", features = ["v4", "serde", "js"] }
-leptos_media_player = { git = "https://github.com/mahmoud-eltahawy/leptos_media_player.git" }
-leptos_outcome = { git = "https://github.com/mahmoud-eltahawy/leptos_outcome.git" }
+serde                  = { version = "1.0.229", features = ["derive"] }
+tower-http             = { version = "0.6.0", features = ["fs"], optional = true }
+leptos-use             = "0.19"
+server_fn              = { version = "0.8.13", features = ["multipart"] }
+toml                   = { version = "1", optional = true }
+tower                  = { version = "0.5", optional = true }
+tokio-util             = { version = "0.7", optional = true }
+http-body-util         = { version = "0.1", optional = true }
+multer                 = { version = "3", optional = true }
+infer                  = { version = "0.16", optional = true }
+slug                   = { version = "0.1", optional = true }
+tempfile               = { version = "3", optional = true }
+uuid                   = { version = "1", features = ["v4", "serde", "js"] }
+
+# ── Local, editable copies ────────────────────────────────────────────────
+leptos_media_player = { path = "crates/leptos_media_player" }
+leptos_outcome      = { path = "crates/leptos_outcome" }
 
 sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio", "sqlite", "uuid", "macros", "migrate",
 ], optional = true }
-
+# 
 [features]
 hydrate = [
     "leptos/hydrate",

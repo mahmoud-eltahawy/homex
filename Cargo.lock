@@ -1529,7 +1529,6 @@ dependencies = [
 [[package]]
 name = "leptos_media_player"
 version = "0.1.0"
-source = "git+https://github.com/mahmoud-eltahawy/leptos_media_player.git#f8a93d9b7512395e53686fd994acea0372ee1e8e"
 dependencies = [
  "leptos",
  "leptos-use",
@@ -1557,10 +1556,10 @@ dependencies = [
 [[package]]
 name = "leptos_outcome"
 version = "0.1.0"
-source = "git+https://github.com/mahmoud-eltahawy/leptos_outcome.git#ba61579276c4a68694e9ceb4e58fa30d41a41de5"
 dependencies = [
  "leptos",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

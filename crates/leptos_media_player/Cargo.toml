@@ -1,0 +1,28 @@
+[package]
+name = "leptos_media_player"
+version = "0.1.0"
+edition = "2024"
+description = "A Leptos media player component with playlist, fullscreen, and edit-mode reordering."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mahmoud_eltahawy/leptos_media_player"
+keywords = ["leptos", "media", "video", "audio", "player"]
+categories = ["gui", "web-programming", "multimedia"]
+readme = "README.md"
+
+[dependencies]
+leptos = "0.8"
+leptos-use = "0.19"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Element",
+    "Event",
+    "HtmlDivElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlVideoElement",
+    "KeyboardEvent",
+    "MouseEvent",
+] }
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v4", "serde", "js"] }
