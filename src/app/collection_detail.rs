@@ -10,6 +10,13 @@ use web_sys::wasm_bindgen::JsCast;
 
 use leptos_media_player::{MediaItem, WatchPage};
 
+use crate::app::multipart;
+use crate::app::multipart::COLLECTION_ID;
+use crate::app::multipart::POSTER_FILE;
+use crate::app::multipart::POSTER_ID;
+use crate::app::multipart::POSTER_SECTION;
+use crate::app::multipart::SEASON_NUMBER;
+use crate::app::multipart::SECTION_SLUG;
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
@@ -30,10 +37,6 @@ use crate::app::{
     upload_job::{UploadJob, UploadProgress},
 };
 use leptos_outcome::ErrorView;
-
-// ─── Multipart form field names (client-side) ─────────────────────────────
-
-mod fields;
 
 // ─── Action type aliases ──────────────────────────────────────────────────
 
@@ -182,9 +185,9 @@ fn use_poster_upload(
 ) -> Callback<web_sys::File> {
     let on_file = Callback::new(move |file: web_sys::File| {
         let fd = web_sys::FormData::new().unwrap();
-        let _ = fd.append_with_str(fields::SECTION, &section_slug);
-        let _ = fd.append_with_str(fields::ID, &collection_id.to_string());
-        let _ = fd.append_with_blob_and_filename(fields::POSTER_FILE, &file, &file.name());
+        let _ = fd.append_with_str(POSTER_SECTION, &section_slug);
+        let _ = fd.append_with_str(POSTER_ID, &collection_id.to_string());
+        let _ = fd.append_with_blob_and_filename(POSTER_FILE, &file, &file.name());
         poster_upload.dispatch(fd);
     });
 
@@ -530,11 +533,11 @@ fn build_append_formdata(
     season: Option<i64>,
 ) -> web_sys::FormData {
     let fd = web_sys::FormData::new().unwrap();
-    let _ = fd.append_with_str(fields::SECTION_SLUG, section_slug);
-    let _ = fd.append_with_str(fields::COLLECTION_ID, &collection_id.to_string());
+    let _ = fd.append_with_str(SECTION_SLUG, section_slug);
+    let _ = fd.append_with_str(COLLECTION_ID, &collection_id.to_string());
 
     if let Some(season) = season {
-        let _ = fd.append_with_str(fields::SEASON_NUMBER, &season.to_string());
+        let _ = fd.append_with_str(SEASON_NUMBER, &season.to_string());
     }
 
     for i in 0..files.length() {
@@ -542,8 +545,8 @@ fn build_append_formdata(
             let file: web_sys::File = f.unchecked_into();
             let name = file.name();
             let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-            let _ = fd.append_with_blob_and_filename(&fields::file(i as usize), &file, &name);
-            let _ = fd.append_with_str(&fields::file_title(i as usize), &stem);
+            let _ = fd.append_with_blob_and_filename(&multipart::file(i as usize), &file, &name);
+            let _ = fd.append_with_str(&multipart::file_title(i as usize), &stem);
         }
     }
     fd

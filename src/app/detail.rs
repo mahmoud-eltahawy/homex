@@ -1,26 +1,5 @@
 use crate::app::icons::DownloadIcon;
-use leptos::{either::Either, prelude::*};
-
-#[component]
-pub fn Poster(
-    src: Option<String>,
-    #[prop(optional, into)] class: Option<String>,
-    #[prop(optional)] alt: Option<String>,
-    #[prop(optional)] placeholder: Option<AnyView>,
-) -> impl IntoView {
-    let class =
-        class.unwrap_or_else(|| "w-full rounded-2xl shadow-2xl border border-white/10".into());
-    view! {
-        {match src {
-            Some(src) => Either::Left(view! {
-                <img src=src class=class alt=alt.unwrap_or_default()/>
-            }),
-            None => Either::Right(placeholder.unwrap_or_else(|| view! {
-                <div class=format!("{class} aspect-[2/3] bg-white/5")></div>
-            }.into_any())),
-        }}
-    }
-}
+use leptos::prelude::*;
 
 #[component]
 pub fn DetailShell(#[prop(into)] poster: Option<String>, children: Children) -> impl IntoView {
@@ -64,29 +43,11 @@ pub fn HeroBadge(#[prop(into)] label: String, icon: impl IntoView + 'static) -> 
 }
 
 #[component]
-pub fn HeroTitle(#[prop(into)] title: String) -> impl IntoView {
-    view! {
-        <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight mb-2">
-            {title}
-        </h1>
-    }
-}
-
-#[component]
 pub fn HeroMeta(children: Children) -> impl IntoView {
     view! {
         <div class="flex flex-wrap items-center gap-3 sm:gap-4 text-gray-300 mt-2 mb-6 text-sm sm:text-base">
             {children()}
         </div>
-    }
-}
-
-#[component]
-pub fn HeroDescription(#[prop(into)] text: String) -> impl IntoView {
-    view! {
-        <p class="text-gray-300 leading-relaxed max-w-2xl text-base sm:text-lg">
-            {text}
-        </p>
     }
 }
 

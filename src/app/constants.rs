@@ -109,7 +109,6 @@ pub mod messages {
     pub const SECTION_SLUG_MISSING: &str = "section_slug is missing";
 
     pub const UNIQUE_SECTION_ID_FAILED: &str = "Could not generate a unique section identifier";
-    pub const CREATE_SECTION_FAILED: &str = "Could not create the section";
 
     pub const INVALID_TOKEN: &str = "Invalid token";
     pub const UPLOAD_STARTED_BG: &str = "Upload and conversion started in the background";

@@ -23,6 +23,7 @@ mod inline_edit;
 mod layout;
 mod login;
 mod model;
+mod multipart;
 mod new_collection;
 mod pagination;
 mod route_params;

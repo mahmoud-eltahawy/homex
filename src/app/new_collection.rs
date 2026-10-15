@@ -7,6 +7,7 @@
 use crate::app::constants::routes;
 use crate::app::error::AppError;
 use crate::app::model::{MediaKind, Section, Tag};
+use crate::app::multipart;
 use crate::app::route_params::use_string_param;
 use crate::app::tags::TagEditor;
 use crate::app::upload_job::{UploadJob, UploadProgress};
@@ -14,29 +15,6 @@ use leptos::prelude::*;
 use leptos_outcome::ErrorView;
 use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
-
-// ─── FormData field names ─────────────────────────────────────────────────
-
-mod fields {
-    pub const SECTION_SLUG: &str = "section_slug";
-    pub const COLLECTION_TITLE: &str = "collection_title";
-    pub const DESCRIPTION: &str = "description";
-    pub const TAG_PREFIX: &str = "tag_";
-    pub const SEASON_NUMBER: &str = "season_number";
-    pub const POSTER_FILE: &str = "poster_file";
-    pub const FILE_PREFIX: &str = "file_";
-    pub const FILE_TITLE_PREFIX: &str = "file_title_";
-
-    pub fn file(idx: usize) -> String {
-        format!("{FILE_PREFIX}{idx}")
-    }
-    pub fn file_title(idx: usize) -> String {
-        format!("{FILE_TITLE_PREFIX}{idx}")
-    }
-    pub fn tag(idx: usize) -> String {
-        format!("{TAG_PREFIX}{idx}")
-    }
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────
 
@@ -342,25 +320,25 @@ fn build_formdata(
     files: &[web_sys::File],
 ) -> web_sys::FormData {
     let fd = web_sys::FormData::new().unwrap();
-    let _ = fd.append_with_str(fields::SECTION_SLUG, section_slug);
-    let _ = fd.append_with_str(fields::COLLECTION_TITLE, title);
+    let _ = fd.append_with_str(multipart::SECTION_SLUG, section_slug);
+    let _ = fd.append_with_str(multipart::COLLECTION_TITLE, title);
     if let Some(d) = description {
-        let _ = fd.append_with_str(fields::DESCRIPTION, d);
+        let _ = fd.append_with_str(multipart::DESCRIPTION, d);
     }
     for (i, t) in tags.iter().enumerate() {
-        let _ = fd.append_with_str(&fields::tag(i), t);
+        let _ = fd.append_with_str(&multipart::tag(i), t);
     }
     if let Some(s) = season {
-        let _ = fd.append_with_str(fields::SEASON_NUMBER, &s.to_string());
+        let _ = fd.append_with_str(multipart::SEASON_NUMBER, &s.to_string());
     }
     if let Some(p) = poster {
-        let _ = fd.append_with_blob_and_filename(fields::POSTER_FILE, p, &p.name());
+        let _ = fd.append_with_blob_and_filename(multipart::POSTER_FILE, p, &p.name());
     }
     for (i, f) in files.iter().enumerate() {
         let name = f.name();
         let stem = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
-        let _ = fd.append_with_blob_and_filename(&fields::file(i), f, &name);
-        let _ = fd.append_with_str(&fields::file_title(i), &stem);
+        let _ = fd.append_with_blob_and_filename(&multipart::file(i), f, &name);
+        let _ = fd.append_with_str(&multipart::file_title(i), &stem);
     }
     fd
 }

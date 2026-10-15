@@ -8,9 +8,9 @@ use crate::app::constants::messages;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
 #[cfg(feature = "ssr")]
-use crate::app::server::db;
+use crate::app::multipart::{POSTER_FILE, POSTER_ID, POSTER_SECTION};
 #[cfg(feature = "ssr")]
-mod fields;
+use crate::app::server::db;
 
 #[server]
 pub async fn fetch_collections(
@@ -161,12 +161,12 @@ pub async fn upload_collection_poster(
 
     while let Some(f) = mp.next_field().await? {
         match f.name().unwrap_or("") {
-            fields::SECTION => section_slug = f.text().await?,
-            fields::ID => {
+            POSTER_SECTION => section_slug = f.text().await?,
+            POSTER_ID => {
                 id = Uuid::parse_str(&f.text().await?)
                     .map_err(|e| AppError::hidden("Invalid request", "poster id parse", e))?;
             }
-            fields::POSTER_FILE => {
+            POSTER_FILE => {
                 let fname = f.file_name().unwrap_or("").to_string();
                 let b = f.bytes().await?.to_vec();
                 if !b.is_empty() {

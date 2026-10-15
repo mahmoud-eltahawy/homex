@@ -1,4 +1,4 @@
-pub fn format_time(time: f64) -> String {
+pub(crate) fn format_time(time: f64) -> String {
     if time.is_nan() {
         return "00:00".into();
     }

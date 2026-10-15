@@ -86,28 +86,6 @@ pub async fn create_section(
 ) -> Result<Uuid, AppError> {
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn prefix_for(kind: MediaKind, nested: bool) -> &'static str {
-        match (kind, nested) {
-            (MediaKind::Video, false) => "video",
-            (MediaKind::Video, true) => "video-group",
-            (MediaKind::Audio, false) => "audio",
-            (MediaKind::Audio, true) => "audio-group",
-        }
-    }
-
-    fn short_hash() -> String {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let c = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let hash = (ns ^ c.wrapping_mul(0x9E37_79B9_7F4A_7C15)) as u32;
-        format!("{hash:08x}")
-    }
 
     let state: AppState = expect_context();
 

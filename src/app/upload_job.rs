@@ -17,7 +17,6 @@ pub struct UploadJob {
     pub pending: Signal<bool>,
     pub collection_id: RwSignal<Option<Uuid>>,
     pub section_slug: RwSignal<Option<String>>,
-    is_new_collection: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -128,14 +127,14 @@ fn derive_pending(
 
 impl UploadJob {
     pub fn new() -> Self {
-        Self::build(false)
+        Self::build()
     }
 
     pub fn new_for_new_collection() -> Self {
-        Self::build(true)
+        Self::build()
     }
 
-    fn build(is_new_collection: bool) -> Self {
+    fn build() -> Self {
         let action = Action::new_local(|fd: &web_sys::FormData| upload_media(fd.clone().into()));
         let signals = UploadSignals::new();
 
@@ -151,7 +150,6 @@ impl UploadJob {
             pending,
             collection_id: signals.collection_id,
             section_slug: signals.section_slug,
-            is_new_collection,
         }
     }
 
@@ -168,7 +166,6 @@ impl UploadJob {
     pub fn is_terminal_success(&self) -> bool {
         // Sync path: done_tick incremented on dispatch result Ok.
         // Async path: polling sees ConversionStatus::Done and bumps done_tick.
-        let _ = self.is_new_collection;
         self.done_tick.get() > 0
     }
 }

@@ -8,6 +8,8 @@ use leptos_use::{UseTimeoutFnReturn, use_document, use_event_listener, use_timeo
 use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::MediaItem;
+use crate::player::view::artwork::AudioArtworkOverlay;
+use crate::player::view::controls::MediaControls;
 use crate::style::stylesheet;
 
 mod handlers;
@@ -21,7 +23,6 @@ use handlers::{
     make_seek_to_fraction, make_toggle_fullscreen, make_toggle_mute, make_toggle_play,
 };
 use state::{PlayerDerived, PlayerHandlers, PlayerNav, PlayerSignals};
-use view::{AudioArtworkOverlay, MediaControls};
 
 // ─── Context bundles ──────────────────────────────────────────────────────
 

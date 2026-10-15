@@ -13,8 +13,6 @@ pub mod upload;
 pub use config::Config;
 pub use convert::Jobs;
 
-pub use crate::app::error::{AppError, ErrorContext};
-
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::SqlitePool,
