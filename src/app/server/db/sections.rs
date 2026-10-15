@@ -2,9 +2,10 @@ use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 use super::tags::fetch_section_tags;
-use crate::app::model::{AudioCollectionRow, Section, SectionRow, VideoCollectionRow};
+use crate::app::ids::Slug;
+use crate::app::model::{AudioCollectionRow, MediaKind, Section, SectionRow, VideoCollectionRow};
 
-// ─── Section queries ──────────────────────────────────────────────────────────
+// ─── Section queries ──────────────────────────────────────────────────────
 
 pub async fn fetch_sections(pool: &SqlitePool) -> sqlx::Result<Vec<Section>> {
     let rows = sqlx::query_as!(
@@ -23,14 +24,17 @@ pub async fn fetch_sections(pool: &SqlitePool) -> sqlx::Result<Vec<Section>> {
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let mut s: Section = row.into();
+        let mut s: Section = row.try_into()?;
         s.tags = fetch_section_tags(pool, s.id).await?;
         out.push(s);
     }
     Ok(out)
 }
 
-pub async fn fetch_section_by_slug(pool: &SqlitePool, slug: &str) -> sqlx::Result<Option<Section>> {
+pub async fn fetch_section_by_slug(
+    pool: &SqlitePool,
+    slug: &Slug,
+) -> sqlx::Result<Option<Section>> {
     let row = sqlx::query_as!(
         SectionRow,
         r#"SELECT id            AS "id!: Uuid",
@@ -40,22 +44,22 @@ pub async fn fetch_section_by_slug(pool: &SqlitePool, slug: &str) -> sqlx::Resul
                   nested        AS "nested!: bool",
                   position      AS "position!: i64"
            FROM sections WHERE slug = ?"#,
-        slug,
+        slug.as_str(),
     )
     .fetch_optional(pool)
     .await?;
 
     let Some(row) = row else { return Ok(None) };
-    let mut s: Section = row.into();
+    let mut s: Section = row.try_into()?;
     s.tags = fetch_section_tags(pool, s.id).await?;
     Ok(Some(s))
 }
 
 pub async fn insert_section(
     pool: &SqlitePool,
-    slug: &str,
+    slug: &Slug,
     title: &str,
-    media_kind: &str,
+    media_kind: MediaKind,
     nested: bool,
 ) -> sqlx::Result<Uuid> {
     let next: i64 = sqlx::query_scalar!(
@@ -69,9 +73,9 @@ pub async fn insert_section(
         r#"INSERT INTO sections (id, slug, title, media_kind, nested, position)
            VALUES (?, ?, ?, ?, ?, ?)"#,
         id,
-        slug,
+        slug.as_str(),
         title,
-        media_kind,
+        media_kind.as_str(),
         nested,
         next,
     )
@@ -84,13 +88,13 @@ pub async fn update_section(
     pool: &SqlitePool,
     id: Uuid,
     title: &str,
-    media_kind: &str,
+    media_kind: MediaKind,
     nested: bool,
 ) -> sqlx::Result<()> {
     sqlx::query!(
         r#"UPDATE sections SET title = ?, media_kind = ?, nested = ? WHERE id = ?"#,
         title,
-        media_kind,
+        media_kind.as_str(),
         nested,
         id,
     )
@@ -106,7 +110,7 @@ pub async fn update_section_title(pool: &SqlitePool, id: Uuid, title: &str) -> s
     Ok(())
 }
 
-// ─── Section deletion ─────────────────────────────────────────────────────────
+// ─── Section deletion ─────────────────────────────────────────────────────
 
 pub enum DeleteSectionOutcome {
     Deleted,
@@ -151,17 +155,23 @@ pub async fn delete_section(pool: &SqlitePool, id: Uuid) -> sqlx::Result<DeleteS
     Ok(DeleteSectionOutcome::Deleted)
 }
 
-// ─── Upload-support ───────────────────────────────────────────────────────────
+// ─── Upload-support ───────────────────────────────────────────────────────
 
-pub async fn fetch_section_kind(pool: &SqlitePool, slug: &str) -> sqlx::Result<Option<String>> {
-    sqlx::query_scalar!(
+pub async fn fetch_section_kind(pool: &SqlitePool, slug: &Slug) -> sqlx::Result<Option<MediaKind>> {
+    let raw: Option<String> = sqlx::query_scalar!(
         r#"SELECT media_kind AS "media_kind!: String" FROM sections WHERE slug = ?"#,
-        slug,
+        slug.as_str(),
     )
     .fetch_optional(pool)
-    .await
+    .await?;
+
+    match raw {
+        None => Ok(None),
+        Some(s) => MediaKind::try_from(s.as_str())
+            .map(Some)
+            .map_err(|e| sqlx::Error::Protocol(format!("section has invalid media_kind: {e}"))),
+    }
 }
 
-// silence unused import if row types go unused
 #[allow(dead_code)]
 fn _unused(_: &VideoCollectionRow, _: &AudioCollectionRow, _: &mut SqliteConnection) {}

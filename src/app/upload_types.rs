@@ -1,16 +1,10 @@
 //! Shared types and constants for the upload path.
-//!
-//! Everything here is visible to both client and server: the same constant
-//! drives which extensions the `<input type="file">` offers and which
-//! extensions the server accepts. Two lists that can't disagree.
-//!
-//! The `is_*` classifiers below are also re-exported through
-//! `crate::app::server::convert`, so call sites that predate this module
-//! keep working. Until that re-export lands, `dead_code` is silenced here
-//! because the module is a shared API surface and some items are only
-//! referenced from server-only paths.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::app::ids::Slug;
 
 // ─── Container classification ─────────────────────────────────────────────
 
@@ -38,9 +32,6 @@ pub fn is_convertible_audio(ext: &str) -> bool {
     in_list(AUDIO_CONVERTIBLE_EXTS, ext)
 }
 
-/// Build an `accept` attribute for `<input type="file">` that matches the
-/// server's allowlist exactly. Both "kept as-is" and "converted" extensions
-/// are included because the picker should let the user choose either.
 pub fn video_accept_attr() -> String {
     VIDEO_SUPPORTED_EXTS
         .iter()
@@ -58,18 +49,9 @@ pub fn audio_accept_attr() -> String {
         .join(",")
 }
 
-// ─── Limits ───────────────────────────────────────────────────────────────
-
 pub const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 
 // ─── Multipart field names ────────────────────────────────────────────────
-//
-// Two wire formats:
-//
-//   * the **media-upload form** sends one `form` field (JSON) followed by
-//     zero or more `file` fields and optionally one `poster_file`;
-//   * the **poster-upload form** sends one `form` field (JSON) followed by
-//     one `poster_file`.
 
 pub const FORM_FIELD: &str = "form";
 pub const FILE_FIELD: &str = "file";
@@ -77,7 +59,6 @@ pub const POSTER_FIELD: &str = "poster_file";
 
 // ─── Wire types ───────────────────────────────────────────────────────────
 
-/// Where an upload is destined.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UploadTarget {
     Existing {
@@ -91,26 +72,23 @@ pub enum UploadTarget {
     },
 }
 
-/// Per-file metadata that accompanies each raw `file` blob in the stream.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadFileMeta {
     pub filename: String,
     pub title: String,
 }
 
-/// The JSON document that opens a media-upload multipart request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadForm {
-    pub section_slug: String,
+    pub section_slug: Slug,
     pub target: UploadTarget,
     pub season_number: Option<i64>,
     pub files: Vec<UploadFileMeta>,
     pub has_poster: bool,
 }
 
-/// The JSON document that opens a poster-upload multipart request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PosterUploadForm {
-    pub section_slug: String,
+    pub section_slug: Slug,
     pub collection_id: Uuid,
 }

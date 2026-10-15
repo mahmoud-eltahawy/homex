@@ -5,6 +5,7 @@ use leptos_outcome::action_error;
 use leptos_router::{LazyRoute, lazy_route};
 use uuid::Uuid;
 
+use crate::app::ids::Slug;
 use crate::app::{
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
@@ -99,7 +100,7 @@ struct SectionTeaserState {
 }
 
 fn use_section_teaser_state(
-    slug: String,
+    slug: Slug,
     search_query: RwSignal<Option<String>>,
 ) -> SectionTeaserState {
     let folded = RwSignal::new(false);
@@ -112,7 +113,7 @@ fn use_section_teaser_state(
 
     let slug_for_fetch = slug;
     let (items, count) = collections_paginated(
-        move || slug_for_fetch.clone(),
+        move || slug_for_fetch.to_string(),
         offset,
         search_query,
         move || folded.get(),
@@ -224,7 +225,7 @@ fn SectionHeader(
     let edit_on = use_edit_mode();
 
     let id = section.id;
-    let kind = section.media_kind();
+    let kind = section.media_kind;
     let href_display = section.href();
     let href_actions = section.href();
     let nested = section.nested;

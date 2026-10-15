@@ -38,6 +38,10 @@ async fn drain_field(mut field: multer::Field<'_>) -> Result<(), AppError> {
 
 /// Parse a media-upload multipart request: one `form` JSON field followed
 /// by zero or more raw `file` fields and optionally one `poster_file`.
+///
+/// All structural validation is done by `serde_json` when parsing the
+/// `form` field — including slug validation, which happens in the `Slug`
+/// `Deserialize` impl.
 pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload, AppError> {
     let mut mp = data
         .into_inner()
@@ -84,10 +88,6 @@ pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload
                 files.len()
             ),
         ));
-    }
-
-    if form.section_slug.trim().is_empty() {
-        return Err(AppError::public(ErrorCode::SectionSlugMissing));
     }
 
     let upload_files: Vec<UploadFile> = form

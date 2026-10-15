@@ -1,4 +1,5 @@
 use crate::app::error::AppError;
+use crate::app::ids::Slug;
 use crate::app::unclassified::helpers::{format_size, plural};
 use crate::app::unclassified::jobs::FolderClassifyJob;
 use crate::app::unclassified::tracker::BatchPhase;
@@ -201,19 +202,16 @@ pub fn FolderClassifyModal(
             return;
         }
         let paths: Vec<String> = sel.iter().map(|e| e.rel_path.clone()).collect();
+
         let dest = match mode.get_untracked() {
             DestinationMode::Existing => {
-                let slug = section_slug.get_untracked();
-                if slug.is_empty() {
+                let slug_str = section_slug.get_untracked();
+                if slug_str.is_empty() {
                     return;
                 }
-                // Existing sections are handled by the "folder → existing
-                // section" branch on the server, which needs a section slug.
-                // We wrap it as a New with the existing section_slug... no —
-                // the classify server fn accepts `ClassifyDestination::New`
-                // with the section's title, but here we only have the slug.
-                // Use the section picker's slug and pass it as New's
-                // section_slug + the section's title.
+                let Ok(slug) = Slug::new(slug_str) else {
+                    return;
+                };
                 let title = existing_options
                     .get_untracked()
                     .into_iter()
@@ -231,10 +229,13 @@ pub fn FolderClassifyModal(
                 if t.is_empty() {
                     return;
                 }
-                let slug = section_slug.get_untracked();
-                if slug.is_empty() {
+                let slug_str = section_slug.get_untracked();
+                if slug_str.is_empty() {
                     return;
                 }
+                let Ok(slug) = Slug::new(slug_str) else {
+                    return;
+                };
                 ClassifyDestination::New {
                     section_slug: slug,
                     title: t.to_string(),

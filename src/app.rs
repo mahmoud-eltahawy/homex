@@ -19,6 +19,7 @@ pub mod detail;
 pub mod error;
 mod home;
 mod icons;
+pub mod ids;
 mod inline_edit;
 mod layout;
 mod login;
@@ -35,7 +36,7 @@ mod tags;
 mod unclassified;
 mod upload_api;
 mod upload_job;
-pub mod upload_types;
+mod upload_types;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {

@@ -19,9 +19,8 @@ use leptos_router::{LazyRoute, lazy_route};
 use uuid::Uuid;
 
 use crate::app::constants::routes;
-use crate::app::error::AppError;
-#[cfg(feature = "ssr")]
-use crate::app::error::ErrorCode;
+use crate::app::error::{AppError, ErrorCode};
+use crate::app::ids::Slug;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
 use crate::app::model::MediaKind;
@@ -159,7 +158,7 @@ pub async fn fetch_sections_with_collections(
             .map(|c| CollectionSummary {
                 id: c.id,
                 title: c.title,
-                section_slug: c.section_slug,
+                section_slug: Slug::from_stored(c.section_slug),
                 section_title: s.title.clone(),
                 nested: s.nested,
             })
@@ -179,7 +178,7 @@ pub async fn fetch_sections_with_collections(
             .map(|c| CollectionSummary {
                 id: c.id,
                 title: c.title,
-                section_slug: c.section_slug,
+                section_slug: Slug::from_stored(c.section_slug),
                 section_title: s.title.clone(),
                 nested: s.nested,
             })
@@ -188,7 +187,7 @@ pub async fn fetch_sections_with_collections(
 
         out.push(SectionWithCollections {
             id: s.id,
-            slug: s.slug.clone(),
+            slug: Slug::from_stored(s.slug),
             title: s.title.clone(),
             nested: s.nested,
             collections: rows,
@@ -395,7 +394,7 @@ pub async fn classify_unclassified_files(
                           nested        AS "nested!: bool",
                           position      AS "position!: i64"
                    FROM sections WHERE slug = ?"#,
-                collection.section_slug,
+                collection.section_slug.as_str(),
             )
             .fetch_one(&state.db)
             .await
@@ -422,7 +421,7 @@ pub async fn classify_unclassified_files(
                           nested        AS "nested!: bool",
                           position      AS "position!: i64"
                    FROM sections WHERE slug = ?"#,
-                section_slug,
+                section_slug.as_str(),
             )
             .fetch_one(&state.db)
             .await
@@ -592,7 +591,7 @@ pub async fn classify_unclassified_folders(
 
     enum Dest {
         Existing {
-            slug: String,
+            slug: Slug,
             kind: MediaKind,
             nested: bool,
         },
@@ -618,7 +617,7 @@ pub async fn classify_unclassified_folders(
                           nested        AS "nested!: bool",
                           position      AS "position!: i64"
                    FROM sections WHERE slug = ?"#,
-                collection.section_slug,
+                collection.section_slug.as_str(),
             )
             .fetch_one(&state.db)
             .await
@@ -653,7 +652,7 @@ pub async fn classify_unclassified_folders(
                           nested        AS "nested!: bool",
                           position      AS "position!: i64"
                    FROM sections WHERE slug = ?"#,
-                section_slug,
+                section_slug.as_str(),
             )
             .fetch_one(&state.db)
             .await
@@ -754,11 +753,11 @@ pub async fn classify_unclassified_folders(
     }
     let groups = kept;
 
-    let section_slug = match &dest {
+    let section_slug: Slug = match &dest {
         Dest::Existing { slug, .. } => slug.clone(),
         Dest::New { title, .. } => {
             let slug = generate_unique_slug(&state.db, kind, nested).await?;
-            db::insert_section(&state.db, &slug, title, kind.as_str(), nested)
+            db::insert_section(&state.db, &slug, title, kind, nested)
                 .await
                 .map_err(|e| AppError::internal("insert section", e))?;
             slug
@@ -972,7 +971,7 @@ async fn resolve_upload_file(
 #[cfg(feature = "ssr")]
 async fn existing_collection_titles(
     db: &sqlx::SqlitePool,
-    section_slug: &str,
+    section_slug: &Slug,
     kind: crate::app::model::MediaKind,
 ) -> Result<std::collections::HashMap<String, Uuid>, AppError> {
     use std::collections::HashMap;
@@ -982,7 +981,7 @@ async fn existing_collection_titles(
             _TitleId,
             r#"SELECT title AS "title!: String", id AS "id!: Uuid"
                FROM video_collections WHERE section_slug = ?"#,
-            section_slug,
+            section_slug.as_str(),
         )
         .fetch_all(db)
         .await
@@ -994,7 +993,7 @@ async fn existing_collection_titles(
             _TitleId,
             r#"SELECT title AS "title!: String", id AS "id!: Uuid"
                FROM audio_collections WHERE section_slug = ?"#,
-            section_slug,
+            section_slug.as_str(),
         )
         .fetch_all(db)
         .await
@@ -1018,17 +1017,20 @@ async fn generate_unique_slug(
     db: &sqlx::SqlitePool,
     kind: crate::app::model::MediaKind,
     nested: bool,
-) -> Result<String, AppError> {
+) -> Result<Slug, AppError> {
     use crate::app::server::db;
     let prefix = crate::app::sections::prefix_for(kind, nested);
     for _ in 0..4 {
         let candidate = format!("{prefix}-{}", crate::app::sections::short_hash());
-        if db::fetch_section_by_slug(db, &candidate)
+        let slug = Slug::new(candidate).map_err(|e| {
+            AppError::internal("create section", format!("generated invalid slug: {e}"))
+        })?;
+        if db::fetch_section_by_slug(db, &slug)
             .await
             .map_err(|e| AppError::internal("check slug uniqueness", e))?
             .is_none()
         {
-            return Ok(candidate);
+            return Ok(slug);
         }
     }
     Err(AppError::internal(

@@ -10,6 +10,8 @@ use web_sys::wasm_bindgen::JsCast;
 
 use leptos_media_player::{MediaItem, WatchPage};
 
+use crate::app::error::{AppError, ErrorCode};
+use crate::app::ids::Slug;
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
@@ -19,7 +21,6 @@ use crate::app::{
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, DownloadButton, HeroBadge, HeroMeta},
-    error::AppError,
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
     model::{Collection, CollectionField, CollectionSummary, Item, MediaKind, Section},
@@ -39,7 +40,7 @@ use leptos_outcome::ErrorView;
 
 type PatchAction = Action<(Uuid, CollectionField, Option<String>), Result<(), AppError>>;
 type PosterUploadAction = Action<web_sys::FormData, Result<String, AppError>>;
-type RegenerateAction = Action<(String, Uuid), Result<String, AppError>>;
+type RegenerateAction = Action<(Slug, Uuid), Result<String, AppError>>;
 type RenameItemAction = Action<(Uuid, String), Result<(), AppError>>;
 type DeleteItemAction = Action<Uuid, Result<(), AppError>>;
 type TagsAction = Action<(Uuid, Vec<String>), Result<(), AppError>>;
@@ -67,7 +68,7 @@ impl CollectionActions {
         );
         let poster_upload =
             Action::new_local(|fd: &web_sys::FormData| upload_collection_poster(fd.clone().into()));
-        let regenerate = Action::new_local(|(slug, id): &(String, Uuid)| {
+        let regenerate = Action::new_local(|(slug, id): &(Slug, Uuid)| {
             regenerate_collection_poster(slug.clone(), *id)
         });
         let rename_item =
@@ -177,7 +178,7 @@ impl CollectionEditState {
 // ─── Poster upload (audio only) ───────────────────────────────────────────
 
 fn use_poster_upload(
-    section_slug: String,
+    section_slug: Slug,
     collection_id: Uuid,
     poster: RwSignal<Option<String>>,
     poster_upload: PosterUploadAction,
@@ -253,19 +254,30 @@ pub struct CollectionDetailPage {
 #[lazy_route]
 impl LazyRoute for CollectionDetailPage {
     fn data() -> Self {
-        let slug = use_string_param("slug");
+        let slug_str = use_string_param("slug");
         let id = use_uuid_param("id");
         let item_id_fn = use_optional_uuid_param("item_id");
 
-        let slug_a = slug;
-        let slug_b = slug;
+        let section = Resource::new(slug_str, |s: String| async move {
+            match Slug::new(s) {
+                Ok(slug) => fetch_section_by_slug(slug).await,
+                Err(e) => Err(AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)),
+            }
+        });
+
+        let collection = Resource::new(
+            move || (slug_str(), id()),
+            |(s, i): (String, Uuid)| async move {
+                match Slug::new(s) {
+                    Ok(slug) => fetch_collection_detail(slug, i).await,
+                    Err(e) => Err(AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)),
+                }
+            },
+        );
 
         Self {
-            section: Resource::new(slug_a, fetch_section_by_slug),
-            collection: Resource::new(
-                move || (slug_b(), id()),
-                |(s, i)| fetch_collection_detail(s, i),
-            ),
+            section,
+            collection,
             items: Resource::new(id, fetch_items),
             initial_item_id: item_id_fn(),
         }
@@ -315,7 +327,7 @@ fn CollectionContent(
 ) -> impl IntoView {
     let collection_id = collection.id;
     let section_slug = section.slug.clone();
-    let is_audio = matches!(section.media_kind(), MediaKind::Audio);
+    let is_audio = matches!(section.media_kind, MediaKind::Audio);
     let is_series = section.nested && !is_audio;
 
     let selected_season = RwSignal::new(None::<i64>);
@@ -370,9 +382,9 @@ fn CollectionContent(
 
     let poster_for_shell = edit.poster.get_untracked();
     let placeholder = make_poster_placeholder(is_audio);
-    let icon = icon_for(section.media_kind(), section.nested);
+    let icon = icon_for(section.media_kind, section.nested);
     let badge_label = section.badge_label();
-    let kind = section.media_kind();
+    let kind = section.media_kind;
 
     let patch_error = actions.patch_error();
     let poster_error = actions.poster_error();
@@ -535,7 +547,7 @@ fn file_stem(name: &str) -> String {
 
 fn build_append_formdata(
     files: &web_sys::FileList,
-    section_slug: &str,
+    section_slug: Slug,
     collection_id: Uuid,
     season: Option<i64>,
 ) -> web_sys::FormData {
@@ -556,7 +568,7 @@ fn build_append_formdata(
     }
 
     let form = UploadForm {
-        section_slug: section_slug.to_string(),
+        section_slug,
         target: UploadTarget::Existing { collection_id },
         season_number: season,
         files: metas,
@@ -573,7 +585,7 @@ fn build_append_formdata(
 
 fn make_file_input_handler(
     upload: UploadJob,
-    section_slug: String,
+    section_slug: Slug,
     collection_id: Uuid,
     is_series: bool,
     selected_season: RwSignal<Option<i64>>,
@@ -596,7 +608,7 @@ fn make_file_input_handler(
             None
         };
 
-        let fd = build_append_formdata(&files, &section_slug, collection_id, season);
+        let fd = build_append_formdata(&files, section_slug.clone(), collection_id, season);
         upload.dispatch(fd);
         input.set_value("");
     })
@@ -616,7 +628,7 @@ fn upload_button_label_text(is_series: bool, season: Option<i64>) -> String {
 #[component]
 fn AppendItems(
     upload: UploadJob,
-    #[prop(into)] section_slug: String,
+    #[prop(into)] section_slug: Slug,
     collection_id: Uuid,
     is_audio: bool,
     is_series: bool,
@@ -871,16 +883,16 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
 #[component]
 fn MoveCollectionPicker(
     collection_id: Uuid,
-    current_slug: String,
+    current_slug: Slug,
     media_kind: MediaKind,
 ) -> impl IntoView {
     let sections: Resource<Result<Vec<Section>, AppError>> = expect_context();
     let navigate = use_navigate();
 
     let action =
-        Action::new_local(|(id, to): &(Uuid, String)| move_collection_to_section(*id, to.clone()));
+        Action::new_local(|(id, to): &(Uuid, Slug)| move_collection_to_section(*id, to.clone()));
 
-    let destination = RwSignal::new(String::new());
+    let destination: RwSignal<Option<Slug>> = RwSignal::new(None);
 
     let current_for_options = current_slug.clone();
     let options: Signal<Vec<Section>> = Signal::derive(move || {
@@ -889,26 +901,27 @@ fn MoveCollectionPicker(
             .and_then(|r| r.ok())
             .unwrap_or_default()
             .into_iter()
-            .filter(|s| s.media_kind() == media_kind && s.slug != current_for_options)
+            .filter(|s| s.media_kind == media_kind && s.slug != current_for_options)
             .collect()
     });
 
     let current_for_change = current_slug;
     let on_change = move |ev: web_sys::Event| {
-        let to = event_target_value(&ev);
-        if to.is_empty() || to == current_for_change {
+        let Ok(to) = Slug::new(event_target_value(&ev)) else {
+            return;
+        };
+        if to == current_for_change {
             return;
         }
-        destination.set(to.clone());
+        destination.set(Some(to.clone()));
         action.dispatch((collection_id, to));
     };
 
     Effect::new(move |_| {
-        if matches!(action.value().get(), Some(Ok(()))) {
-            let to = destination.get_untracked();
-            if !to.is_empty() {
-                navigate(&format!("/s/{to}"), Default::default());
-            }
+        if matches!(action.value().get(), Some(Ok(())))
+            && let Some(to) = destination.get_untracked()
+        {
+            navigate(&format!("/s/{to}"), Default::default());
         }
     });
 
@@ -924,7 +937,7 @@ fn MoveCollectionPicker(
                 >
                     <option value="">"Move to…"</option>
                     <For each=move || options.get() key=|s| s.slug.clone() let:s>
-                        <option value=s.slug.clone()>{s.title.clone()}</option>
+                        <option value=s.slug.to_string()>{s.title.clone()}</option>
                     </For>
                 </select>
                 <ErrorView error=action_error(action)/>

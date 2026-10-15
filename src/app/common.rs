@@ -1,11 +1,15 @@
 use crate::app::collections::{fetch_collections, fetch_collections_count};
 use crate::app::error::AppError;
 use crate::app::icons::EmptyStateIcon;
+use crate::app::ids::Slug;
 use crate::app::model::{Collection, SearchQuery};
 use crate::app::tags::TagList;
 use leptos::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
 
 #[component]
 pub fn CardsLoading() -> impl IntoView {
@@ -115,14 +119,14 @@ pub fn collections_paginated(
         move || (skip(), slug_items(), offset.get(), search.get()),
         move |(skip_now, s, off, q)| async move {
             if skip_now {
-                Ok(Vec::new())
-            } else {
-                let parsed = q
-                    .as_deref()
-                    .map(SearchQuery::parse)
-                    .filter(|sq| !sq.is_empty());
-                fetch_collections(s, off, page_size, parsed).await
+                return Ok(Vec::new());
             }
+            let slug = parse_slug_for_resource(s)?;
+            let parsed = q
+                .as_deref()
+                .map(SearchQuery::parse)
+                .filter(|sq| !sq.is_empty());
+            fetch_collections(slug, off, page_size, parsed).await
         },
     );
 
@@ -130,13 +134,27 @@ pub fn collections_paginated(
     let count = Resource::new(
         move || (slug_count(), search.get()),
         |(s, q)| async move {
+            let slug = parse_slug_for_resource(s)?;
             let parsed = q
                 .as_deref()
                 .map(SearchQuery::parse)
                 .filter(|sq| !sq.is_empty());
-            fetch_collections_count(s, parsed).await
+            fetch_collections_count(slug, parsed).await
         },
     );
 
     (items, count)
+}
+
+fn parse_slug_for_resource(raw: String) -> Result<Slug, AppError> {
+    Slug::new(raw).map_err(|e| {
+        #[cfg(feature = "ssr")]
+        {
+            AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)
+        }
+        #[cfg(not(feature = "ssr"))]
+        {
+            AppError::detailed(format!("Invalid slug: {e}"))
+        }
+    })
 }

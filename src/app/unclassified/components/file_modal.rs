@@ -1,4 +1,5 @@
 use crate::app::error::AppError;
+use crate::app::ids::Slug;
 use crate::app::model::MediaKind;
 use crate::app::unclassified::fetch_sections_with_collections;
 use crate::app::unclassified::helpers::{file_stem, kind_for_ext, parse_season};
@@ -113,7 +114,7 @@ pub fn ClassifyModal(
         sections
             .get()
             .and_then(|r| r.ok())
-            .and_then(|list| list.into_iter().find(|s| s.slug == slug))
+            .and_then(|list| list.into_iter().find(|s| s.slug.as_str() == slug))
     });
 
     let chosen_is_series = Signal::derive(move || {
@@ -218,11 +219,14 @@ pub fn ClassifyModal(
         }
 
         let dest = if form.creating_new.get_untracked() {
-            let slug = form.section_slug.get_untracked();
+            let slug_str = form.section_slug.get_untracked();
             let title = form.new_title.get_untracked();
-            if slug.is_empty() || title.trim().is_empty() {
+            if slug_str.is_empty() || title.trim().is_empty() {
                 return;
             }
+            let Ok(slug) = Slug::new(slug_str) else {
+                return;
+            };
             ClassifyDestination::New {
                 section_slug: slug,
                 title: title.trim().to_string(),

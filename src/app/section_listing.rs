@@ -4,6 +4,7 @@ use crate::app::{
         collections_paginated,
     },
     error::AppError,
+    ids::Slug,
     inline_edit::use_edit_mode,
     model::{Collection, Section},
     pagination::{PaginationControls, PaginationControlsProps},
@@ -15,6 +16,9 @@ use leptos::prelude::*;
 use leptos_outcome::ResourceView;
 use leptos_router::hooks::use_navigate;
 use leptos_router::{LazyRoute, lazy_route};
+
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
 
 const LISTING_PAGE_SIZE: usize = 18;
 
@@ -34,7 +38,15 @@ impl LazyRoute for SectionListingPage {
         let search_query = RwSignal::new(None);
 
         let slug_for_section = slug;
-        let section = Resource::new(slug_for_section, fetch_section_by_slug);
+        let section = Resource::new(slug_for_section, |s: String| async move {
+            match Slug::new(s) {
+                #[cfg(feature = "ssr")]
+                Ok(slug) => fetch_section_by_slug(slug).await,
+                #[cfg(not(feature = "ssr"))]
+                Ok(_) => unreachable!("server fn stub returns directly"),
+                Err(e) => Err(parse_slug_error(e)),
+            }
+        });
 
         let slug_for_fetch = slug;
         let (collections, count) = collections_paginated(
@@ -70,6 +82,17 @@ impl LazyRoute for SectionListingPage {
             <ResourceView resource=this.section view_fn=SectionListingBody adapter=adapter/>
         }
         .into_any()
+    }
+}
+
+fn parse_slug_error(e: crate::app::ids::SlugError) -> AppError {
+    #[cfg(feature = "ssr")]
+    {
+        AppError::hidden(ErrorCode::InvalidPath, "parse slug", e)
+    }
+    #[cfg(not(feature = "ssr"))]
+    {
+        AppError::detailed(format!("Invalid slug: {e}"))
     }
 }
 
@@ -110,10 +133,7 @@ fn SectionListingBody(
 }
 
 #[component]
-fn CreateNewButton(
-    #[prop(into)] section_slug: String,
-    #[prop(into)] label: String,
-) -> impl IntoView {
+fn CreateNewButton(#[prop(into)] section_slug: Slug, #[prop(into)] label: String) -> impl IntoView {
     let navigate = use_navigate();
     let edit_on = use_edit_mode();
 

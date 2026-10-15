@@ -1,6 +1,4 @@
-//! Database layer. Public items are re-exported from this module, so
-//! callers can keep using `server::db::X` without knowing the internal
-//! split across files.
+//! Database layer.
 
 mod collections;
 mod files;

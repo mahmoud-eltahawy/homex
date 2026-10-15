@@ -80,7 +80,7 @@ fn storage_slug(payload: &UploadPayload) -> String {
 
 fn build_staging_plan(payload: &UploadPayload) -> StagingPlan {
     StagingPlan {
-        subdir: payload.section_slug.clone(),
+        subdir: payload.section_slug.to_string(),
         slug: storage_slug(payload),
     }
 }
@@ -215,6 +215,7 @@ async fn stage_kept_file(placed: &PlacedRaw, file: &UploadFile) -> Result<Staged
         origin: file.temp_path.clone(),
     })
 }
+
 async fn stage_converted_file(
     ctx: &StagingContext<'_>,
     placed: &PlacedRaw,

@@ -5,6 +5,7 @@ use super::super::err_not_found;
 use super::super::files::purge_orphan_files;
 use super::super::tags::{collection_ids_with_all_tags, fetch_collection_tags};
 use super::{CollectionDeletion, CollectionField, CollectionMove, MoveCollectionError};
+use crate::app::ids::Slug;
 use crate::app::model::{
     AudioCollectionRow, Collection, CollectionSummary, MediaKind, SearchQuery, SectionRow,
 };
@@ -13,7 +14,7 @@ use crate::app::model::{
 
 pub(super) async fn fetch(
     pool: &SqlitePool,
-    section_slug: &str,
+    section_slug: &Slug,
     offset: usize,
     size: usize,
     search: Option<&SearchQuery>,
@@ -39,7 +40,7 @@ pub(super) async fn fetch(
              AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')
            ORDER BY position ASC, title ASC, id ASC
            LIMIT ?3 OFFSET ?4"#,
-        section_slug,
+        section_slug.as_str(),
         parsed.text,
         size as i64,
         offset as i64,
@@ -64,7 +65,7 @@ pub(super) async fn fetch(
 
 pub(super) async fn count(
     pool: &SqlitePool,
-    section_slug: &str,
+    section_slug: &Slug,
     search: Option<&SearchQuery>,
 ) -> sqlx::Result<i64> {
     let parsed = search.cloned().unwrap_or_default();
@@ -84,7 +85,7 @@ pub(super) async fn count(
                FROM audio_collections
                WHERE section_slug = ?1
                  AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')"#,
-            section_slug,
+            section_slug.as_str(),
             parsed.text,
         )
         .fetch_all(pool)
@@ -97,7 +98,7 @@ pub(super) async fn count(
            FROM audio_collections
            WHERE section_slug = ?1
              AND (?2 IS NULL OR title LIKE '%' || ?2 || '%')"#,
-        section_slug,
+        section_slug.as_str(),
         parsed.text,
     )
     .fetch_one(pool)
@@ -106,7 +107,7 @@ pub(super) async fn count(
 
 pub(super) async fn detail(
     pool: &SqlitePool,
-    section_slug: &str,
+    section_slug: &Slug,
     collection_id: Uuid,
 ) -> sqlx::Result<Option<Collection>> {
     let row = sqlx::query_as!(
@@ -116,7 +117,7 @@ pub(super) async fn detail(
                   items_count AS "items_count!: i64"
            FROM audio_collections
            WHERE section_slug = ? AND id = ?"#,
-        section_slug,
+        section_slug.as_str(),
         collection_id,
     )
     .fetch_optional(pool)
@@ -130,7 +131,7 @@ pub(super) async fn detail(
 
 pub(super) async fn summaries(
     pool: &SqlitePool,
-    media_kind: &str,
+    media_kind: MediaKind,
 ) -> sqlx::Result<Vec<CollectionSummary>> {
     let sections = sqlx::query_as!(
         SectionRow,
@@ -141,7 +142,7 @@ pub(super) async fn summaries(
                   nested        AS "nested!: bool",
                   position      AS "position!: i64"
            FROM sections WHERE media_kind = ? ORDER BY title ASC"#,
-        media_kind,
+        media_kind.as_str(),
     )
     .fetch_all(pool)
     .await?;
@@ -164,7 +165,7 @@ pub(super) async fn summaries(
             section_title: section.title.clone(),
             id: c.id,
             title: c.title,
-            section_slug: c.section_slug,
+            section_slug: Slug::from_stored(c.section_slug),
             nested: section.nested,
         }));
     }
@@ -220,7 +221,7 @@ async fn write_tags(
 pub(super) async fn insert(
     pool: &SqlitePool,
     id: Uuid,
-    section_slug: &str,
+    section_slug: &Slug,
     title: &str,
     description: Option<&str>,
     tags: &[String],
@@ -237,7 +238,7 @@ pub(super) async fn insert(
                   nested        AS "nested!: bool",
                   position      AS "position!: i64"
            FROM sections WHERE slug = ?"#,
-        section_slug,
+        section_slug.as_str(),
     )
     .fetch_optional(&mut *tx)
     .await?
@@ -360,7 +361,7 @@ pub(super) async fn delete_cascade(
 pub(super) async fn move_to_section(
     pool: &SqlitePool,
     collection_id: Uuid,
-    to_section_slug: &str,
+    to_section_slug: &Slug,
 ) -> Result<CollectionMove, MoveCollectionError> {
     let to_section = sqlx::query_as!(
         SectionRow,
@@ -371,13 +372,15 @@ pub(super) async fn move_to_section(
                   nested        AS "nested!: bool",
                   position      AS "position!: i64"
            FROM sections WHERE slug = ?"#,
-        to_section_slug,
+        to_section_slug.as_str(),
     )
     .fetch_optional(pool)
     .await?
     .ok_or(MoveCollectionError::SectionNotFound)?;
 
-    if to_section.media_kind != MediaKind::Audio.as_str() {
+    let to_kind = MediaKind::try_from(to_section.media_kind.as_str())
+        .map_err(|_| MoveCollectionError::MediaKindMismatch)?;
+    if to_kind != MediaKind::Audio {
         return Err(MoveCollectionError::MediaKindMismatch);
     }
 
@@ -403,7 +406,7 @@ pub(super) async fn move_to_section(
     .await?;
 
     Ok(CollectionMove {
-        from_slug,
+        from_slug: Slug::from_stored(from_slug),
         poster_url: poster,
     })
 }

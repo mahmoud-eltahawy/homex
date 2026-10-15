@@ -3,11 +3,10 @@ use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 use uuid::Uuid;
 
+use crate::app::error::{AppError, ErrorCode};
+
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
-use crate::app::error::AppError;
-#[cfg(feature = "ssr")]
-use crate::app::error::ErrorCode;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorContext;
 
@@ -41,7 +40,6 @@ pub enum ConversionStatus {
 
 #[server(input = MultipartFormData)]
 pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError> {
-    use crate::app::model::MediaKind;
     use crate::app::server::convert::{Job, JobPhase};
     use crate::app::server::upload::{
         UploadTarget, needs_conversion, parse_upload_multipart, process_upload,
@@ -49,15 +47,13 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     };
     use crate::app::server::{AppState, db};
 
-    let mut state: AppState = expect_context();
+    let state: AppState = expect_context();
     let payload = parse_upload_multipart(data).await?;
 
-    let kind_str = db::fetch_section_kind(&mut state.db, &payload.section_slug)
+    let kind = db::fetch_section_kind(&state.db, &payload.section_slug)
         .await
         .context("fetch section kind for upload")?
         .ok_or_else(|| AppError::public(ErrorCode::SectionNotFound))?;
-    let kind = MediaKind::try_from(kind_str.as_str())
-        .map_err(|e| AppError::internal("section has invalid media_kind", e))?;
 
     validate_extensions(&payload, kind)?;
 
@@ -75,7 +71,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
             message: msg,
             job_id: None,
             collection_id,
-            section_slug,
+            section_slug: section_slug.to_string(),
         });
     }
 
@@ -117,7 +113,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
         message: messages::UPLOAD_STARTED_BG.into(),
         job_id: Some(job_id),
         collection_id,
-        section_slug,
+        section_slug: section_slug.to_string(),
     })
 }
 

@@ -1,6 +1,5 @@
-use crate::app::error::AppError;
-#[cfg(feature = "ssr")]
-use crate::app::error::ErrorCode;
+use crate::app::error::{AppError, ErrorCode};
+use crate::app::ids::Slug;
 use crate::app::model::{MediaKind, Section};
 use leptos::prelude::*;
 use uuid::Uuid;
@@ -44,7 +43,7 @@ pub async fn fetch_sections() -> Result<Vec<Section>, AppError> {
 }
 
 #[server]
-pub async fn fetch_section_by_slug(slug: String) -> Result<Section, AppError> {
+pub async fn fetch_section_by_slug(slug: Slug) -> Result<Section, AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
     db::fetch_section_by_slug(&state.db, &slug)
@@ -95,7 +94,10 @@ pub async fn create_section(
     let prefix = prefix_for(media_kind, nested);
 
     for attempt in 0..4 {
-        let slug = format!("{prefix}-{}", short_hash());
+        let candidate = format!("{prefix}-{}", short_hash());
+        let slug = Slug::new(candidate).map_err(|e| {
+            AppError::internal("create section", format!("generated invalid slug: {e}"))
+        })?;
 
         if db::fetch_section_by_slug(&state.db, &slug)
             .await
@@ -108,7 +110,7 @@ pub async fn create_section(
             return Err(AppError::public(ErrorCode::UniqueSectionIdFailed));
         }
 
-        match db::insert_section(&state.db, &slug, &title, media_kind.as_str(), nested).await {
+        match db::insert_section(&state.db, &slug, &title, media_kind, nested).await {
             Ok(id) => return Ok(id),
             Err(e) => {
                 if attempt < 3 {
@@ -131,7 +133,7 @@ pub async fn update_section(
 ) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    db::update_section(&state.db, id, &title, media_kind.as_str(), nested)
+    db::update_section(&state.db, id, &title, media_kind, nested)
         .await
         .context("update section")?;
     Ok(())

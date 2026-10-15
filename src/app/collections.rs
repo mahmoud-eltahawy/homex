@@ -1,6 +1,5 @@
-use crate::app::error::AppError;
-#[cfg(feature = "ssr")]
-use crate::app::error::ErrorCode;
+use crate::app::error::{AppError, ErrorCode};
+use crate::app::ids::Slug;
 use crate::app::model::{
     Collection, CollectionField, CollectionSummary, Item, MediaKind, SearchQuery,
 };
@@ -14,7 +13,7 @@ use crate::app::server::db;
 
 #[server]
 pub async fn fetch_collections(
-    section_slug: String,
+    section_slug: Slug,
     offset: usize,
     size: usize,
     search_query: Option<SearchQuery>,
@@ -34,7 +33,7 @@ pub async fn fetch_collections(
 
 #[server]
 pub async fn fetch_collections_count(
-    section_slug: String,
+    section_slug: Slug,
     search_query: Option<SearchQuery>,
 ) -> Result<usize, AppError> {
     use crate::app::server::AppState;
@@ -47,7 +46,7 @@ pub async fn fetch_collections_count(
 
 #[server]
 pub async fn fetch_collection_detail(
-    section_slug: String,
+    section_slug: Slug,
     collection_id: Uuid,
 ) -> Result<Collection, AppError> {
     use crate::app::server::AppState;
@@ -74,7 +73,6 @@ pub async fn patch_collection_field(
     value: Option<String>,
 ) -> Result<(), AppError> {
     use crate::app::server::AppState;
-
     let state: AppState = expect_context();
 
     if matches!(field, CollectionField::Title)
@@ -181,10 +179,7 @@ pub async fn upload_collection_poster(
         .await
         .context("fetch section for poster")?
         .ok_or_else(|| AppError::public(ErrorCode::SectionNotFound))?;
-    if MediaKind::try_from(section.media_kind.as_str())
-        .map_err(|e| AppError::internal("section has invalid media_kind", e))?
-        != MediaKind::Audio
-    {
+    if section.media_kind != MediaKind::Audio {
         return Err(AppError::detailed(
             "This section's poster is generated automatically from its media",
         ));
@@ -192,7 +187,7 @@ pub async fn upload_collection_poster(
 
     let url = write_poster(
         &state.config.storage.data_dir,
-        &section.slug,
+        section.slug.as_str(),
         form.collection_id,
         &ext,
         &bytes,
@@ -208,7 +203,7 @@ pub async fn upload_collection_poster(
 
 #[server]
 pub async fn regenerate_collection_poster(
-    section_slug: String,
+    section_slug: Slug,
     collection_id: Uuid,
 ) -> Result<String, AppError> {
     use crate::app::model::MediaKind;
@@ -222,10 +217,7 @@ pub async fn regenerate_collection_poster(
         .await
         .context("fetch section for regenerate")?
         .ok_or_else(|| AppError::public(ErrorCode::SectionNotFound))?;
-    if MediaKind::try_from(section.media_kind.as_str())
-        .map_err(|e| AppError::internal("section has invalid media_kind", e))?
-        != MediaKind::Video
-    {
+    if section.media_kind != MediaKind::Video {
         return Err(AppError::detailed(
             "Only video sections have extractable posters",
         ));
@@ -262,7 +254,7 @@ pub async fn regenerate_collection_poster(
     let ts = pick_timestamp(duration, false);
     let url = extract_and_save_poster(
         &state.config.storage.data_dir,
-        &section_slug,
+        section_slug.as_str(),
         collection_id,
         &abs,
         ts,
@@ -295,7 +287,7 @@ pub async fn move_item(id: Uuid, is_up: bool) -> Result<(), AppError> {
 #[server]
 pub async fn move_collection_to_section(
     collection_id: Uuid,
-    to_section_slug: String,
+    to_section_slug: Slug,
 ) -> Result<(), AppError> {
     use crate::app::server::db::{self as sdb, MoveCollectionError};
     use crate::app::server::{AppState, poster};
@@ -315,8 +307,8 @@ pub async fn move_collection_to_section(
     if let Some(url) = mv.poster_url.as_deref()
         && let Some(new_url) = poster::move_poster_to_subdir(
             &state.config.storage.data_dir,
-            &mv.from_slug,
-            &to_section_slug,
+            mv.from_slug.as_str(),
+            to_section_slug.as_str(),
             url,
         )
         .await

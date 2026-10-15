@@ -5,9 +5,9 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use super::err_not_found;
+use crate::app::ids::Slug;
 use crate::app::model::{Collection, CollectionKind, CollectionSummary, MediaKind, SearchQuery};
 
-// Re-export the wire-shape enum so `db::CollectionField` keeps resolving.
 pub use crate::app::model::CollectionField;
 
 // ─── Kind lookups ─────────────────────────────────────────────────────────
@@ -63,23 +63,20 @@ pub(crate) async fn kind_of_tx(
     Ok(None)
 }
 
-pub(crate) async fn section_kind(pool: &SqlitePool, section_slug: &str) -> sqlx::Result<MediaKind> {
-    let mk: Option<String> = sqlx::query_scalar!(
-        r#"SELECT media_kind AS "media_kind!: String" FROM sections WHERE slug = ?"#,
-        section_slug,
-    )
-    .fetch_optional(pool)
-    .await?;
-    let mk = mk.ok_or_else(|| err_not_found("section"))?;
-    MediaKind::try_from(mk.as_str())
-        .map_err(|e| sqlx::Error::Protocol(format!("section has invalid media_kind: {e}")))
+pub(crate) async fn section_kind(
+    pool: &SqlitePool,
+    section_slug: &Slug,
+) -> sqlx::Result<MediaKind> {
+    super::sections::fetch_section_kind(pool, section_slug)
+        .await?
+        .ok_or_else(|| err_not_found("section"))
 }
 
 // ─── Read entry points ────────────────────────────────────────────────────
 
 pub async fn fetch_collections(
     pool: &SqlitePool,
-    section_slug: &str,
+    section_slug: &Slug,
     offset: usize,
     size: usize,
     search: Option<&SearchQuery>,
@@ -92,7 +89,7 @@ pub async fn fetch_collections(
 
 pub async fn fetch_collections_count(
     pool: &SqlitePool,
-    section_slug: &str,
+    section_slug: &Slug,
     search: Option<&SearchQuery>,
 ) -> sqlx::Result<i64> {
     match section_kind(pool, section_slug).await? {
@@ -103,7 +100,7 @@ pub async fn fetch_collections_count(
 
 pub async fn fetch_collection_detail(
     pool: &SqlitePool,
-    section_slug: &str,
+    section_slug: &Slug,
     collection_id: Uuid,
 ) -> sqlx::Result<Option<Collection>> {
     match section_kind(pool, section_slug).await? {
@@ -157,8 +154,8 @@ pub async fn fetch_collection_summaries(
     media_kind: MediaKind,
 ) -> sqlx::Result<Vec<CollectionSummary>> {
     match media_kind {
-        MediaKind::Video => video::summaries(pool, media_kind.as_str()).await,
-        MediaKind::Audio => audio::summaries(pool, media_kind.as_str()).await,
+        MediaKind::Video => video::summaries(pool, media_kind).await,
+        MediaKind::Audio => audio::summaries(pool, media_kind).await,
     }
 }
 
@@ -167,7 +164,7 @@ pub async fn fetch_collection_summaries(
 pub async fn insert_video_collection(
     pool: &SqlitePool,
     id: Uuid,
-    section_slug: &str,
+    section_slug: &Slug,
     title: &str,
     description: Option<&str>,
     tags: &[String],
@@ -179,7 +176,7 @@ pub async fn insert_video_collection(
 pub async fn insert_audio_collection(
     pool: &SqlitePool,
     id: Uuid,
-    section_slug: &str,
+    section_slug: &Slug,
     title: &str,
     description: Option<&str>,
     tags: &[String],
@@ -242,7 +239,7 @@ pub async fn delete_collection_cascade(
 pub async fn move_collection_to_section(
     pool: &SqlitePool,
     collection_id: Uuid,
-    to_section_slug: &str,
+    to_section_slug: &Slug,
 ) -> Result<CollectionMove, MoveCollectionError> {
     match kind_of(pool, collection_id)
         .await
@@ -254,7 +251,7 @@ pub async fn move_collection_to_section(
     }
 }
 
-// ─── Decrement-or-delete helper ───────────────────────────────────────────
+// ─── Decrement-or-delete ──────────────────────────────────────────────────
 
 pub(crate) async fn decrement_or_delete(
     conn: &mut sqlx::SqliteConnection,
@@ -363,7 +360,7 @@ pub struct CollectionDeletion {
 }
 
 pub struct CollectionMove {
-    pub from_slug: String,
+    pub from_slug: Slug,
     pub poster_url: Option<String>,
 }
 

@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::app::error::{AppError, ErrorCode};
+use crate::app::ids::Slug;
 use crate::app::model::MediaKind;
 use crate::app::server::AppState;
 use crate::app::server::convert::{Job, JobPhase, job_set_phase};
@@ -128,7 +129,7 @@ pub struct PreparedJob {
 pub fn prepare_file_job(
     file: UploadFile,
     target: UploadTarget,
-    section_slug: &str,
+    section_slug: &Slug,
     season: Option<i64>,
     kind: MediaKind,
     rel_path: String,
@@ -142,7 +143,7 @@ pub fn prepare_file_job(
         title,
         season_number: season,
         payload: UploadPayload {
-            section_slug: section_slug.to_string(),
+            section_slug: section_slug.clone(),
             target,
             season_number: season,
             files: vec![file],
@@ -159,7 +160,7 @@ pub fn prepare_file_job(
 pub async fn register_and_spawn(
     state: &AppState,
     prepared: Vec<PreparedJob>,
-    section_slug: &str,
+    section_slug: &Slug,
     collection_id: Option<Uuid>,
 ) -> Vec<FileJobHandle> {
     let handles: Vec<FileJobHandle> = prepared

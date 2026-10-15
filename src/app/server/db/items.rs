@@ -334,8 +334,8 @@ pub async fn delete_item_cascade(pool: &SqlitePool, id: Uuid) -> sqlx::Result<It
         .execute(&mut *tx)
         .await?;
 
-    let emptied_poster = decrement_or_delete(&mut *tx, collection_id, 1).await?;
-    let media_paths = purge_orphan_files(&mut *tx, [file_id]).await?;
+    let emptied_poster = decrement_or_delete(&mut tx, collection_id, 1).await?;
+    let media_paths = purge_orphan_files(&mut tx, [file_id]).await?;
 
     tx.commit().await?;
     Ok(ItemDeletion {
@@ -379,12 +379,12 @@ pub async fn delete_items_cascade(
 
     let mut emptied_posters: Vec<String> = Vec::new();
     for (collection_id, delta) in deltas {
-        if let Some(poster) = decrement_or_delete(&mut *tx, collection_id, delta).await? {
+        if let Some(poster) = decrement_or_delete(&mut tx, collection_id, delta).await? {
             emptied_posters.push(poster);
         }
     }
 
-    let media_paths = purge_orphan_files(&mut *tx, file_ids).await?;
+    let media_paths = purge_orphan_files(&mut tx, file_ids).await?;
     tx.commit().await?;
     Ok(BulkItemDeletion {
         media_paths,

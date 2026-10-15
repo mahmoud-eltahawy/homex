@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::app::ids::Slug;
 use crate::app::model::{CollectionSummary, MediaKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,7 +17,7 @@ pub struct UnclassifiedEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SectionWithCollections {
     pub id: Uuid,
-    pub slug: String,
+    pub slug: Slug,
     pub title: String,
     pub nested: bool,
     pub collections: Vec<CollectionSummary>,
@@ -36,7 +37,7 @@ pub struct ClassifyInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClassifyDestination {
     Existing(Uuid),
-    New { section_slug: String, title: String },
+    New { section_slug: Slug, title: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

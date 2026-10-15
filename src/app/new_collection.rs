@@ -1,5 +1,6 @@
 use crate::app::constants::routes;
 use crate::app::error::AppError;
+use crate::app::ids::Slug;
 use crate::app::model::{MediaKind, Section, Tag};
 use crate::app::route_params::use_string_param;
 use crate::app::tags::TagEditor;
@@ -43,15 +44,15 @@ impl LazyRoute for NewCollectionPage {
             sections
                 .get()
                 .and_then(|r| r.ok())
-                .and_then(|v| v.into_iter().find(|s| s.slug == slug))
+                .and_then(|v| v.into_iter().find(|s| s.slug.as_str() == slug))
         });
 
-        let kind = Signal::derive(move || section.get().map(|s| s.media_kind()));
+        let kind = Signal::derive(move || section.get().map(|s| s.media_kind));
         let is_audio = Signal::derive(move || kind.get() == Some(MediaKind::Audio));
         let is_series = Signal::derive(move || {
             matches!(
                 section.get(),
-                Some(s) if s.nested && s.media_kind() == MediaKind::Video
+                Some(s) if s.nested && s.media_kind == MediaKind::Video
             )
         });
 
@@ -97,9 +98,10 @@ impl LazyRoute for NewCollectionPage {
         let on_submit = move |ev: web_sys::SubmitEvent| {
             ev.prevent_default();
             let slug = section_slug.get_untracked();
-            if slug.is_empty() {
+            let slug = Slug::new(slug);
+            let Ok(slug) = slug else {
                 return;
-            }
+            };
             let t = title.get_untracked().trim().to_string();
             if t.is_empty() {
                 return;

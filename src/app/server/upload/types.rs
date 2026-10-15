@@ -2,10 +2,12 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
+use crate::app::ids::Slug;
+
 pub use crate::app::upload_types::UploadTarget;
 
 pub struct UploadPayload {
-    pub section_slug: String,
+    pub section_slug: Slug,
     pub target: UploadTarget,
     pub season_number: Option<i64>,
     pub files: Vec<UploadFile>,

@@ -24,6 +24,7 @@ pub use types::{StagedFile, UploadFile, UploadPayload, UploadTarget};
 pub use validate::{needs_conversion, validate_extensions};
 
 use crate::app::error::AppError;
+use crate::app::ids::Slug;
 use crate::app::model::MediaKind;
 use crate::app::server::convert::{JobPhase, job_set_phase};
 use crate::app::server::poster::{extract_and_save_poster, pick_timestamp, write_poster};
@@ -97,7 +98,7 @@ async fn extract_and_insert_new_collection(
 
             let url = extract_and_save_poster(
                 &state.config.storage.data_dir,
-                &payload.section_slug,
+                payload.section_slug.as_str(),
                 id,
                 &abs,
                 ts,
@@ -134,7 +135,7 @@ async fn extract_and_insert_new_collection(
                 Some((ext, bytes)) => Some(
                     write_poster(
                         &state.config.storage.data_dir,
-                        &payload.section_slug,
+                        payload.section_slug.as_str(),
                         id,
                         ext,
                         bytes,
@@ -192,14 +193,13 @@ async fn execute_upload(
         if let Some(path) = poster_path {
             let _ = tokio::fs::remove_file(&path).await;
         }
-        // Put the source bytes back so a retry can find them.
         for sf in &staged {
             let staged_abs = state.config.storage.media_root.join(&sf.rel);
-            if staged_abs.exists() && tokio::fs::rename(&staged_abs, &sf.origin).await.is_err() {
-                // Cross-device: copy then unlink.
-                if tokio::fs::copy(&staged_abs, &sf.origin).await.is_ok() {
-                    let _ = tokio::fs::remove_file(&staged_abs).await;
-                }
+            if staged_abs.exists()
+                && tokio::fs::rename(&staged_abs, &sf.origin).await.is_err()
+                && tokio::fs::copy(&staged_abs, &sf.origin).await.is_ok()
+            {
+                let _ = tokio::fs::remove_file(&staged_abs).await;
             }
         }
         return Err(e);
@@ -221,7 +221,7 @@ pub async fn process_upload(
 
 pub async fn extract_poster_for_new_video_collection(
     state: &AppState,
-    section_slug: &str,
+    section_slug: &Slug,
     collection_id: Uuid,
     source_path: &std::path::Path,
     first_only: bool,
@@ -230,7 +230,7 @@ pub async fn extract_poster_for_new_video_collection(
     let ts = pick_timestamp(duration, first_only);
     extract_and_save_poster(
         &state.config.storage.data_dir,
-        section_slug,
+        section_slug.as_str(),
         collection_id,
         source_path,
         ts,

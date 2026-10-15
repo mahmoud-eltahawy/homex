@@ -160,7 +160,7 @@ fn DesktopNavLinks() -> impl IntoView {
     view! {
         <div class="hidden md:flex items-center gap-2">
             {render_section_links(|s: Section| {
-                let icon = icon_for(s.media_kind(), s.nested);
+                let icon = icon_for(s.media_kind, s.nested);
                 view! { <NavLink href=s.href() label=s.title icon=icon/> }
             })}
             <NavLink
@@ -179,7 +179,7 @@ fn FooterGrid() -> impl IntoView {
             <Brand/>
             <div class="flex items-center gap-6">
                 {render_section_links(|s: Section| {
-                    let icon = icon_for(s.media_kind(), s.nested);
+                    let icon = icon_for(s.media_kind, s.nested);
                     view! { <NavLink href=s.href() label=s.title icon=icon/> }
                 })}
             </div>
@@ -193,7 +193,7 @@ fn FooterGrid() -> impl IntoView {
 #[component]
 fn MobileMenu(open: RwSignal<bool>) -> impl IntoView {
     let render = move |s: Section| {
-        let icon = icon_for(s.media_kind(), s.nested);
+        let icon = icon_for(s.media_kind, s.nested);
         view! { <MobileMenuLink href=s.href() icon=icon label=s.title open=open/> }
     };
 

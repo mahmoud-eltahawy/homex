@@ -77,7 +77,7 @@ pub fn SectionSelect(
                            focus:outline-none focus:ring-1 focus:ring-cyan-400">
                 <option value="">"Choose a section…"</option>
                 {move || options.get().into_iter().map(|s| view! {
-                    <option value=s.slug.clone()>{s.title.clone()}</option>
+                    <option value=s.slug.to_string()>{s.title.clone()}</option>
                 }).collect_view()}
             </select>
         </div>
