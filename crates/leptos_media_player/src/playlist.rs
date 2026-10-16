@@ -2,7 +2,6 @@
 
 use leptos::prelude::*;
 
-use crate::style::stylesheet;
 use crate::{ContextBundle, MediaItem, Uuid};
 
 mod row;
@@ -62,16 +61,24 @@ pub fn Playlist(
     let title = title.unwrap_or_else(|| "Playlist".to_string());
 
     view! {
-        {stylesheet()}
-        <aside class="lmp-playlist">
-            <div class="lmp-playlist-panel">
-                <div class="lmp-playlist-header">
-                    <h3 class="lmp-playlist-title">{title}</h3>
-                    <span class="lmp-playlist-count">
+        <aside class="w-full shrink-0 box-border font-sans text-white \
+                      lg:w-72 xl:w-80 2xl:w-96">
+            <div class="bg-white/5 backdrop-blur-sm \
+                        rounded-2xl border border-white/10 \
+                        overflow-hidden flex flex-col text-white \
+                        max-h-[50vh] sm:max-h-[60vh] lg:max-h-[75vh]">
+                <div class="px-4 py-3 border-b border-white/10 \
+                            flex items-center justify-between shrink-0">
+                    <h3 class="text-sm font-bold whitespace-nowrap overflow-hidden \
+                               text-ellipsis m-0">
+                        {title}
+                    </h3>
+                    <span class="text-xs text-gray-400 font-mono \
+                                 bg-white/10 px-2 rounded-full leading-5">
                         {move || items.get().len()}
                     </span>
                 </div>
-                <div class="lmp-playlist-list">
+                <div class="overflow-y-auto p-2 flex-1 min-h-0">
                     <For
                         each=move || {
                             let v = items.get();

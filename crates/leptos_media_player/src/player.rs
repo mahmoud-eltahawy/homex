@@ -10,7 +10,6 @@ use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
 use crate::MediaItem;
 use crate::player::view::artwork::AudioArtworkOverlay;
 use crate::player::view::controls::MediaControls;
-use crate::style::stylesheet;
 
 mod handlers;
 mod shortcuts;
@@ -32,6 +31,24 @@ impl ContextBundle for PlayerSignals {}
 impl ContextBundle for PlayerDerived {}
 impl ContextBundle for PlayerHandlers {}
 impl ContextBundle for PlayerNav {}
+
+// ─── Shared class fragments ───────────────────────────────────────────────
+
+/// The player container, minus its fullscreen/rounded variants, which are
+/// applied by a class closure because they differ between the two modes.
+const PLAYER_BASE: &str = "relative bg-black overflow-hidden font-sans text-white w-full box-border \
+     focus:outline-none focus-visible:outline-2 focus-visible:outline-cyan-400 \
+     focus-visible:outline-offset-2";
+
+/// The non-audio video element, with its responsive height caps.
+const VIDEO_BASE: &str = "block w-full object-contain cursor-pointer \
+     h-auto max-h-[50vh] sm:max-h-[60vh] lg:max-h-[75vh]";
+
+/// The audio-mode video element: zero-height, non-interactive.
+const VIDEO_AUDIO: &str = "block w-full h-0 object-contain pointer-events-none";
+
+/// The video element while the player is in fullscreen.
+const VIDEO_FULLSCREEN: &str = "block w-full h-full object-contain cursor-pointer";
 
 // ─── Public component ─────────────────────────────────────────────────────
 
@@ -188,10 +205,22 @@ pub fn MediaPlayer(
     PlayerNav::provide(nav);
 
     // ── View ──────────────────────────────────────────────────────────
-    let video_class = if audio {
-        "lmp-video lmp-video--audio"
-    } else {
-        "lmp-video"
+    let player_class = move || {
+        if signals.fullscreen.get() {
+            format!("{PLAYER_BASE} rounded-none shadow-none")
+        } else {
+            format!("{PLAYER_BASE} rounded-2xl shadow-2xl")
+        }
+    };
+
+    let video_class = move || {
+        if audio {
+            VIDEO_AUDIO
+        } else if signals.fullscreen.get() {
+            VIDEO_FULLSCREEN
+        } else {
+            VIDEO_BASE
+        }
     };
 
     let artwork_view = if audio {
@@ -207,10 +236,9 @@ pub fn MediaPlayer(
     };
 
     view! {
-        {stylesheet()}
         <div
             node_ref=player_ref
-            class="lmp-player"
+            class=player_class
             tabindex="0"
             on:keydown=handle_keydown
             on:click=handle_player_click

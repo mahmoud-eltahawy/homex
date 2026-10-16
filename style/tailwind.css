@@ -1,1 +1,5 @@
-@import "tailwindcss"
+@import "tailwindcss";
+
+@source "../crates/icons/src";
+@source "../crates/leptos_media_player/src";
+@source "../crates/leptos_outcome/src";

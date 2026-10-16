@@ -1,7 +1,7 @@
 //! # leptos_media_player
 //!
-//! A small, styleable media-player component for [Leptos](https://leptos.dev),
-//! packaged with a YouTube-style watch page and a scrollable playlist column.
+//! A small media-player component for [Leptos](https://leptos.dev), packaged
+//! with a YouTube-style watch page and a scrollable playlist column.
 //!
 //! ## What's in the box
 //!
@@ -55,24 +55,27 @@
 //!
 //! ## Styling
 //!
-//! All styles live in the crate's embedded stylesheet (injected automatically
-//! by each component — there's no external CSS file to wire up). Theme by
-//! overriding the CSS custom properties on `:root` or any ancestor:
+//! The components are styled entirely with Tailwind utility classes. There is
+//! no embedded stylesheet, no custom-property theming layer, and no external
+//! CSS file to import. Restyle anything by editing the classes in the
+//! component sources, or by wrapping the components in your own container and
+//! targeting them with descendant selectors.
+//!
+//! The consuming app's Tailwind build must scan this crate's source. In a
+//! Tailwind 4 setup, add to your stylesheet:
 //!
 //! ```css
-//! :root {
-//!     --lmp-accent: #f472b6;
-//!     --lmp-radius: 0.75rem;
-//! }
+//! @import "tailwindcss";
+//! @source "../../crates/leptos_media_player/src";
 //! ```
 //!
-//! See `style.css` in the repository for the full list of variables.
+//! Adjust the path to match your workspace layout.
 //!
 //! ## Responsive behaviour
 //!
-//! [`WatchPage`] stacks the player above the playlist on phones (`< 768 px`)
-//! and switches to a side-by-side layout at `≥ 768 px`. No JavaScript is
-//! involved — it's a single CSS media query.
+//! [`WatchPage`] stacks the player above the playlist on phones and switches
+//! to a side-by-side layout at `lg` (`≥ 1024 px`). No JavaScript is involved
+//! — it's a single Tailwind breakpoint.
 //!
 //! ## Usage
 //!
@@ -215,8 +218,8 @@
 //! When you need to observe or drive the playback cursor — persist it, sync
 //! it to a URL query parameter, feed it to a third component — use
 //! [`MediaPlayer`] and [`Playlist`] directly and pass them a shared signal.
-//! The `lmp-watch` / `lmp-watch-main` classes give you the same responsive
-//! layout `WatchPage` uses, but you're free to swap in your own container.
+//! Wrap them in your own flex container; the default `WatchPage` layout is
+//! just one arrangement.
 //!
 //! ```rust,no_run
 //! # use leptos::prelude::*;
@@ -236,8 +239,8 @@
 //! let items_sig = Signal::derive(move || items.get());
 //!
 //! view! {
-//!     <div class="lmp-watch">
-//!         <div class="lmp-watch-main">
+//!     <div class="flex flex-col gap-4 w-full lg:flex-row lg:items-start">
+//!         <div class="flex-1 min-w-0 w-full lg:w-auto">
 //!             <MediaPlayer items=items_sig current_idx=current_idx/>
 //!         </div>
 //!         <Playlist
@@ -259,15 +262,13 @@
 //! leptos_media_player = { path = "../leptos_media_player" }
 //! ```
 //!
-//! …and drop [`WatchPage`] anywhere in your app's tree. No global CSS import
-//! is needed — the stylesheet is embedded and injected on first render.
+//! …and drop [`WatchPage`] anywhere in your app's tree.
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 mod player;
 mod playlist;
-mod style;
 mod utils;
 mod watch_page;
 

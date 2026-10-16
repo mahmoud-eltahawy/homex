@@ -13,6 +13,31 @@ use icons::{DeleteIcon, DownloadIcon, EditIcon, player::PlayIcon};
 
 use super::{PlaylistConfig, use_edit_mode};
 
+// ─── Shared class fragments ───────────────────────────────────────────────
+
+/// The row surface, minus the current/non-current variants which are
+/// applied by a class closure.
+const ROW_BASE: &str = "group w-full flex items-center gap-2 p-2 rounded-lg border cursor-pointer \
+     text-start transition-colors duration-150 box-border \
+     motion-reduce:transition-none";
+
+const ROW_CURRENT: &str = "bg-cyan-400/15 border-cyan-400/30 hover:bg-cyan-400/20";
+const ROW_IDLE: &str = "border-transparent hover:bg-white/5";
+
+/// A row action (download, rename, delete). Hidden until the row is hovered,
+/// always visible on coarse pointers.
+const ROW_ACTION: &str = "inline-flex items-center justify-center text-gray-400 p-1 shrink-0 \
+     opacity-0 group-hover:opacity-100 \
+     transition-[opacity,color] duration-150 \
+     no-underline bg-transparent border-none cursor-pointer \
+     hover:text-white motion-reduce:transition-none \
+     [@media(pointer:coarse)]:p-2 \
+     [@media(pointer:coarse)]:opacity-100";
+
+/// The reorder arrows in edit mode.
+const ROW_ARROW: &str = "text-gray-500 bg-transparent border-none cursor-pointer px-1 leading-none text-xs \
+     transition-colors hover:text-white disabled:opacity-20 disabled:cursor-not-allowed";
+
 // ─── Row ──────────────────────────────────────────────────────────────────
 
 #[component]
@@ -86,9 +111,9 @@ pub(crate) fn PlaylistItem(
 
     let row_class = move || {
         if is_current() {
-            "lmp-row lmp-row--current"
+            format!("{ROW_BASE} {ROW_CURRENT}")
         } else {
-            "lmp-row"
+            format!("{ROW_BASE} {ROW_IDLE}")
         }
     };
 
@@ -105,10 +130,10 @@ pub(crate) fn PlaylistItem(
             </Show>
 
             <Show when=move || edit_on.get() && can_move>
-                <div class="lmp-row-arrows">
+                <div class="flex flex-col shrink-0">
                     <button
                         type="button"
-                        class="lmp-row-arrow"
+                        class=ROW_ARROW
                         disabled=is_first
                         on:click=move |ev| on_move_click(ev, true)
                         aria-label="Move up"
@@ -117,7 +142,7 @@ pub(crate) fn PlaylistItem(
                     </button>
                     <button
                         type="button"
-                        class="lmp-row-arrow"
+                        class=ROW_ARROW
                         disabled=is_last
                         on:click=move |ev| on_move_click(ev, false)
                         aria-label="Move down"
@@ -127,14 +152,20 @@ pub(crate) fn PlaylistItem(
                 </div>
             </Show>
 
-            <div class="lmp-row-text">
+            <div class="flex-1 min-w-0">
                 <Show
                     when=move || editing.get()
                     fallback=move || view! {
                         <>
-                            <div class="lmp-row-title">{title.get_value()}</div>
+                            <div class="text-sm text-white whitespace-nowrap \
+                                        overflow-hidden text-ellipsis">
+                                {title.get_value()}
+                            </div>
                             {subtitle.get_value().map(|s| view! {
-                                <div class="lmp-row-subtitle">{s}</div>
+                                <div class="text-xs text-gray-400 whitespace-nowrap \
+                                            overflow-hidden text-ellipsis">
+                                    {s}
+                                </div>
                             })}
                         </>
                     }
@@ -142,7 +173,9 @@ pub(crate) fn PlaylistItem(
                     <input
                         node_ref=input_ref
                         type="text"
-                        class="lmp-row-input"
+                        class="w-full box-border bg-white/10 text-white text-sm \
+                               rounded border-none outline-none px-2 py-1 font-inherit \
+                               focus:ring-1 focus:ring-cyan-400"
                         prop:value=move || draft.get()
                         on:input=move |ev| draft.set(event_target_value(&ev))
                         on:keydown=move |ev: web_sys::KeyboardEvent| match ev.key().as_str() {
@@ -160,7 +193,7 @@ pub(crate) fn PlaylistItem(
                 <a
                     href=download_src.clone()
                     download=download_name.clone()
-                    class="lmp-row-action"
+                    class=ROW_ACTION
                     aria-label="Download"
                     on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
                 >
@@ -171,7 +204,7 @@ pub(crate) fn PlaylistItem(
             <Show when=move || edit_on.get() && can_rename>
                 <button
                     type="button"
-                    class="lmp-row-action"
+                    class=ROW_ACTION
                     on:click=begin_edit
                     aria-label="Rename"
                 >
@@ -182,7 +215,7 @@ pub(crate) fn PlaylistItem(
             <Show when=move || edit_on.get() && can_delete>
                 <button
                     type="button"
-                    class="lmp-row-action lmp-row-action--delete"
+                    class=format!("{ROW_ACTION} hover:text-red-300")
                     on:click=on_delete_click
                     aria-label="Delete"
                 >
@@ -200,13 +233,15 @@ fn PlaylistIndicator(index: usize, #[prop(into)] is_current: Signal<bool>) -> im
     view! {
         {move || if is_current.get() {
             Either::Left(view! {
-                <span class="lmp-row-indicator lmp-row-indicator--current">
+                <span class="flex items-center justify-center w-8 h-8 rounded-full \
+                             shrink-0 bg-cyan-400/15 text-cyan-400">
                     <PlayIcon/>
                 </span>
             })
         } else {
             Either::Right(view! {
-                <span class="lmp-row-indicator lmp-row-indicator--number">
+                <span class="flex items-center justify-center w-8 h-8 rounded-full \
+                             shrink-0 bg-white/5 text-gray-300 text-xs font-bold">
                     {index + 1}
                 </span>
             })
