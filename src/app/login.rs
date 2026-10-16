@@ -1,8 +1,12 @@
-use crate::app::error::AppError;
 use leptos::prelude::*;
+use std::convert::Infallible;
+
 use leptos_outcome::ErrorView;
 use leptos_outcome::action_error;
-use leptos_router::{LazyRoute, hooks::use_navigate, lazy_route};
+use leptos_router::hooks::use_navigate;
+
+use crate::app::error::AppError;
+use crate::app::page::{InfalliblePage, PageContent};
 
 #[server(endpoint = "login")]
 pub async fn login(token: String) -> Result<(), AppError> {
@@ -33,16 +37,14 @@ pub async fn login(token: String) -> Result<(), AppError> {
 
     Ok(())
 }
+pub struct LoginContent;
 
-pub struct LoginPage;
-
-#[lazy_route]
-impl LazyRoute for LoginPage {
-    fn data() -> Self {
-        Self
+impl PageContent<Infallible> for LoginContent {
+    fn load() -> Result<Self, Infallible> {
+        Ok(Self)
     }
 
-    fn view(_this: Self) -> AnyView {
+    fn render(self) -> AnyView {
         let token = RwSignal::new(String::new());
         let navigate = use_navigate();
         let submit = Action::new_local(|t: &String| login(t.clone()));
@@ -97,6 +99,9 @@ impl LazyRoute for LoginPage {
                     </div>
                 </form>
             </div>
-        }.into_any()
+        }
+        .into_any()
     }
 }
+
+pub type LoginPage = InfalliblePage<LoginContent>;

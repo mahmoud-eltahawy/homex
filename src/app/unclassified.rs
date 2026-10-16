@@ -6,6 +6,8 @@ mod jobs;
 mod tracker;
 pub mod types;
 
+use std::convert::Infallible;
+
 use leptos_outcome::ResourceView;
 pub use types::{
     ClassifyDestination, ClassifyInput, FileJobHandle, FolderInspection, FoldersInspection,
@@ -15,7 +17,6 @@ pub use types::{
 use leptos::either::Either;
 use leptos::prelude::*;
 use leptos_router::hooks::{use_navigate, use_query_map};
-use leptos_router::{LazyRoute, lazy_route};
 use uuid::Uuid;
 
 use crate::app::constants::routes;
@@ -25,6 +26,7 @@ use crate::app::ids::Slug;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
 use crate::app::model::MediaKind;
+use crate::app::page::{InfalliblePage, PageContent};
 use crate::app::upload_api::ConversionStatus;
 
 use components::breadcrumb::Breadcrumb;
@@ -1127,15 +1129,14 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
 //  Page
 // ══════════════════════════════════════════════════════════════════════════
 
-pub struct UnclassifiedPage {
+pub struct UnclassifiedContent {
     rel_path: Signal<String>,
     refresh: RwSignal<u32>,
     entries: Resource<Result<Vec<UnclassifiedEntry>, AppError>>,
 }
 
-#[lazy_route]
-impl LazyRoute for UnclassifiedPage {
-    fn data() -> Self {
+impl PageContent<Infallible> for UnclassifiedContent {
+    fn load() -> Result<Self, Infallible> {
         let query = use_query_map();
         let rel_path: Signal<String> =
             Signal::derive(move || query.with(|q| q.get("path")).unwrap_or_default());
@@ -1144,14 +1145,14 @@ impl LazyRoute for UnclassifiedPage {
             move || (rel_path.get(), refresh.get()),
             |(p, _)| list_unclassified(p),
         );
-        Self {
+        Ok(Self {
             entries,
             rel_path,
             refresh,
-        }
+        })
     }
 
-    fn view(this: Self) -> AnyView {
+    fn render(self) -> AnyView {
         let navigate = use_navigate();
 
         let on_navigate = Callback::new(move |path: String| {
@@ -1172,7 +1173,7 @@ impl LazyRoute for UnclassifiedPage {
         let folder_classify = FolderClassifyJob::new();
 
         Effect::new(move |_| {
-            let _ = this.rel_path.get();
+            let _ = self.rel_path.get();
             file_selection.set(Vec::new());
             folder_selection.set(Vec::new());
             folder_modal_open.set(false);
@@ -1189,11 +1190,11 @@ impl LazyRoute for UnclassifiedPage {
 
         let on_modal_close = Callback::new(move |_: ()| {
             file_selection.set(Vec::new());
-            this.refresh.update(|n| *n = n.wrapping_add(1));
+            self.refresh.update(|n| *n = n.wrapping_add(1));
         });
         let on_folder_modal_close = Callback::new(move |_: ()| {
             folder_selection.set(Vec::new());
-            this.refresh.update(|n| *n = n.wrapping_add(1));
+            self.refresh.update(|n| *n = n.wrapping_add(1));
         });
 
         let adapter = move |list: Vec<UnclassifiedEntry>| EntryListProps {
@@ -1217,10 +1218,12 @@ impl LazyRoute for UnclassifiedPage {
                         "Browse the incoming folder and classify files or whole folders."
                     </p>
                 </div>
-                <Breadcrumb rel_path=this.rel_path on_navigate=on_navigate/>
-                <ResourceView resource=this.entries view_fn=render_entry_list adapter=adapter/>
+                <Breadcrumb rel_path=self.rel_path on_navigate=on_navigate/>
+                <ResourceView resource=self.entries view_fn=render_entry_list adapter=adapter/>
             </div>
         }
         .into_any()
     }
 }
+
+pub type UnclassifiedPage = InfalliblePage<UnclassifiedContent>;

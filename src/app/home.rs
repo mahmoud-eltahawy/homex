@@ -1,11 +1,12 @@
+use std::convert::Infallible;
+
 use leptos::either::Either;
 use leptos::prelude::*;
-use leptos_outcome::ResourceView;
-use leptos_outcome::action_error;
-use leptos_router::{LazyRoute, lazy_route};
+use leptos_outcome::{ErrorView, ResourceView, action_error};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
+use crate::app::page::{InfalliblePage, PageContent};
 use crate::app::{
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
@@ -22,27 +23,25 @@ use crate::app::{
     },
     tags::TagEditor,
 };
-use leptos_outcome::ErrorView;
 
 const MEDIA_LIST_SIZE: usize = 6;
 
-pub struct HomePage {
+pub struct HomeContent {
     search_query: RwSignal<Option<String>>,
     sections: Resource<Result<Vec<Section>, AppError>>,
 }
 
-#[lazy_route]
-impl LazyRoute for HomePage {
-    fn data() -> Self {
-        Self {
+impl PageContent<Infallible> for HomeContent {
+    fn load() -> Result<Self, Infallible> {
+        Ok(Self {
             search_query: RwSignal::new(None),
             sections: Resource::new(|| (), |_| fetch_sections()),
-        }
+        })
     }
 
-    fn view(this: Self) -> AnyView {
-        let search_query = this.search_query;
-        let sections = this.sections;
+    fn render(self) -> AnyView {
+        let search_query = self.search_query;
+        let sections = self.sections;
 
         let adapter = move |value: Vec<Section>| AllSectionsProps {
             sections: value,
@@ -61,6 +60,8 @@ impl LazyRoute for HomePage {
         .into_any()
     }
 }
+
+pub type HomePage = InfalliblePage<HomeContent>;
 
 #[component]
 fn AllSections(

@@ -1,19 +1,16 @@
 use leptos::prelude::*;
-use leptos_router::{LazyRoute, lazy_route};
+use std::convert::Infallible;
 
-/// Destination for a page whose URL parameter failed to parse.
-///
-/// Renders inside the app's [`Layout`](crate::app::layout::Layout) so the
-/// navbar stays reachable.
-pub struct ErrorPage;
+use crate::app::page::{InfalliblePage, PageContent};
 
-#[lazy_route]
-impl LazyRoute for ErrorPage {
-    fn data() -> Self {
-        Self
+pub struct ErrorContent;
+
+impl PageContent<Infallible> for ErrorContent {
+    fn load() -> Result<Self, Infallible> {
+        Ok(Self)
     }
 
-    fn view(_this: Self) -> AnyView {
+    fn render(self) -> AnyView {
         view! {
             <div class="min-h-[70vh] flex items-center justify-center px-4">
                 <div class="max-w-md text-center space-y-4">
@@ -37,3 +34,5 @@ impl LazyRoute for ErrorPage {
         .into_any()
     }
 }
+
+pub type ErrorPage = InfalliblePage<ErrorContent>;
