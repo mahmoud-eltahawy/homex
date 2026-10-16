@@ -15,9 +15,7 @@
 //!   and `load()` always produces `Good`.
 
 use leptos::prelude::*;
-use leptos_router::LazyRoute;
-
-use crate::app::common::RedirectToError;
+use leptos_router::{LazyRoute, components::Redirect};
 
 pub enum Page<T, E> {
     Good(T),
@@ -50,9 +48,7 @@ where
     pub fn into_view(self) -> AnyView {
         match self {
             Page::Good(body) => body.render(),
-            // Unreachable for `E = Infallible`, but the compiler can't know
-            // that from the enum shape alone.
-            Page::Bad(_) => view! { <RedirectToError/> }.into_any(),
+            Page::Bad(_) => view! { <Redirect path="/error"/> }.into_any(),
         }
     }
 }

@@ -5,7 +5,6 @@ use crate::app::ids::Slug;
 use crate::app::model::{Collection, SearchQuery};
 use crate::app::tags::TagList;
 use leptos::prelude::*;
-use leptos_router::hooks::use_navigate;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -85,26 +84,6 @@ pub fn EmptyState(#[prop(into)] label: String) -> impl IntoView {
         <div class="flex flex-col items-center justify-center py-12 gap-3">
             <EmptyStateIcon />
             <span class="text-white/40 text-sm">{label}</span>
-        </div>
-    }
-}
-
-/// Replace the current view's subtree with a brief "Redirecting…"
-/// placeholder and schedule a navigation to `/error`.
-///
-/// Rendered by [`Page::into_view`](crate::app::page::Page::into_view) when
-/// a URL parameter failed to parse. The redirect happens inside an
-/// `Effect`, so the placeholder paints for a frame before the router
-/// swaps the page.
-#[component]
-pub fn RedirectToError() -> impl IntoView {
-    let navigate = use_navigate();
-    Effect::new(move |_| {
-        navigate("/error", Default::default());
-    });
-    view! {
-        <div class="min-h-[40vh] flex items-center justify-center text-gray-500 text-sm">
-            "Redirecting…"
         </div>
     }
 }
