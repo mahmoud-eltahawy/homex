@@ -3,13 +3,14 @@ use axum::{
     body::Body,
     extract::Path,
     http::{Request, StatusCode},
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
 };
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 use uuid::Uuid;
 
 use crate::app::server::db;
+use crate::app::types::RelPath;
 
 use super::AppState;
 
@@ -18,7 +19,7 @@ pub async fn stream_media(
     Path(file_id): Path<Uuid>,
     req: Request<Body>,
 ) -> Response {
-    let rel: Option<String> = match db::fetch_file_path(&state.db, file_id).await {
+    let rel: Option<RelPath> = match db::fetch_file_path(&state.db, file_id).await {
         Ok(r) => r,
         Err(e) => {
             leptos::logging::error!("[stream] db error: {e}");
@@ -30,11 +31,7 @@ pub async fn stream_media(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    if rel.starts_with("http://") || rel.starts_with("https://") {
-        return Redirect::temporary(&rel).into_response();
-    }
-
-    let abs = state.config.storage.media_root.join(&rel);
+    let abs = rel.join_under(&state.config.storage.media_root);
     if tokio::fs::metadata(&abs).await.is_err() {
         leptos::logging::warn!("[stream] missing file: {}", abs.display());
         return StatusCode::NOT_FOUND.into_response();

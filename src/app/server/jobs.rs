@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
 use crate::app::error::{AppError, ErrorCode};
 use crate::app::ids::Slug;
@@ -15,6 +14,7 @@ use crate::app::server::convert::{Job, JobPhase, job_set_phase};
 use crate::app::server::upload::{
     UploadFile, UploadPayload, UploadTarget, process_upload, schedule_job_eviction,
 };
+use crate::app::types::{JobId, RelPath};
 use crate::app::unclassified::FileJobHandle;
 
 pub const JOB_TIMEOUT_SECS: u64 = 15 * 60;
@@ -116,8 +116,8 @@ pub fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
 
 pub struct PreparedJob {
     pub name: String,
-    pub job_id: String,
-    pub rel_path: String,
+    pub job_id: JobId,
+    pub rel_path: RelPath,
     pub title: String,
     pub season_number: Option<i64>,
     pub payload: UploadPayload,
@@ -132,13 +132,13 @@ pub fn prepare_file_job(
     section_slug: &Slug,
     season: Option<i64>,
     kind: MediaKind,
-    rel_path: String,
+    rel_path: RelPath,
 ) -> Result<PreparedJob, AppError> {
     let name = file.filename.clone();
     let title = file.title.clone();
     Ok(PreparedJob {
         name,
-        job_id: Uuid::new_v4().to_string(),
+        job_id: JobId::new_v4(),
         rel_path,
         title,
         season_number: season,
@@ -161,13 +161,13 @@ pub async fn register_and_spawn(
     state: &AppState,
     prepared: Vec<PreparedJob>,
     section_slug: &Slug,
-    collection_id: Option<Uuid>,
+    collection_id: Option<uuid::Uuid>,
 ) -> Vec<FileJobHandle> {
     let handles: Vec<FileJobHandle> = prepared
         .iter()
         .map(|p| FileJobHandle {
             name: p.name.clone(),
-            job_id: p.job_id.clone(),
+            job_id: p.job_id,
             section_slug: section_slug.to_string(),
             collection_id,
             rel_path: p.rel_path.clone(),
@@ -180,7 +180,7 @@ pub async fn register_and_spawn(
         let mut jobs = state.jobs.write().await;
         for p in &prepared {
             jobs.insert(
-                p.job_id.clone(),
+                p.job_id,
                 Job {
                     phase: JobPhase::Writing,
                     started_at: std::time::Instant::now(),
@@ -230,7 +230,7 @@ fn spawn_job_worker(state: AppState, p: PreparedJob) {
 
 // ─── Watchers ─────────────────────────────────────────────────────────────
 
-pub async fn wait_for_terminal(state: &AppState, job_ids: &[String]) {
+pub async fn wait_for_terminal(state: &AppState, job_ids: &[JobId]) {
     let wait = async {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -254,14 +254,14 @@ pub async fn wait_for_terminal(state: &AppState, job_ids: &[String]) {
     let _ = tokio::time::timeout(Duration::from_secs(WATCHER_DEADLINE_SECS), wait).await;
 }
 
-pub fn spawn_lock_holder(state: AppState, job_ids: Vec<String>, lock: ClassifyLocks) {
+pub fn spawn_lock_holder(state: AppState, job_ids: Vec<JobId>, lock: ClassifyLocks) {
     tokio::spawn(async move {
         let _lock = lock;
         wait_for_terminal(&state, &job_ids).await;
     });
 }
 
-pub fn spawn_cleanup_watcher(state: AppState, job_ids: Vec<String>, dir: PathBuf) {
+pub fn spawn_cleanup_watcher(state: AppState, job_ids: Vec<JobId>, dir: PathBuf) {
     tokio::spawn(async move {
         wait_for_terminal(&state, &job_ids).await;
         if let Err(e) = tokio::fs::remove_dir(&dir).await

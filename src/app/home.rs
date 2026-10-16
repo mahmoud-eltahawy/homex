@@ -6,6 +6,7 @@ use leptos_outcome::{ErrorView, ResourceView, action_error};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
+use crate::app::types::TagName;
 use crate::app::{
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
@@ -182,7 +183,7 @@ struct SectionHeaderState {
     commit_title: Callback<String>,
     rename: Action<(Uuid, String), Result<(), AppError>>,
     delete_action: Action<Uuid, Result<(), AppError>>,
-    tags_action: Action<(Uuid, Vec<String>), Result<(), AppError>>,
+    tags_action: Action<(Uuid, Vec<TagName>), Result<(), AppError>>,
 }
 
 fn use_section_header_state(
@@ -194,8 +195,9 @@ fn use_section_header_state(
 
     let rename = Action::new_local(|(id, t): &(Uuid, String)| patch_section_title(*id, t.clone()));
     let delete_action = Action::new_local(|id: &Uuid| delete_section(*id));
-    let tags_action =
-        Action::new_local(|(id, tags): &(Uuid, Vec<String>)| patch_section_tags(*id, tags.clone()));
+    let tags_action = Action::new_local(|(id, tags): &(Uuid, Vec<TagName>)| {
+        patch_section_tags(*id, tags.clone())
+    });
 
     refetch_on_success(rename, sections_resource);
     refetch_on_success(delete_action, sections_resource);
@@ -240,7 +242,7 @@ fn SectionHeader(
         let _ = state.delete_action.dispatch(id);
     });
 
-    let on_tags_commit = Callback::new(move |names: Vec<String>| {
+    let on_tags_commit = Callback::new(move |names: Vec<TagName>| {
         let _ = state.tags_action.dispatch((id, names));
     });
 

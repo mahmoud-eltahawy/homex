@@ -3,20 +3,18 @@ use uuid::Uuid;
 
 use crate::app::constants::routes;
 use crate::app::ids::Slug;
+use crate::app::types::{FileExt, PosterUrl, TagName};
 
-// ─── Tag canonicalization (SSR only) ──────────────────────────────────────
+// ─── Tag canonicalization ─────────────────────────────────────────────────
 
-#[cfg(feature = "ssr")]
-pub fn canonicalize_tags<I, S>(tags: I) -> Vec<String>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut v: Vec<String> = tags
-        .into_iter()
-        .map(|t| t.as_ref().trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect();
+/// Sort and deduplicate tag names.
+///
+/// Both operations use [`TagName`]'s case-insensitive `Ord` and `Eq`, so
+/// `["Action", "ACTION"]` collapses to one entry. Trimming and empty-string
+/// rejection already happened at construction, so there is nothing left to
+/// normalize here.
+pub fn canonicalize_tags(tags: impl IntoIterator<Item = TagName>) -> Vec<TagName> {
+    let mut v: Vec<TagName> = tags.into_iter().collect();
     v.sort();
     v.dedup();
     v
@@ -26,24 +24,24 @@ where
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchQuery {
-    pub tags: Vec<String>,
+    pub tags: Vec<TagName>,
     pub text: Option<String>,
 }
 
 impl SearchQuery {
     pub fn parse(raw: &str) -> Self {
-        let mut tags: Vec<String> = Vec::new();
+        let mut tags: Vec<TagName> = Vec::new();
         let mut words: Vec<&str> = Vec::new();
 
         for word in raw.split_whitespace() {
-            match word.strip_prefix('#') {
-                Some(tag) if !tag.is_empty() => tags.push(tag.to_string()),
-                _ => words.push(word),
+            match word.strip_prefix('#').and_then(|t| TagName::new(t).ok()) {
+                Some(name) => tags.push(name),
+                None => words.push(word),
             }
         }
 
         tags.sort();
-        tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        tags.dedup();
 
         let text = if words.is_empty() {
             None
@@ -92,7 +90,7 @@ impl MediaKind {
         }
     }
 
-    pub fn from_extension(ext: &str) -> Option<Self> {
+    pub fn from_extension(ext: &FileExt) -> Option<Self> {
         const VIDEO_EXTS: &[&str] = &[
             "mp4", "mkv", "mov", "webm", "avi", "m4v", "wmv", "flv", "ts", "mpg", "mpeg", "3gp",
             "ogv",
@@ -101,7 +99,7 @@ impl MediaKind {
             "mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "wma", "aiff", "aif", "alac",
             "ape",
         ];
-        let ext = ext.to_lowercase();
+        let ext = ext.as_str();
         if VIDEO_EXTS.iter().any(|e| *e == ext) {
             Some(Self::Video)
         } else if AUDIO_EXTS.iter().any(|e| *e == ext) {
@@ -112,8 +110,8 @@ impl MediaKind {
     }
 
     pub fn from_filename(name: &str) -> Option<Self> {
-        let ext = name.rsplit_once('.').map(|(_, e)| e)?;
-        Self::from_extension(ext)
+        let ext = FileExt::from_filename(name)?;
+        Self::from_extension(&ext)
     }
 }
 
@@ -130,11 +128,6 @@ impl TryFrom<&str> for MediaKind {
 
 // ─── CollectionField ──────────────────────────────────────────────────────
 
-/// Which column of a collection a `patch_*` server function is updating.
-///
-/// Crosses the wire as a JSON string (`"Title"` / `"Description"` /
-/// `"Poster"`), so the `_ => Err(UnknownField)` branch that used to guard
-/// the stringly-typed version is now a compile-time impossibility.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CollectionField {
     Title,
@@ -153,11 +146,6 @@ pub enum CollectionKind {
 
 // ─── ModelError ───────────────────────────────────────────────────────────
 
-/// A row from the database could not be turned into a domain type.
-///
-/// This is a hard error — it means the database contains a value that our
-/// own insert path would never have written. It should be logged and the
-/// request rejected, never silently defaulted.
 #[derive(Debug, Clone)]
 pub struct ModelError(String);
 
@@ -191,21 +179,33 @@ impl From<ModelError> for sqlx::Error {
 // ─── Tag ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct Tag {
+    pub id: Uuid,
+    pub name: TagName,
+}
+
+/// The raw shape of a row from the `tags` table.
+///
+/// Kept separate from [`Tag`] because `TagName` has a validating constructor
+/// and no `sqlx::Decode` impl. Every `sqlx::query_as!` that selects a tag
+/// targets this struct, and the `From` impl below runs the value through
+/// `TagName::from_stored` — the trusting path, since every name written to
+/// the DB passed through `TagName::new`.
+#[cfg(feature = "ssr")]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TagRow {
     pub id: Uuid,
     pub name: String,
 }
 
-// ─── File (SSR only) ──────────────────────────────────────────────────────
-
 #[cfg(feature = "ssr")]
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct File {
-    pub id: Uuid,
-    pub relative_path: String,
-    pub size_bytes: i64,
-    pub duration_secs: i64,
+impl From<TagRow> for Tag {
+    fn from(row: TagRow) -> Self {
+        Self {
+            id: row.id,
+            name: TagName::from_stored(row.name),
+        }
+    }
 }
 
 // ─── Item (wire + row) ────────────────────────────────────────────────────
@@ -282,7 +282,7 @@ pub struct Collection {
     pub section_id: Uuid,
     pub section_slug: Slug,
     pub title: String,
-    pub poster: Option<String>,
+    pub poster: Option<PosterUrl>,
     pub description: Option<String>,
     pub position: i64,
     pub items_count: i64,
@@ -325,7 +325,7 @@ impl From<VideoCollectionRow> for Collection {
             section_id: row.section_id,
             section_slug: Slug::from_stored(row.section_slug),
             title: row.title,
-            poster: Some(row.poster),
+            poster: Some(PosterUrl::from_stored(row.poster)),
             description: row.description,
             position: row.position,
             items_count: row.items_count,
@@ -342,7 +342,7 @@ impl From<AudioCollectionRow> for Collection {
             section_id: row.section_id,
             section_slug: Slug::from_stored(row.section_slug),
             title: row.title,
-            poster: row.poster,
+            poster: row.poster.map(PosterUrl::from_stored),
             description: row.description,
             position: row.position,
             items_count: row.items_count,

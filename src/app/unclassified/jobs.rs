@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 
 use crate::app::error::AppError;
+use crate::app::types::RelPath;
 
 use super::tracker::BatchTracker;
 use super::types::{ClassifyDestination, ClassifyInput, FileJobHandle};
@@ -71,14 +72,14 @@ impl ClassifyJob {
 
 #[derive(Clone, Copy)]
 pub struct FolderClassifyJob {
-    action: Action<(Vec<String>, ClassifyDestination), Result<Vec<FileJobHandle>, AppError>>,
+    action: Action<(Vec<RelPath>, ClassifyDestination), Result<Vec<FileJobHandle>, AppError>>,
     tracker: BatchTracker,
 }
 
 impl FolderClassifyJob {
     pub fn new() -> Self {
         let tracker = BatchTracker::new();
-        let action = Action::new_local(|(paths, dest): &(Vec<String>, ClassifyDestination)| {
+        let action = Action::new_local(|(paths, dest): &(Vec<RelPath>, ClassifyDestination)| {
             classify_unclassified_folders(paths.clone(), dest.clone())
         });
 
@@ -95,7 +96,7 @@ impl FolderClassifyJob {
         Self { action, tracker }
     }
 
-    pub fn dispatch(&self, paths: Vec<String>, dest: ClassifyDestination) {
+    pub fn dispatch(&self, paths: Vec<RelPath>, dest: ClassifyDestination) {
         self.tracker.reset();
         self.action.dispatch((paths, dest));
     }

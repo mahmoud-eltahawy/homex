@@ -11,14 +11,15 @@ use crate::app::server::convert::{
     JobPhase, Jobs, TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
     is_video_container_supported, job_set_phase,
 };
+use crate::app::types::{FileExt, JobId, RelPath};
 
 use super::naming::{sanitize_filename, slugify};
 use super::types::{StagedFile, UploadFile, UploadPayload, UploadTarget};
 
 const COPY_CHUNK: usize = 4 * 1024 * 1024;
 
-fn extension_of(name: &str) -> String {
-    name.rsplit('.').next().unwrap_or("").to_string()
+fn extension_of(name: &str) -> Option<FileExt> {
+    FileExt::from_filename(name)
 }
 
 fn stem_of(name: &str) -> String {
@@ -34,9 +35,9 @@ fn safe_stem(name: &str) -> String {
 fn target_for(kind: MediaKind, filename: &str) -> Option<TargetFormat> {
     let ext = extension_of(filename);
     match kind {
-        MediaKind::Video if is_video_container_supported(&ext) => None,
+        MediaKind::Video if ext.as_ref().is_some_and(is_video_container_supported) => None,
         MediaKind::Video => Some(TargetFormat::Mp4),
-        MediaKind::Audio if is_audio_container_supported(&ext) => None,
+        MediaKind::Audio if ext.as_ref().is_some_and(is_audio_container_supported) => None,
         MediaKind::Audio => Some(TargetFormat::Mp3),
     }
 }
@@ -59,8 +60,9 @@ impl StagingPlan {
         media_root.join(&self.subdir).join(&self.slug)
     }
 
-    fn rel_for(&self, stem: &str, token: Uuid, ext: &str) -> String {
-        format!("{}/{}/{}-{}.{}", self.subdir, self.slug, stem, token, ext)
+    fn rel_for(&self, stem: &str, token: Uuid, ext: &str) -> RelPath {
+        let s = format!("{}/{}/{}-{}.{}", self.subdir, self.slug, stem, token, ext);
+        RelPath::from_stored(s)
     }
 }
 
@@ -98,7 +100,7 @@ async fn move_temp_to_final(
     total_size: u64,
     display_name: &str,
     jobs: &Jobs,
-    job_id: Option<&str>,
+    job_id: Option<&JobId>,
 ) -> Result<(), AppError> {
     if tokio::fs::rename(src, dst).await.is_ok() {
         return Ok(());
@@ -159,7 +161,7 @@ async fn move_temp_to_final(
 struct PlacedRaw {
     token: Uuid,
     safe_stem: String,
-    rel: String,
+    rel: RelPath,
     abs: PathBuf,
 }
 
@@ -168,10 +170,11 @@ async fn place_raw_file(
     file: &UploadFile,
 ) -> Result<PlacedRaw, AppError> {
     let ext = extension_of(&file.filename);
+    let ext_str = ext.as_ref().map(|e| e.as_str()).unwrap_or("");
     let stem = safe_stem(&file.filename);
     let token = Uuid::new_v4();
-    let rel = ctx.plan.rel_for(&stem, token, &ext);
-    let abs = ctx.media_root.join(&rel);
+    let rel = ctx.plan.rel_for(&stem, token, ext_str);
+    let abs = rel.join_under(ctx.media_root);
 
     move_temp_to_final(
         &file.temp_path,
@@ -196,9 +199,9 @@ fn final_path_for(
     media_root: &Path,
     placed: &PlacedRaw,
     target: TargetFormat,
-) -> (String, PathBuf) {
+) -> (RelPath, PathBuf) {
     let rel = plan.rel_for(&placed.safe_stem, placed.token, target.extension());
-    let abs = media_root.join(&rel);
+    let abs = rel.join_under(media_root);
     (rel, abs)
 }
 
@@ -286,7 +289,7 @@ struct StagingContext<'a> {
     payload: &'a UploadPayload,
     plan: &'a StagingPlan,
     media_root: &'a Path,
-    job_id: Option<&'a str>,
+    job_id: Option<&'a JobId>,
     cancel: &'a CancellationToken,
     conversion_pos: usize,
     conversion_count: usize,
@@ -311,7 +314,7 @@ async fn stage_one_file(
         None => stage_kept_file(&placed, file).await,
         Some(t) => {
             let staged = stage_converted_file(ctx, &placed, file, t).await?;
-            let out_abs = ctx.media_root.join(&staged.rel);
+            let out_abs = staged.rel.join_under(ctx.media_root);
             track.replace(placed.abs, out_abs);
             Ok(staged)
         }
@@ -352,7 +355,7 @@ pub async fn stage_files(
     payload: &UploadPayload,
     state: &AppState,
     kind: MediaKind,
-    job_id: Option<&str>,
+    job_id: Option<&JobId>,
     cancel: &CancellationToken,
 ) -> Result<Vec<StagedFile>, AppError> {
     let plan = build_staging_plan(payload);

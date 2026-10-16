@@ -9,6 +9,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::error::AppError;
+use crate::app::types::JobId;
 
 // ─── Container classification (re-exported from shared module) ────────────
 
@@ -48,13 +49,13 @@ pub struct Job {
     pub cancel: CancellationToken,
 }
 
-pub type Jobs = Arc<RwLock<HashMap<String, Job>>>;
+pub type Jobs = Arc<RwLock<HashMap<JobId, Job>>>;
 
 pub fn new_jobs() -> Jobs {
     Arc::new(RwLock::new(HashMap::new()))
 }
 
-pub async fn job_set_phase(jobs: &Jobs, job_id: Option<&str>, phase: JobPhase) {
+pub async fn job_set_phase(jobs: &Jobs, job_id: Option<&JobId>, phase: JobPhase) {
     let Some(id) = job_id else { return };
     if let Some(job) = jobs.write().await.get_mut(id) {
         job.phase = phase;
@@ -230,7 +231,7 @@ impl ProgressTracker {
 #[derive(Clone, Copy)]
 struct ConvertContext<'a> {
     jobs: &'a Jobs,
-    job_id: Option<&'a str>,
+    job_id: Option<&'a JobId>,
     conversion_index: usize,
     conversion_count: usize,
     display_name: &'a str,
@@ -240,7 +241,7 @@ struct ConvertContext<'a> {
 impl<'a> ConvertContext<'a> {
     fn build(
         jobs: &'a Jobs,
-        job_id: Option<&'a str>,
+        job_id: Option<&'a JobId>,
         conversion_index: usize,
         conversion_count: usize,
         display_name: &'a str,
@@ -368,7 +369,7 @@ pub async fn convert_file(
     conversion_count: usize,
     display_name: &str,
     jobs: &Jobs,
-    job_id: Option<&str>,
+    job_id: Option<&JobId>,
     cancel: &CancellationToken,
 ) -> Result<(), String> {
     let ctx = ConvertContext::build(

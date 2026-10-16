@@ -58,7 +58,7 @@ pub fn ClassifyModal(
         selection
             .get()
             .first()
-            .and_then(|e| kind_for_ext(e.ext.as_deref()))
+            .and_then(|e| kind_for_ext(e.ext.as_ref()))
     });
 
     let sections: Resource<Result<Vec<SectionWithCollections>, AppError>> = Resource::new(

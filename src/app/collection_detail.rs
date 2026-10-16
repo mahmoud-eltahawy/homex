@@ -14,6 +14,7 @@ use leptos_media_player::{MediaItem, WatchPage};
 use crate::app::error::AppError;
 use crate::app::ids::Slug;
 use crate::app::route_params::{use_optional_uuid_param, use_slug_param, use_uuid_param};
+use crate::app::types::{PosterUrl, TagName};
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
@@ -41,11 +42,11 @@ use leptos_page::{Page, PageContent};
 // ─── Action type aliases ──────────────────────────────────────────────────
 
 type PatchAction = Action<(Uuid, CollectionField, Option<String>), Result<(), AppError>>;
-type PosterUploadAction = Action<web_sys::FormData, Result<String, AppError>>;
-type RegenerateAction = Action<(Slug, Uuid), Result<String, AppError>>;
+type PosterUploadAction = Action<web_sys::FormData, Result<PosterUrl, AppError>>;
+type RegenerateAction = Action<(Slug, Uuid), Result<PosterUrl, AppError>>;
 type RenameItemAction = Action<(Uuid, String), Result<(), AppError>>;
 type DeleteItemAction = Action<Uuid, Result<(), AppError>>;
-type TagsAction = Action<(Uuid, Vec<String>), Result<(), AppError>>;
+type TagsAction = Action<(Uuid, Vec<TagName>), Result<(), AppError>>;
 type MoveToIncomingAction = Action<Vec<Uuid>, Result<(), AppError>>;
 
 // ─── Collection actions bundle ────────────────────────────────────────────
@@ -76,7 +77,7 @@ impl CollectionActions {
         let rename_item =
             Action::new_local(|(id, t): &(Uuid, String)| patch_item_title(*id, t.clone()));
         let delete_item = Action::new_local(|id: &Uuid| delete_item(*id));
-        let tags = Action::new_local(|(id, t): &(Uuid, Vec<String>)| {
+        let tags = Action::new_local(|(id, t): &(Uuid, Vec<TagName>)| {
             patch_collection_tags(*id, t.clone())
         });
 
@@ -144,7 +145,7 @@ impl CollectionActions {
 struct CollectionEditState {
     title: RwSignal<String>,
     description: RwSignal<String>,
-    poster: RwSignal<Option<String>>,
+    poster: RwSignal<Option<PosterUrl>>,
     commit_title: Callback<String>,
     commit_desc: Callback<String>,
 }
@@ -182,7 +183,7 @@ impl CollectionEditState {
 fn use_poster_upload(
     section_slug: Slug,
     collection_id: Uuid,
-    poster: RwSignal<Option<String>>,
+    poster: RwSignal<Option<PosterUrl>>,
     poster_upload: PosterUploadAction,
 ) -> Callback<web_sys::File> {
     let on_file = Callback::new(move |file: web_sys::File| {
@@ -221,7 +222,7 @@ fn make_poster_placeholder(is_audio: bool) -> ViewFn {
 #[allow(clippy::too_many_arguments)]
 fn make_playlist_adapter(
     playlist_title: String,
-    poster: Option<String>,
+    poster: Option<PosterUrl>,
     is_audio: bool,
     is_series: bool,
     selected_season: RwSignal<Option<i64>>,
@@ -235,7 +236,7 @@ fn make_playlist_adapter(
         audio: is_audio,
         is_series,
         selected_season,
-        artwork: poster.clone(),
+        artwork: poster.as_ref().map(|p| p.to_string()),
         playlist_title: playlist_title.clone(),
         initial_item_id,
         on_rename,
@@ -302,7 +303,7 @@ impl PageContent<RouteError> for CollectionDetailContent {
 
 pub type CollectionDetailPage = Page<CollectionDetailContent, RouteError>;
 
-// ─── Body / hero / playlist (unchanged) ───────────────────────────────────
+// ─── Body / hero / playlist ───────────────────────────────────────────────
 
 #[component]
 fn CollectionDetailBody(
@@ -342,7 +343,7 @@ fn CollectionContent(
     let edit = CollectionEditState::new(&collection, actions.patch);
 
     let tags_signal = RwSignal::new(collection.tags.clone());
-    let on_tags_commit = Callback::new(move |names: Vec<String>| {
+    let on_tags_commit = Callback::new(move |names: Vec<TagName>| {
         let _ = actions.tags.dispatch((collection_id, names));
     });
 
@@ -414,7 +415,7 @@ fn CollectionContent(
         <DetailShell poster=poster_for_shell>
             <DetailHero poster=view! {
                 <EditablePoster
-                    src=Signal::derive(move || edit.poster.get())
+                    src=Signal::derive(move || edit.poster.get().map(|p| p.to_string()))
                     placeholder=placeholder
                     input_id=format!("poster-collection-{collection_id}")
                     on_file=audio_picker

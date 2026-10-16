@@ -29,10 +29,11 @@ use crate::app::model::MediaKind;
 use crate::app::server::convert::{JobPhase, job_set_phase};
 use crate::app::server::poster::{extract_and_save_poster, pick_timestamp, write_poster};
 use crate::app::server::{AppState, Jobs, db};
+use crate::app::types::JobId;
 
 const JOB_RETENTION: Duration = Duration::from_secs(60);
 
-pub fn schedule_job_eviction(jobs: Jobs, job_id: String) {
+pub fn schedule_job_eviction(jobs: Jobs, job_id: JobId) {
     tokio::spawn(async move {
         sleep(JOB_RETENTION).await;
         jobs.write().await.remove(&job_id);
@@ -43,7 +44,7 @@ async fn stage_phase(
     payload: &UploadPayload,
     state: &AppState,
     kind: MediaKind,
-    job_id: Option<&str>,
+    job_id: Option<&JobId>,
     cancel: &CancellationToken,
 ) -> Result<Vec<StagedFile>, AppError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Writing).await;
@@ -54,17 +55,17 @@ async fn persist_phase(
     state: &AppState,
     payload: &UploadPayload,
     staged: &[StagedFile],
-    job_id: Option<&str>,
+    job_id: Option<&JobId>,
 ) -> Result<(), AppError> {
     job_set_phase(&state.jobs, job_id, JobPhase::Finalizing).await;
     let file_rows = persist::insert_files(&state.db, staged).await?;
     persist::insert_items_and_poster(&state.db, payload, &file_rows).await
 }
 
-async fn finish_job(state: &AppState, job_id: Option<&str>) {
+async fn finish_job(state: &AppState, job_id: Option<&JobId>) {
     job_set_phase(&state.jobs, job_id, JobPhase::Done).await;
     if let Some(id) = job_id {
-        schedule_job_eviction(state.jobs.clone(), id.to_string());
+        schedule_job_eviction(state.jobs.clone(), *id);
     }
 }
 
@@ -92,7 +93,7 @@ async fn extract_and_insert_new_collection(
             let first = staged
                 .first()
                 .ok_or_else(|| AppError::internal("extract poster", "no staged files"))?;
-            let abs = state.config.storage.media_root.join(&first.rel);
+            let abs = first.rel.join_under(&state.config.storage.media_root);
             let duration = crate::app::server::convert::ffprobe_duration(&abs).await;
             let ts = pick_timestamp(duration, true);
 
@@ -105,16 +106,7 @@ async fn extract_and_insert_new_collection(
             )
             .await?;
 
-            let file_rel = url
-                .strip_prefix(crate::app::constants::routes::POSTERS_URL_PREFIX)
-                .map(|r| {
-                    state
-                        .config
-                        .storage
-                        .data_dir
-                        .join(crate::app::constants::storage::POSTERS_DIR)
-                        .join(r)
-                });
+            let file_rel = url.to_filesystem_path(&state.config.storage.data_dir);
 
             db::insert_video_collection(
                 &db,
@@ -128,7 +120,7 @@ async fn extract_and_insert_new_collection(
             .await
             .map_err(|e| AppError::internal("insert video collection", e))?;
 
-            Ok(file_rel)
+            Ok(Some(file_rel))
         }
         MediaKind::Audio => {
             let url = match payload.poster.as_ref() {
@@ -144,17 +136,9 @@ async fn extract_and_insert_new_collection(
                 ),
                 None => None,
             };
-            let file_rel = url.as_ref().and_then(|u| {
-                u.strip_prefix(crate::app::constants::routes::POSTERS_URL_PREFIX)
-                    .map(|r| {
-                        state
-                            .config
-                            .storage
-                            .data_dir
-                            .join(crate::app::constants::storage::POSTERS_DIR)
-                            .join(r)
-                    })
-            });
+            let file_rel = url
+                .as_ref()
+                .map(|u| u.to_filesystem_path(&state.config.storage.data_dir));
 
             db::insert_audio_collection(
                 &db,
@@ -177,7 +161,7 @@ async fn execute_upload(
     payload: &UploadPayload,
     state: &AppState,
     kind: MediaKind,
-    job_id: Option<&str>,
+    job_id: Option<&JobId>,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
     let staged = stage_phase(payload, state, kind, job_id, cancel).await?;
@@ -194,7 +178,7 @@ async fn execute_upload(
             let _ = tokio::fs::remove_file(&path).await;
         }
         for sf in &staged {
-            let staged_abs = state.config.storage.media_root.join(&sf.rel);
+            let staged_abs = sf.rel.join_under(&state.config.storage.media_root);
             if staged_abs.exists()
                 && tokio::fs::rename(&staged_abs, &sf.origin).await.is_err()
                 && tokio::fs::copy(&staged_abs, &sf.origin).await.is_ok()
@@ -213,7 +197,7 @@ pub async fn process_upload(
     payload: UploadPayload,
     state: &AppState,
     kind: MediaKind,
-    job_id: Option<&str>,
+    job_id: Option<&JobId>,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
     execute_upload(&payload, state, kind, job_id, cancel).await
@@ -225,7 +209,7 @@ pub async fn extract_poster_for_new_video_collection(
     collection_id: Uuid,
     source_path: &std::path::Path,
     first_only: bool,
-) -> Result<String, AppError> {
+) -> Result<crate::app::types::PosterUrl, AppError> {
     let duration = crate::app::server::convert::ffprobe_duration(source_path).await;
     let ts = pick_timestamp(duration, first_only);
     extract_and_save_poster(

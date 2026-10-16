@@ -6,6 +6,7 @@ use uuid::Uuid;
 use super::collections::decrement_or_delete;
 use super::files::purge_orphan_files;
 use crate::app::model::Item;
+use crate::app::types::{PosterUrl, RelPath};
 
 // ─── Item queries ─────────────────────────────────────────────────────────
 
@@ -308,13 +309,13 @@ pub async fn move_items_to_collection(
 // ─── Cascade deletion ─────────────────────────────────────────────────────
 
 pub struct ItemDeletion {
-    pub media_paths: Vec<String>,
-    pub emptied_poster: Option<String>,
+    pub media_paths: Vec<RelPath>,
+    pub emptied_poster: Option<PosterUrl>,
 }
 
 pub struct BulkItemDeletion {
-    pub media_paths: Vec<String>,
-    pub emptied_posters: Vec<String>,
+    pub media_paths: Vec<RelPath>,
+    pub emptied_posters: Vec<PosterUrl>,
 }
 
 pub async fn delete_item_cascade(pool: &SqlitePool, id: Uuid) -> sqlx::Result<ItemDeletion> {
@@ -377,7 +378,7 @@ pub async fn delete_items_cascade(
             .await?;
     }
 
-    let mut emptied_posters: Vec<String> = Vec::new();
+    let mut emptied_posters: Vec<PosterUrl> = Vec::new();
     for (collection_id, delta) in deltas {
         if let Some(poster) = decrement_or_delete(&mut tx, collection_id, delta).await? {
             emptied_posters.push(poster);

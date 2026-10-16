@@ -3,6 +3,7 @@ use leptos::prelude::*;
 use crate::app::error::AppError;
 use crate::app::inline_edit::use_edit_mode;
 use crate::app::model::Tag;
+use crate::app::types::TagName;
 use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
@@ -10,20 +11,21 @@ use crate::app::error::ErrorContext;
 #[cfg(feature = "ssr")]
 use crate::app::server::db;
 
-// ─── Tag pill ─────────────────────────────────────────────────────────────────
+// ─── Tag pill ─────────────────────────────────────────────────────────────
 
 #[component]
-pub fn TagPill(#[prop(into)] name: String) -> impl IntoView {
+pub fn TagPill(name: TagName) -> impl IntoView {
+    let label = name.to_string();
     view! {
         <span class="inline-flex items-center px-2 py-0.5 rounded-full \
                      bg-cyan-500/15 border border-cyan-400/25 text-cyan-300 \
                      text-[10px] font-medium tracking-wide whitespace-nowrap">
-            {name}
+            {label}
         </span>
     }
 }
 
-// ─── Tag list (read-only, truncating) ─────────────────────────────────────────
+// ─── Tag list (read-only, truncating) ─────────────────────────────────────
 
 #[component]
 pub fn TagList(tags: Vec<Tag>, #[prop(optional)] max: Option<usize>) -> impl IntoView {
@@ -59,7 +61,7 @@ pub fn TagList(tags: Vec<Tag>, #[prop(optional)] max: Option<usize>) -> impl Int
     }
 }
 
-// ─── Server fn ────────────────────────────────────────────────────────────────
+// ─── Server fn ────────────────────────────────────────────────────────────
 
 #[server]
 pub async fn fetch_all_tags() -> Result<Vec<Tag>, AppError> {
@@ -70,7 +72,7 @@ pub async fn fetch_all_tags() -> Result<Vec<Tag>, AppError> {
         .context("fetch all tags")
 }
 
-// ─── Shared tag cache ─────────────────────────────────────────────────────────
+// ─── Shared tag cache ─────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 pub struct TagsCache {
@@ -98,26 +100,25 @@ pub fn use_tags_cache() -> TagsCache {
     use_context::<TagsCache>().unwrap_or_else(TagsCache::new)
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
-fn ci_eq(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b)
+fn contains_ci(haystack: &TagName, needle: &str) -> bool {
+    haystack
+        .as_str()
+        .to_lowercase()
+        .contains(&needle.to_lowercase())
 }
 
-fn ci_contains(haystack: &str, needle: &str) -> bool {
-    haystack.to_lowercase().contains(&needle.to_lowercase())
-}
-
-// ─── Tag editor with autocomplete ─────────────────────────────────────────────
+// ─── Tag editor with autocomplete ─────────────────────────────────────────
 
 #[component]
-pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> impl IntoView {
+pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<TagName>>) -> impl IntoView {
     let edit_mode = use_edit_mode();
     let cache = use_tags_cache();
     let input = RwSignal::new(String::new());
     let focused = RwSignal::new(false);
 
-    let all_names: Memo<Vec<String>> = Memo::new(move |_| {
+    let all_names: Memo<Vec<TagName>> = Memo::new(move |_| {
         cache
             .all
             .get()
@@ -128,7 +129,7 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
             .collect()
     });
 
-    let set_names = Callback::new(move |names: Vec<String>| {
+    let set_names = Callback::new(move |names: Vec<TagName>| {
         let new_tags: Vec<Tag> = names
             .iter()
             .map(|n| Tag {
@@ -141,23 +142,22 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         cache.refresh();
     });
 
-    let add_name = Callback::new(move |name: String| {
-        let trimmed = name.trim().to_string();
+    let add_name = Callback::new(move |raw: String| {
         input.set(String::new());
-        if trimmed.is_empty() {
+        let Ok(tag_name) = TagName::new(raw) else {
+            return;
+        };
+        let mut names: Vec<TagName> = tags.get_untracked().into_iter().map(|t| t.name).collect();
+        if names.iter().any(|n| n == &tag_name) {
             return;
         }
-        let mut names: Vec<String> = tags.get_untracked().into_iter().map(|t| t.name).collect();
-        if names.iter().any(|n| ci_eq(n, &trimmed)) {
-            return;
-        }
-        names.push(trimmed);
+        names.push(tag_name);
         names.sort();
         set_names.run(names);
     });
 
-    let remove = Callback::new(move |name: String| {
-        let names: Vec<String> = tags
+    let remove = Callback::new(move |name: TagName| {
+        let names: Vec<TagName> = tags
             .get_untracked()
             .into_iter()
             .map(|t| t.name)
@@ -175,7 +175,8 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
             }
         }
         "Backspace" if input.get_untracked().is_empty() => {
-            let mut names: Vec<String> = tags.get_untracked().into_iter().map(|t| t.name).collect();
+            let mut names: Vec<TagName> =
+                tags.get_untracked().into_iter().map(|t| t.name).collect();
             if names.pop().is_some() {
                 set_names.run(names);
             }
@@ -184,17 +185,17 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         _ => {}
     });
 
-    let suggestions: Memo<Vec<String>> = Memo::new(move |_| {
+    let suggestions: Memo<Vec<TagName>> = Memo::new(move |_| {
         let q = input.get().trim().to_string();
         if q.is_empty() {
             return Vec::new();
         }
-        let added: Vec<String> = tags.get().into_iter().map(|t| t.name).collect();
+        let added: Vec<TagName> = tags.get().into_iter().map(|t| t.name).collect();
         all_names
             .get()
             .into_iter()
-            .filter(|n| ci_contains(n, &q))
-            .filter(|n| !added.iter().any(|a| ci_eq(a, n)))
+            .filter(|n| contains_ci(n, &q))
+            .filter(|n| !added.iter().any(|a| a == n))
             .take(6)
             .collect()
     });
@@ -204,11 +205,14 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         if q.is_empty() {
             return false;
         }
-        let added: Vec<String> = tags.get().into_iter().map(|t| t.name).collect();
-        if added.iter().any(|a| ci_eq(a, &q)) {
+        let Ok(needle) = TagName::new(q) else {
+            return false;
+        };
+        let added: Vec<TagName> = tags.get().into_iter().map(|t| t.name).collect();
+        if added.iter().any(|a| a == &needle) {
             return false;
         }
-        all_names.get().iter().any(|n| ci_eq(n, &q))
+        all_names.get().iter().any(|n| n == &needle)
     });
 
     let show_create: Memo<bool> = Memo::new(move |_| {
@@ -216,8 +220,11 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         if q.is_empty() {
             return false;
         }
-        let added: Vec<String> = tags.get().into_iter().map(|t| t.name).collect();
-        !added.iter().any(|a| ci_eq(a, &q)) && !all_names.get().iter().any(|n| ci_eq(n, &q))
+        let Ok(needle) = TagName::new(q) else {
+            return false;
+        };
+        let added: Vec<TagName> = tags.get().into_iter().map(|t| t.name).collect();
+        !added.iter().any(|a| a == &needle) && !all_names.get().iter().any(|n| n == &needle)
     });
 
     let already_added: Memo<bool> = Memo::new(move |_| {
@@ -225,10 +232,13 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
         if q.is_empty() {
             return false;
         }
-        tags.get().iter().any(|t| ci_eq(&t.name, &q))
+        let Ok(needle) = TagName::new(q) else {
+            return false;
+        };
+        tags.get().iter().any(|t| t.name == needle)
     });
 
-    let render = move || {
+    move || {
         if !edit_mode.get() {
             let current = tags.get();
             if current.is_empty() {
@@ -251,13 +261,13 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
             <div class="flex flex-wrap items-center gap-1.5">
                 <For each=move || tags.get() key=|t| t.name.clone() let:tag>
                     {
-                        let name = tag.name.clone();
-                        let name_for_remove = name.clone();
+                        let label = tag.name.to_string();
+                        let name_for_remove = tag.name.clone();
                         view! {
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full \
                                          bg-cyan-500/15 border border-cyan-400/25 text-cyan-300 \
                                          text-[10px] font-medium tracking-wide">
-                                {name}
+                                {label}
                                 <button type="button"
                                     on:click=move |_| remove.run(name_for_remove.clone())
                                     class="text-cyan-300/70 hover:text-white transition-colors leading-none"
@@ -284,17 +294,18 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
                                     py-1 max-h-48 overflow-auto">
                             <For each=move || suggestions.get() key=|s| s.clone() let:name>
                                 {
+                                    let label = name.to_string();
                                     let name_for_add = name.clone();
                                     view! {
                                         <button type="button"
                                             on:mousedown=move |ev| {
                                                 ev.prevent_default();
-                                                add_name.run(name_for_add.clone());
+                                                add_name.run(name_for_add.to_string());
                                             }
                                             class="w-full text-left px-2 py-1 flex items-center gap-2 \
                                                    hover:bg-white/10 transition-colors">
                                             <span class="text-cyan-400 text-[10px] leading-none">"✓"</span>
-                                            <span class="text-white text-xs truncate flex-1">{name.clone()}</span>
+                                            <span class="text-white text-xs truncate flex-1">{label}</span>
                                             <span class="text-[9px] text-gray-500 ml-auto shrink-0">"existing"</span>
                                         </button>
                                     }
@@ -337,7 +348,5 @@ pub fn TagEditor(tags: RwSignal<Vec<Tag>>, on_commit: Callback<Vec<String>>) -> 
                 </div>
             </div>
         }.into_any()
-    };
-
-    view! { {render} }
+    }
 }

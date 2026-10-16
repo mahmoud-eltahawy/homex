@@ -35,7 +35,7 @@ pub fn CardSkeleton() -> impl IntoView {
 pub fn CollectionCard(collection: Collection) -> impl IntoView {
     let href = collection.href();
     let title = collection.title.clone();
-    let poster = collection.poster.clone();
+    let poster_src: Option<String> = collection.poster.as_ref().map(|p| p.to_string());
     let count = collection.items_count;
     let tags = collection.tags.clone();
 
@@ -45,7 +45,7 @@ pub fn CollectionCard(collection: Collection) -> impl IntoView {
             class="group rounded-2xl overflow-hidden bg-[#1a1a24]/80 backdrop-blur-sm border border-white/5 hover:border-cyan-400/40 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.03]"
         >
             <div class="aspect-[2/3] relative overflow-hidden bg-white/5">
-                {poster.map(|p| view! {
+                {poster_src.map(|p| view! {
                     <img
                         src=p
                         class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
@@ -104,11 +104,6 @@ where
 pub type CollectionPage = Resource<Result<Vec<Collection>, AppError>>;
 pub type CollectionCount = Resource<Result<usize, AppError>>;
 
-/// Paginated collections for a section, keyed on the section's `Slug`.
-///
-/// Callers supply a `Slug` — never a `String`. The parse happens upstream
-/// in `PageContent::load`; this function's contract is that its input is
-/// already a concrete domain value.
 pub fn collections_paginated(
     slug: impl Fn() -> Slug + Clone + Send + Sync + 'static,
     offset: RwSignal<usize>,

@@ -3,10 +3,11 @@
 use leptos::prelude::*;
 
 use crate::app::model::MediaKind;
+use crate::app::types::FileExt;
 
 use super::types::UnclassifiedEntry;
 
-pub fn kind_for_ext(ext: Option<&str>) -> Option<MediaKind> {
+pub fn kind_for_ext(ext: Option<&FileExt>) -> Option<MediaKind> {
     MediaKind::from_extension(ext?)
 }
 
@@ -31,8 +32,6 @@ pub fn file_stem(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
-/// Percent-encode a path for a query-string value. Leaves `/` and unreserved
-/// characters alone so URLs stay readable (`?path=movies/action`).
 pub fn encode_query_path(s: &str) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(s.len());
@@ -53,11 +52,11 @@ pub fn select_all(selection: RwSignal<Vec<UnclassifiedEntry>>, entries: Vec<Uncl
     selection.update(|v| {
         let target_kind = v
             .first()
-            .and_then(|e| kind_for_ext(e.ext.as_deref()))
-            .or_else(|| entries.iter().find_map(|e| kind_for_ext(e.ext.as_deref())));
+            .and_then(|e| kind_for_ext(e.ext.as_ref()))
+            .or_else(|| entries.iter().find_map(|e| kind_for_ext(e.ext.as_ref())));
         v.clear();
         for e in entries {
-            let k = kind_for_ext(e.ext.as_deref());
+            let k = kind_for_ext(e.ext.as_ref());
             if k.is_none() || (target_kind.is_some() && k != target_kind) {
                 continue;
             }
@@ -72,8 +71,8 @@ pub fn toggle_selection(selection: RwSignal<Vec<UnclassifiedEntry>>, entry: Uncl
             v.remove(pos);
             return;
         }
-        let new_kind = kind_for_ext(entry.ext.as_deref());
-        let existing_kind = v.first().and_then(|e| kind_for_ext(e.ext.as_deref()));
+        let new_kind = kind_for_ext(entry.ext.as_ref());
+        let existing_kind = v.first().and_then(|e| kind_for_ext(e.ext.as_ref()));
         if existing_kind.is_some() && existing_kind != new_kind {
             v.clear();
         }

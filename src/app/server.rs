@@ -1,4 +1,4 @@
-use crate::app::constants::{self, protocols, storage};
+use crate::app::types::{PosterUrl, RelPath};
 use tokio_util::sync::CancellationToken;
 
 pub mod auth;
@@ -21,29 +21,18 @@ pub struct AppState {
     pub cancel: CancellationToken,
 }
 
-pub async fn remove_media_files(state: &AppState, rel_paths: &[String]) {
+pub async fn remove_media_files(state: &AppState, rel_paths: &[RelPath]) {
     for rel in rel_paths {
-        if rel.starts_with(protocols::HTTP) || rel.starts_with(protocols::HTTPS) {
-            continue;
-        }
-        let abs = state.config.storage.media_root.join(rel);
+        let abs = rel.join_under(&state.config.storage.media_root);
         if let Err(e) = tokio::fs::remove_file(&abs).await {
             leptos::logging::warn!("[cleanup] remove media {}: {e}", abs.display());
         }
     }
 }
 
-pub async fn remove_poster(state: &AppState, url: Option<&str>) {
-    let Some(url) = url else { return };
-    let Some(rest) = url.strip_prefix(constants::routes::POSTERS_URL_PREFIX) else {
-        return;
-    };
-    let abs = state
-        .config
-        .storage
-        .data_dir
-        .join(storage::POSTERS_DIR)
-        .join(rest);
+pub async fn remove_poster(state: &AppState, poster: Option<&PosterUrl>) {
+    let Some(poster) = poster else { return };
+    let abs = poster.to_filesystem_path(&state.config.storage.data_dir);
     if let Err(e) = tokio::fs::remove_file(&abs).await {
         leptos::logging::warn!("[cleanup] remove poster {}: {e}", abs.display());
     }

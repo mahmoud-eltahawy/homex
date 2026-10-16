@@ -1,4 +1,5 @@
 use crate::app::icons::{SearchIcon, XIcon};
+use crate::app::types::TagName;
 use leptos::prelude::*;
 use std::time::Duration;
 
@@ -68,20 +69,15 @@ where
 }
 
 // ─── Tag hint chip ────────────────────────────────────────────────────────
-//
-// Renders one chip per `#tag`-looking word currently in the input, so the
-// user can see at a glance which words the server will interpret as tag
-// filters.
 
-fn extract_tag_hints(raw: &str) -> Vec<String> {
-    let mut tags: Vec<String> = raw
+fn extract_tag_hints(raw: &str) -> Vec<TagName> {
+    let mut tags: Vec<TagName> = raw
         .split_whitespace()
         .filter_map(|w| w.strip_prefix('#'))
-        .filter(|t| !t.is_empty())
-        .map(str::to_string)
+        .filter_map(|t| TagName::new(t).ok())
         .collect();
     tags.sort();
-    tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    tags.dedup();
     tags
 }
 
@@ -99,7 +95,7 @@ fn TagHints(raw: Signal<String>) -> impl IntoView {
                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full \
                                  bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 \
                                  text-[10px] font-medium">
-                        {"#"}{tag}
+                        {"#"}{tag.to_string()}
                     </span>
                 </For>
             </div>

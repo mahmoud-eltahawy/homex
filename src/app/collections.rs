@@ -1,8 +1,11 @@
-use crate::app::error::{AppError, ErrorCode};
+use crate::app::error::AppError;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
 use crate::app::ids::Slug;
 use crate::app::model::{
     Collection, CollectionField, CollectionSummary, Item, MediaKind, SearchQuery,
 };
+use crate::app::types::{PosterUrl, TagName};
 use leptos::prelude::*;
 use uuid::Uuid;
 
@@ -88,7 +91,7 @@ pub async fn patch_collection_field(
 }
 
 #[server]
-pub async fn patch_collection_tags(id: Uuid, tags: Vec<String>) -> Result<(), AppError> {
+pub async fn patch_collection_tags(id: Uuid, tags: Vec<TagName>) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
     db::set_collection_tags(&state.db, id, &tags)
@@ -120,7 +123,7 @@ pub async fn delete_collection(id: Uuid) -> Result<(), AppError> {
         .await
         .context("delete collection cascade")?;
     remove_media_files(&state, &del.media_paths).await;
-    remove_poster(&state, del.poster_url.as_deref()).await;
+    remove_poster(&state, del.poster_url.as_ref()).await;
     Ok(())
 }
 
@@ -132,14 +135,14 @@ pub async fn delete_item(id: Uuid) -> Result<(), AppError> {
         .await
         .context("delete item cascade")?;
     remove_media_files(&state, &del.media_paths).await;
-    remove_poster(&state, del.emptied_poster.as_deref()).await;
+    remove_poster(&state, del.emptied_poster.as_ref()).await;
     Ok(())
 }
 
 #[server(input = server_fn::codec::MultipartFormData)]
 pub async fn upload_collection_poster(
     data: server_fn::codec::MultipartData,
-) -> Result<String, AppError> {
+) -> Result<PosterUrl, AppError> {
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     use crate::app::server::poster::write_poster;
@@ -150,7 +153,7 @@ pub async fn upload_collection_poster(
 
     let mut mp = data.into_inner().unwrap();
     let mut form: Option<PosterUploadForm> = None;
-    let mut bytes: Option<(String, Vec<u8>)> = None;
+    let mut bytes: Option<(crate::app::types::FileExt, Vec<u8>)> = None;
 
     while let Some(f) = mp.next_field().await? {
         match f.name().unwrap_or("") {
@@ -205,11 +208,12 @@ pub async fn upload_collection_poster(
 pub async fn regenerate_collection_poster(
     section_slug: Slug,
     collection_id: Uuid,
-) -> Result<String, AppError> {
+) -> Result<PosterUrl, AppError> {
     use crate::app::model::MediaKind;
     use crate::app::server::AppState;
     use crate::app::server::convert::{ffprobe_duration, is_video_container_supported};
     use crate::app::server::poster::{extract_and_save_poster, pick_timestamp};
+    use crate::app::types::FileExt;
 
     let state: AppState = expect_context();
 
@@ -235,12 +239,14 @@ pub async fn regenerate_collection_poster(
         .context("resolve first item file")?
         .ok_or_else(|| AppError::public(ErrorCode::FileNotFound))?;
 
-    let ext = rel.rsplit('.').next().unwrap_or("");
-    if !is_video_container_supported(ext) {
+    let Some(ext) = FileExt::from_filename(rel.as_str()) else {
+        return Err(AppError::detailed("Cannot extract a poster from this file"));
+    };
+    if !is_video_container_supported(&ext) {
         return Err(AppError::detailed("Cannot extract a poster from this file"));
     }
 
-    let abs = state.config.storage.media_root.join(&rel);
+    let abs = rel.join_under(&state.config.storage.media_root);
     if tokio::fs::metadata(&abs).await.is_err() {
         return Err(AppError::detailed("Source file is missing"));
     }
@@ -261,8 +267,8 @@ pub async fn regenerate_collection_poster(
     )
     .await?;
 
-    if let Some(old) = previous.as_deref()
-        && old != url
+    if let Some(old) = previous.as_ref()
+        && old != &url
     {
         crate::app::server::remove_poster(&state, Some(old)).await;
     }
@@ -304,7 +310,7 @@ pub async fn move_collection_to_section(
             MoveCollectionError::Db(e) => AppError::internal("move collection to section", e),
         })?;
 
-    if let Some(url) = mv.poster_url.as_deref()
+    if let Some(url) = mv.poster_url.as_ref()
         && let Some(new_url) = poster::move_poster_to_subdir(
             &state.config.storage.data_dir,
             mv.from_slug.as_str(),

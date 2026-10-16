@@ -6,25 +6,26 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::app::error::AppError;
+use crate::app::types::RelPath;
 
 /// Move one file back into the incoming directory.
 ///
 /// Returns `Ok(Some(new_path))` if the file was moved, `Ok(None)` if it was
-/// skipped (external URL, missing file, path outside `media_root`). `Err`
-/// only for genuinely unexpected failures like a cross-device copy error.
+/// skipped (missing file, path outside `media_root`). `Err` only for
+/// genuinely unexpected failures like a cross-device copy error.
 pub async fn move_file_to_incoming(
     media_root: &Path,
     incoming_dir: &Path,
-    relative_path: &str,
+    relative_path: &RelPath,
 ) -> Result<Option<PathBuf>, AppError> {
-    if relative_path.starts_with("http://") || relative_path.starts_with("https://") {
-        return Ok(None);
-    }
-    let abs = media_root.join(relative_path);
+    let abs = relative_path.join_under(media_root);
     let abs_canon = match tokio::fs::canonicalize(&abs).await {
         Ok(p) => p,
         Err(_) => return Ok(None),
     };
+    // `join_under` guarantees `abs` is inside `media_root`; the `starts_with`
+    // check is still meaningful because `canonicalize` follows symlinks, and
+    // a symlink inside `media_root` could point outside.
     if !abs_canon.starts_with(media_root) {
         return Ok(None);
     }

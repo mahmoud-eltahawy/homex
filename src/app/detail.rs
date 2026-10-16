@@ -1,12 +1,14 @@
 use crate::app::icons::DownloadIcon;
+use crate::app::types::PosterUrl;
 use leptos::prelude::*;
 
 #[component]
-pub fn DetailShell(#[prop(into)] poster: Option<String>, children: Children) -> impl IntoView {
+pub fn DetailShell(#[prop(into)] poster: Option<PosterUrl>, children: Children) -> impl IntoView {
+    let poster_src: Option<String> = poster.map(|p| p.to_string());
     view! {
         <div class="relative min-h-screen bg-black text-white overflow-hidden">
             <div class="absolute inset-0">
-                {poster.map(|src| view! {
+                {poster_src.map(|src| view! {
                     <img src=src class="w-full h-full object-cover opacity-40" alt=""/>
                 })}
                 <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>

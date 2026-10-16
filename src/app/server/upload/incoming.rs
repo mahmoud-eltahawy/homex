@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 
 use crate::app::error::{AppError, ErrorContext};
 use crate::app::model::MediaKind;
+use crate::app::types::RelPath;
 
 #[derive(Debug, Clone)]
 pub struct RawFile {
     pub abs: PathBuf,
-    pub rel: String,
+    pub rel: RelPath,
     pub filename: String,
     pub size: u64,
 }
@@ -62,10 +63,25 @@ pub async fn collect_files(
             } else if ft.is_file() {
                 let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
                 let abs = entry.path();
-                let rel = abs
-                    .strip_prefix(root_canon)
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| name.clone());
+
+                // Every file we reach here was discovered by walking from
+                // `root_canon`, so it is guaranteed to be under that root.
+                // A failure to strip the prefix or to build a valid `RelPath`
+                // would mean an invariant of the walk itself is broken —
+                // log and skip rather than crash.
+                let Ok(rel_os) = abs.strip_prefix(root_canon) else {
+                    leptos::logging::warn!("[incoming] path not under root: {}", abs.display(),);
+                    continue;
+                };
+                let rel_string = rel_os.to_string_lossy().into_owned();
+                let Ok(rel) = RelPath::new(rel_string) else {
+                    leptos::logging::warn!(
+                        "[incoming] invalid relative path: {}",
+                        rel_os.display(),
+                    );
+                    continue;
+                };
+
                 out.push(RawFile {
                     abs,
                     rel,
@@ -75,7 +91,12 @@ pub async fn collect_files(
             }
         }
     }
-    out.sort_by_key(|f| f.rel.to_lowercase());
+    out.sort_by(|a, b| {
+        a.rel
+            .as_str()
+            .to_lowercase()
+            .cmp(&b.rel.as_str().to_lowercase())
+    });
     Ok(out)
 }
 

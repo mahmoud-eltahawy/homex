@@ -1,4 +1,5 @@
 use crate::app::error::AppError;
+use crate::app::types::JobId;
 use crate::app::upload_api::{ConversionStatus, UploadResult, poll_conversion, upload_media};
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
@@ -22,7 +23,7 @@ pub struct UploadJob {
 struct UploadSignals {
     status: RwSignal<Option<ConversionStatus>>,
     done_tick: RwSignal<u32>,
-    active_job: RwSignal<Option<String>>,
+    active_job: RwSignal<Option<JobId>>,
     collection_id: RwSignal<Option<Uuid>>,
     section_slug: RwSignal<Option<String>>,
 }
@@ -42,8 +43,8 @@ impl UploadSignals {
         self.done_tick.update(|n| *n += 1);
     }
 
-    fn clear_active_if(&self, id: &str) {
-        if self.active_job.get_untracked().as_deref() == Some(id) {
+    fn clear_active_if(&self, id: JobId) {
+        if self.active_job.get_untracked() == Some(id) {
             self.active_job.set(None);
         }
     }
@@ -62,10 +63,10 @@ fn is_terminal(s: &ConversionStatus) -> bool {
     )
 }
 
-async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
+async fn poll_until_terminal(job_id: JobId, signals: UploadSignals) {
     let mut consecutive_errors = 0u32;
     loop {
-        match poll_conversion(job_id.clone()).await {
+        match poll_conversion(job_id).await {
             Ok(s) => {
                 consecutive_errors = 0;
                 let terminal = is_terminal(&s);
@@ -86,7 +87,7 @@ async fn poll_until_terminal(job_id: String, signals: UploadSignals) {
         }
         TimeoutFuture::new(POLL_INTERVAL_MS).await;
     }
-    signals.clear_active_if(&job_id);
+    signals.clear_active_if(job_id);
     signals.mark_done_if_successful();
 }
 

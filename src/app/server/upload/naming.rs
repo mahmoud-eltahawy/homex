@@ -1,12 +1,9 @@
-// ─── Slug ─────────────────────────────────────────────────────────────────
-//
-// Re-exported so callers can keep using `super::naming::slugify`. The `slug`
-// crate handles Unicode (via `deunicode`) — hand-rolled ASCII-only versions
-// collapse non-Latin titles to an empty string.
+//! Filename and path helpers for the upload pipeline.
 
 pub use slug::slugify;
 
 use crate::app::error::{AppError, ErrorCode};
+use crate::app::types::{FileExt, RelPath};
 
 // ─── Filename helpers ─────────────────────────────────────────────────────
 
@@ -16,34 +13,18 @@ pub fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
-/// Extension for a poster upload. Falls back to `"jpg"` when the incoming
-/// filename has no plausible extension.
+/// Candidate extension for a poster upload.
 ///
-/// This is only the *candidate* extension — the poster write path replaces
-/// it with the magic-byte-detected extension when `infer` recognizes the
-/// bytes. See `server::poster::write_poster`.
-pub fn extension_of(filename: &str) -> String {
-    match filename.rsplit_once('.') {
-        Some((_, ext))
-            if !ext.is_empty()
-                && ext.len() <= 8
-                && ext.chars().all(|c| c.is_ascii_alphanumeric()) =>
-        {
-            ext.to_ascii_lowercase()
-        }
-        _ => "jpg".to_string(),
-    }
+/// Falls back to `"jpg"` when the incoming filename has no plausible
+/// extension. Only the *candidate* — the poster write path replaces it with
+/// the magic-byte-detected extension when `infer` recognizes the bytes. See
+/// `server::poster::write_poster`.
+pub fn extension_of(filename: &str) -> FileExt {
+    FileExt::from_filename(filename)
+        .unwrap_or_else(|| FileExt::new("jpg").expect("`jpg` is a valid extension"))
 }
 
-pub fn sanitize_rel(rel: &str) -> Result<String, AppError> {
-    let trimmed = rel.trim_matches('/');
-    if trimmed.is_empty() {
-        return Ok(String::new());
-    }
-    for part in trimmed.split('/') {
-        if part.is_empty() || part == "." || part == ".." {
-            return Err(AppError::public(ErrorCode::InvalidPath));
-        }
-    }
-    Ok(trimmed.to_string())
+/// Validate a relative path.
+pub fn sanitize_rel(rel: &str) -> Result<RelPath, AppError> {
+    RelPath::new(rel).map_err(|_| AppError::public(ErrorCode::InvalidPath))
 }

@@ -4,6 +4,7 @@ use crate::app::ids::Slug;
 use crate::app::model::{MediaKind, Section, Tag};
 use crate::app::route_params::use_slug_param;
 use crate::app::tags::TagEditor;
+use crate::app::types::TagName;
 use crate::app::upload_job::{UploadJob, UploadProgress};
 use crate::app::upload_types::{
     FILE_FIELD, FORM_FIELD, POSTER_FIELD, UploadFileMeta, UploadForm, UploadTarget,
@@ -92,7 +93,8 @@ impl PageContent<RouteError> for NewCollectionContent {
                 return;
             }
             let desc = description.get_untracked();
-            let tag_names: Vec<String> = tags.get_untracked().into_iter().map(|t| t.name).collect();
+            let tag_names: Vec<TagName> =
+                tags.get_untracked().into_iter().map(|t| t.name).collect();
             let season_opt = if is_series.get_untracked() {
                 season.get_untracked().trim().parse::<i64>().ok()
             } else {
@@ -188,7 +190,7 @@ impl PageContent<RouteError> for NewCollectionContent {
                                         <div class="mt-1">
                                             <TagEditor
                                                 tags=tags
-                                                on_commit=Callback::new(|_: Vec<String>| ())
+                                                on_commit=Callback::new(|_: Vec<TagName>| ())
                                             />
                                         </div>
                                     </div>

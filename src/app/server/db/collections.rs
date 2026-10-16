@@ -7,6 +7,7 @@ use uuid::Uuid;
 use super::err_not_found;
 use crate::app::ids::Slug;
 use crate::app::model::{Collection, CollectionKind, CollectionSummary, MediaKind, SearchQuery};
+use crate::app::types::{PosterUrl, RelPath, TagName};
 
 pub use crate::app::model::CollectionField;
 
@@ -161,26 +162,28 @@ pub async fn fetch_collection_summaries(
 
 // ─── Insert entry points ──────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_video_collection(
     pool: &SqlitePool,
     id: Uuid,
     section_slug: &Slug,
     title: &str,
     description: Option<&str>,
-    tags: &[String],
-    poster: &str,
+    tags: &[TagName],
+    poster: &PosterUrl,
 ) -> sqlx::Result<()> {
     video::insert(pool, id, section_slug, title, description, tags, poster).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_audio_collection(
     pool: &SqlitePool,
     id: Uuid,
     section_slug: &Slug,
     title: &str,
     description: Option<&str>,
-    tags: &[String],
-    poster: Option<String>,
+    tags: &[TagName],
+    poster: Option<PosterUrl>,
 ) -> sqlx::Result<()> {
     audio::insert(pool, id, section_slug, title, description, tags, poster).await
 }
@@ -205,19 +208,19 @@ pub async fn update_collection_field(
 pub async fn set_collection_poster(
     pool: &SqlitePool,
     id: Uuid,
-    url: Option<&str>,
+    poster: Option<&PosterUrl>,
 ) -> sqlx::Result<()> {
     match kind_of(pool, id)
         .await?
         .ok_or_else(|| err_not_found("collection"))?
     {
         CollectionKind::Video => {
-            let url = url.ok_or_else(|| {
+            let poster = poster.ok_or_else(|| {
                 sqlx::Error::Protocol("video collection poster cannot be cleared".into())
             })?;
-            video::set_poster(pool, id, url).await
+            video::set_poster(pool, id, poster).await
         }
-        CollectionKind::Audio => audio::set_poster(pool, id, url).await,
+        CollectionKind::Audio => audio::set_poster(pool, id, poster).await,
     }
 }
 
@@ -257,7 +260,7 @@ pub(crate) async fn decrement_or_delete(
     conn: &mut sqlx::SqliteConnection,
     collection_id: Uuid,
     delta: i64,
-) -> sqlx::Result<Option<String>> {
+) -> sqlx::Result<Option<PosterUrl>> {
     let Some(kind) = kind_of_tx(conn, collection_id).await? else {
         return Ok(None);
     };
@@ -288,7 +291,7 @@ pub(crate) async fn decrement_or_delete(
                 )
                 .execute(&mut *conn)
                 .await?;
-                Ok(Some(poster))
+                Ok(Some(PosterUrl::from_stored(poster)))
             } else {
                 sqlx::query!(
                     r#"UPDATE video_collections SET items_count = ? WHERE id = ?"#,
@@ -325,7 +328,7 @@ pub(crate) async fn decrement_or_delete(
                 )
                 .execute(&mut *conn)
                 .await?;
-                Ok(poster)
+                Ok(poster.map(PosterUrl::from_stored))
             } else {
                 sqlx::query!(
                     r#"UPDATE audio_collections SET items_count = ? WHERE id = ?"#,
@@ -355,13 +358,13 @@ struct _AudioCount {
 // ─── Shared shapes ────────────────────────────────────────────────────────
 
 pub struct CollectionDeletion {
-    pub media_paths: Vec<String>,
-    pub poster_url: Option<String>,
+    pub media_paths: Vec<RelPath>,
+    pub poster_url: Option<PosterUrl>,
 }
 
 pub struct CollectionMove {
     pub from_slug: Slug,
-    pub poster_url: Option<String>,
+    pub poster_url: Option<PosterUrl>,
 }
 
 #[derive(Debug)]

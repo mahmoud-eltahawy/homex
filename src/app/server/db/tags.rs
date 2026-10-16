@@ -1,56 +1,68 @@
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
-use crate::app::model::{Tag, canonicalize_tags};
+use crate::app::model::{Tag, TagRow, canonicalize_tags};
+use crate::app::types::TagName;
 
-// ─── Tag loaders / writers ────────────────────────────────────────────────────
+// ─── Tag loaders / writers ────────────────────────────────────────────────
 
 pub async fn fetch_all_tags(pool: &SqlitePool) -> sqlx::Result<Vec<Tag>> {
-    sqlx::query_as!(
-        Tag,
+    let rows = sqlx::query_as!(
+        TagRow,
         r#"SELECT id AS "id!: Uuid", name AS "name!: String"
            FROM tags ORDER BY name ASC"#,
     )
     .fetch_all(pool)
-    .await
+    .await?;
+    Ok(rows.into_iter().map(Tag::from).collect())
 }
 
-async fn find_tag_id_by_name(pool: &SqlitePool, name: &str) -> sqlx::Result<Option<Uuid>> {
+async fn find_tag_id_by_name(pool: &SqlitePool, name: &TagName) -> sqlx::Result<Option<Uuid>> {
     sqlx::query_scalar!(
         r#"SELECT id AS "id!: Uuid" FROM tags WHERE name = ? COLLATE NOCASE"#,
-        name,
+        name.as_str(),
     )
     .fetch_optional(pool)
     .await
 }
 
-async fn upsert_tag_tx(conn: &mut SqliteConnection, name: &str) -> sqlx::Result<Tag> {
-    if let Some(t) = sqlx::query_as!(
-        Tag,
+async fn upsert_tag_tx(conn: &mut SqliteConnection, name: &TagName) -> sqlx::Result<Tag> {
+    let existing = sqlx::query_as!(
+        TagRow,
         r#"SELECT id AS "id!: Uuid", name AS "name!: String"
            FROM tags WHERE name = ?"#,
-        name,
+        name.as_str(),
     )
     .fetch_optional(&mut *conn)
-    .await?
-    {
-        return Ok(t);
+    .await?;
+
+    if let Some(row) = existing {
+        return Ok(row.into());
     }
+
     let id = Uuid::new_v4();
-    sqlx::query!(r#"INSERT INTO tags (id, name) VALUES (?, ?)"#, id, name)
-        .execute(&mut *conn)
-        .await?;
+    sqlx::query!(
+        r#"INSERT INTO tags (id, name) VALUES (?, ?)"#,
+        id,
+        name.as_str()
+    )
+    .execute(&mut *conn)
+    .await?;
+
     Ok(Tag {
         id,
-        name: name.to_string(),
+        name: name.clone(),
     })
 }
 
 async fn tags_for_joins(pool: &SqlitePool, tag_ids: &[Uuid]) -> sqlx::Result<Vec<Tag>> {
-    let mut out = Vec::with_capacity(tag_ids.len());
+    // Annotate: `Vec::with_capacity` leaves the element type unconstrained
+    // until the first push, and the `From<TagRow> for Tag` conversion is
+    // ambiguous without it.
+    let mut out: Vec<Tag> = Vec::with_capacity(tag_ids.len());
     for id in tag_ids {
         let row = sqlx::query_as!(
-            Tag,
+            TagRow,
             r#"SELECT id AS "id!: Uuid", name AS "name!: String"
                FROM tags WHERE id = ?"#,
             id,
@@ -58,7 +70,7 @@ async fn tags_for_joins(pool: &SqlitePool, tag_ids: &[Uuid]) -> sqlx::Result<Vec
         .fetch_optional(pool)
         .await?;
         match row {
-            Some(t) => out.push(t),
+            Some(r) => out.push(r.into()),
             None => leptos::logging::warn!("[tags] dangling tag_id {id}"),
         }
     }
@@ -94,9 +106,9 @@ pub async fn fetch_collection_tags(
 pub async fn set_section_tags(
     pool: &SqlitePool,
     section_id: Uuid,
-    names: &[String],
+    names: &[TagName],
 ) -> sqlx::Result<()> {
-    let normalized = canonicalize_tags(names);
+    let normalized = canonicalize_tags(names.iter().cloned());
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
@@ -125,9 +137,9 @@ pub async fn set_section_tags(
 pub async fn set_collection_tags(
     pool: &SqlitePool,
     collection_id: Uuid,
-    names: &[String],
+    names: &[TagName],
 ) -> sqlx::Result<()> {
-    let normalized = canonicalize_tags(names);
+    let normalized = canonicalize_tags(names.iter().cloned());
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
@@ -153,11 +165,11 @@ pub async fn set_collection_tags(
     Ok(())
 }
 
-// ─── Tag-driven collection filtering ──────────────────────────────────────────
+// ─── Tag-driven collection filtering ──────────────────────────────────────
 
 pub(crate) async fn collection_ids_with_all_tags(
     pool: &SqlitePool,
-    tag_names: &[String],
+    tag_names: &[TagName],
 ) -> sqlx::Result<Vec<Uuid>> {
     let mut intersection: Option<Vec<Uuid>> = None;
 

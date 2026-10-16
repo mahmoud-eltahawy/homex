@@ -4,6 +4,7 @@ use server_fn::codec::MultipartData;
 use tokio::io::AsyncWriteExt;
 
 use crate::app::error::{AppError, ErrorCode};
+use crate::app::types::FileExt;
 use crate::app::upload_types::{FILE_FIELD, FORM_FIELD, POSTER_FIELD, UploadFileMeta, UploadForm};
 
 use super::naming::extension_of;
@@ -38,10 +39,6 @@ async fn drain_field(mut field: multer::Field<'_>) -> Result<(), AppError> {
 
 /// Parse a media-upload multipart request: one `form` JSON field followed
 /// by zero or more raw `file` fields and optionally one `poster_file`.
-///
-/// All structural validation is done by `serde_json` when parsing the
-/// `form` field — including slug validation, which happens in the `Slug`
-/// `Deserialize` impl.
 pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload, AppError> {
     let mut mp = data
         .into_inner()
@@ -50,7 +47,7 @@ pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload
 
     let mut form: Option<UploadForm> = None;
     let mut files: Vec<(String, PathBuf, u64)> = Vec::new();
-    let mut poster: Option<(String, Vec<u8>)> = None;
+    let mut poster: Option<(FileExt, Vec<u8>)> = None;
 
     while let Some(mut field) = mp.next_field().await? {
         match field.name() {

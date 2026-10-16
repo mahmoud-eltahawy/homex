@@ -4,14 +4,15 @@ use uuid::Uuid;
 
 use crate::app::ids::Slug;
 use crate::app::model::{CollectionSummary, MediaKind};
+use crate::app::types::{FileExt, JobId, RelPath};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnclassifiedEntry {
     pub name: String,
-    pub rel_path: String,
+    pub rel_path: RelPath,
     pub is_dir: bool,
     pub size: u64,
-    pub ext: Option<String>,
+    pub ext: Option<FileExt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,15 +26,10 @@ pub struct SectionWithCollections {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClassifyInput {
-    pub rel_path: String,
+    pub rel_path: RelPath,
     pub title: String,
 }
 
-/// Where a classification batch is destined.
-///
-/// `New` defers collection creation to the classify server fn — the row is
-/// created (with a poster extracted from the first file) in the same call
-/// that dispatches the jobs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClassifyDestination {
     Existing(Uuid),
@@ -42,7 +38,7 @@ pub enum ClassifyDestination {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FolderInspection {
-    pub rel_path: String,
+    pub rel_path: RelPath,
     pub name: String,
     pub has_subdirs: bool,
     pub subdir_names: Vec<String>,
@@ -63,10 +59,10 @@ pub struct FoldersInspection {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileJobHandle {
     pub name: String,
-    pub job_id: String,
+    pub job_id: JobId,
     pub section_slug: String,
     pub collection_id: Option<Uuid>,
-    pub rel_path: String,
+    pub rel_path: RelPath,
     pub title: String,
     pub season_number: Option<i64>,
 }

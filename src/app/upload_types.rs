@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
+use crate::app::types::{FileExt, TagName};
 
 // ─── Container classification ─────────────────────────────────────────────
 
@@ -15,20 +16,20 @@ pub const VIDEO_CONVERTIBLE_EXTS: &[&str] = &[
 ];
 pub const AUDIO_CONVERTIBLE_EXTS: &[&str] = &["flac", "wma", "aiff", "aif", "alac", "ape"];
 
-fn in_list(list: &[&str], ext: &str) -> bool {
-    list.iter().any(|e| e.eq_ignore_ascii_case(ext))
+fn in_list(list: &[&str], ext: &FileExt) -> bool {
+    list.iter().any(|e| *e == ext.as_str())
 }
 
-pub fn is_video_container_supported(ext: &str) -> bool {
+pub fn is_video_container_supported(ext: &FileExt) -> bool {
     in_list(VIDEO_SUPPORTED_EXTS, ext)
 }
-pub fn is_audio_container_supported(ext: &str) -> bool {
+pub fn is_audio_container_supported(ext: &FileExt) -> bool {
     in_list(AUDIO_SUPPORTED_EXTS, ext)
 }
-pub fn is_convertible_video(ext: &str) -> bool {
+pub fn is_convertible_video(ext: &FileExt) -> bool {
     in_list(VIDEO_CONVERTIBLE_EXTS, ext)
 }
-pub fn is_convertible_audio(ext: &str) -> bool {
+pub fn is_convertible_audio(ext: &FileExt) -> bool {
     in_list(AUDIO_CONVERTIBLE_EXTS, ext)
 }
 
@@ -68,7 +69,7 @@ pub enum UploadTarget {
         id: Uuid,
         title: String,
         description: Option<String>,
-        tags: Vec<String>,
+        tags: Vec<TagName>,
     },
 }
 

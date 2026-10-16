@@ -1,6 +1,9 @@
-use crate::app::error::{AppError, ErrorCode};
+use crate::app::error::AppError;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
 use crate::app::ids::Slug;
 use crate::app::model::{MediaKind, Section};
+use crate::app::types::TagName;
 use leptos::prelude::*;
 use uuid::Uuid;
 
@@ -24,7 +27,7 @@ pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError
 }
 
 #[server]
-pub async fn patch_section_tags(id: Uuid, tags: Vec<String>) -> Result<(), AppError> {
+pub async fn patch_section_tags(id: Uuid, tags: Vec<TagName>) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
     db::set_section_tags(&state.db, id, &tags)

@@ -1,5 +1,6 @@
-use crate::app::constants::{routes, storage};
+use crate::app::constants::storage;
 use crate::app::error::{AppError, ErrorCode};
+use crate::app::types::{FileExt, PosterUrl};
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -8,21 +9,11 @@ use uuid::Uuid;
 const ALLOWED_POSTER_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
 const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 
-/// The window (in seconds) from the start of a video from which the first
-/// poster is picked. `0..=300` — the first five minutes. Contains title
-/// cards and representative scenes for most feature films and episodes.
 const FIRST_PICK_WINDOW_SECS: f64 = 300.0;
-
-/// The regenerate path avoids the very start and the very end of the video
-/// to reduce the odds of a black frame, studio logo, or end credits.
 const RANDOM_MARGIN: f64 = 0.02;
 
 // ─── Timestamp selection ──────────────────────────────────────────────────
 
-/// Pick a timestamp for frame extraction.
-///
-/// `first_only=true` → uniform in `[0, min(duration, 300s)]`.
-/// `first_only=false` → uniform in `[2%, 98%]` of duration.
 pub fn pick_timestamp(duration_secs: f64, first_only: bool) -> f64 {
     if !duration_secs.is_finite() || duration_secs <= 0.0 {
         return 0.0;
@@ -41,7 +32,6 @@ pub fn pick_timestamp(duration_secs: f64, first_only: bool) -> f64 {
     lo + pseudo_random_f64() * (hi - lo)
 }
 
-/// xorshift64 — good enough for "pick a different frame each click".
 fn pseudo_random_f64() -> f64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,10 +53,6 @@ fn pseudo_random_f64() -> f64 {
 }
 
 // ─── Cache-busting filename ───────────────────────────────────────────────
-//
-// Every extraction produces a new filename. Two consequences:
-//   1. The browser never serves a cached image after a regenerate.
-//   2. The old file must be unlinked by the caller after the new one lands.
 
 fn poster_filename(entity_id: Uuid) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -79,19 +65,13 @@ fn poster_filename(entity_id: Uuid) -> String {
 
 // ─── Frame extraction ─────────────────────────────────────────────────────
 
-/// Extract a single frame at `timestamp_secs` and write it as
-/// `<entity_id>-<millis>.jpg`. Returns the poster URL.
-///
-/// The frame is written to a hidden temp file first; only after ffmpeg
-/// produces a non-empty result do we swap it in. A failure therefore never
-/// destroys an existing poster.
 pub async fn extract_and_save_poster(
     data_dir: &Path,
     subdir: &str,
     entity_id: Uuid,
     video_path: &Path,
     timestamp_secs: f64,
-) -> Result<String, AppError> {
+) -> Result<PosterUrl, AppError> {
     let dir = data_dir.join(storage::POSTERS_DIR).join(subdir);
     tokio::fs::create_dir_all(&dir)
         .await
@@ -149,18 +129,23 @@ pub async fn extract_and_save_poster(
         .await
         .map_err(|e| AppError::internal("rename extracted poster", e))?;
 
-    Ok(routes::poster(subdir, &filename))
+    PosterUrl::for_file(subdir, &filename).map_err(|e| {
+        AppError::internal(
+            "extract poster",
+            format!("poster filename produced an invalid URL: {e}"),
+        )
+    })
 }
 
 // ─── Manual poster write (audio only) ─────────────────────────────────────
 
-fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, AppError> {
+fn resolve_poster_ext(client_ext: &FileExt, bytes: &[u8]) -> Result<FileExt, AppError> {
     let candidate = match infer::get(bytes) {
         Some(kind) => kind.extension().to_string(),
-        None => client_ext.to_ascii_lowercase(),
+        None => client_ext.as_str().to_string(),
     };
 
-    ALLOWED_POSTER_EXTS
+    let found = ALLOWED_POSTER_EXTS
         .iter()
         .find(|allowed| allowed.eq_ignore_ascii_case(&candidate))
         .copied()
@@ -168,18 +153,18 @@ fn resolve_poster_ext(client_ext: &str, bytes: &[u8]) -> Result<&'static str, Ap
             AppError::public(ErrorCode::Detailed(format!(
                 "Unsupported image format: .{candidate}"
             )))
-        })
+        })?;
+
+    Ok(FileExt::new(found).expect("ALLOWED_POSTER_EXTS entries are valid extensions"))
 }
 
-/// Write a manually-uploaded poster. Used only by the audio path — video
-/// posters come from `extract_and_save_poster`.
 pub async fn write_poster(
     data_dir: &Path,
     subdir: &str,
     entity_id: Uuid,
-    client_ext: &str,
+    client_ext: &FileExt,
     bytes: &[u8],
-) -> Result<String, AppError> {
+) -> Result<PosterUrl, AppError> {
     if bytes.len() > MAX_POSTER_BYTES {
         return Err(AppError::public(ErrorCode::ImageTooLarge {
             mb: MAX_POSTER_BYTES / 1024 / 1024,
@@ -198,22 +183,23 @@ pub async fn write_poster(
         .await
         .map_err(|e| AppError::internal("write poster", e))?;
 
-    Ok(routes::poster(subdir, &filename))
+    PosterUrl::for_file(subdir, &filename).map_err(|e| {
+        AppError::internal(
+            "write poster",
+            format!("poster filename produced an invalid URL: {e}"),
+        )
+    })
 }
 
 // ─── Poster relocation on section change ──────────────────────────────────
 
-/// Move a poster file from one subdirectory to another, returning the new
-/// URL on success. Returns `None` for non-posters URLs or filesystem errors
-/// (which are logged).
 pub async fn move_poster_to_subdir(
     data_dir: &Path,
     from_subdir: &str,
     to_subdir: &str,
-    poster_url: &str,
-) -> Option<String> {
-    let rest = poster_url.strip_prefix(routes::POSTERS_URL_PREFIX)?;
-    let (_old, filename) = rest.split_once('/')?;
+    poster: &PosterUrl,
+) -> Option<PosterUrl> {
+    let filename = poster.filename();
 
     let to_dir = data_dir.join(storage::POSTERS_DIR).join(to_subdir);
     if let Err(e) = tokio::fs::create_dir_all(&to_dir).await {
@@ -251,10 +237,5 @@ pub async fn move_poster_to_subdir(
         return None;
     }
 
-    Some(format!(
-        "{}{}/{}",
-        routes::POSTERS_URL_PREFIX,
-        to_subdir,
-        filename
-    ))
+    PosterUrl::for_file(to_subdir, filename).ok()
 }

@@ -11,6 +11,8 @@ use leptos_router::{
     components::{ParentRoute, Route, Router, Routes},
 };
 
+mod types;
+
 mod collection_detail;
 mod collections;
 mod common;

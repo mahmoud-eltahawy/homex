@@ -8,7 +8,9 @@ use super::{CollectionDeletion, CollectionField, CollectionMove, MoveCollectionE
 use crate::app::ids::Slug;
 use crate::app::model::{
     Collection, CollectionSummary, MediaKind, SearchQuery, SectionRow, VideoCollectionRow,
+    canonicalize_tags,
 };
+use crate::app::types::{PosterUrl, TagName};
 
 // ─── Read ─────────────────────────────────────────────────────────────────
 
@@ -187,24 +189,31 @@ async fn next_position(conn: &mut sqlx::SqliteConnection, section_id: Uuid) -> s
 async fn write_tags(
     conn: &mut sqlx::SqliteConnection,
     collection_id: Uuid,
-    tags: &[String],
+    tags: &[TagName],
 ) -> sqlx::Result<()> {
-    use crate::app::model::canonicalize_tags;
-    for name in canonicalize_tags(tags) {
-        let existing: Option<Uuid> =
-            sqlx::query_scalar!(r#"SELECT id AS "id!: Uuid" FROM tags WHERE name = ?"#, name,)
-                .fetch_optional(&mut *conn)
-                .await?;
+    for name in canonicalize_tags(tags.iter().cloned()) {
+        let existing: Option<Uuid> = sqlx::query_scalar!(
+            r#"SELECT id AS "id!: Uuid" FROM tags WHERE name = ?"#,
+            name.as_str(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+
         let tag_id = match existing {
             Some(id) => id,
             None => {
                 let id = Uuid::new_v4();
-                sqlx::query!(r#"INSERT INTO tags (id, name) VALUES (?, ?)"#, id, name)
-                    .execute(&mut *conn)
-                    .await?;
+                sqlx::query!(
+                    r#"INSERT INTO tags (id, name) VALUES (?, ?)"#,
+                    id,
+                    name.as_str()
+                )
+                .execute(&mut *conn)
+                .await?;
                 id
             }
         };
+
         sqlx::query!(
             r#"INSERT INTO collection_tags (id, collection_id, tag_id) VALUES (?, ?, ?)"#,
             Uuid::new_v4(),
@@ -224,8 +233,8 @@ pub(super) async fn insert(
     section_slug: &Slug,
     title: &str,
     description: Option<&str>,
-    tags: &[String],
-    poster: &str,
+    tags: &[TagName],
+    poster: &PosterUrl,
 ) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
 
@@ -254,7 +263,7 @@ pub(super) async fn insert(
         section.id,
         section.slug,
         title,
-        poster,
+        poster.as_str(),
         description,
         next,
     )
@@ -298,10 +307,14 @@ pub(super) async fn update_field(
     Ok(())
 }
 
-pub(super) async fn set_poster(pool: &SqlitePool, id: Uuid, url: &str) -> sqlx::Result<()> {
+pub(super) async fn set_poster(
+    pool: &SqlitePool,
+    id: Uuid,
+    poster: &PosterUrl,
+) -> sqlx::Result<()> {
     sqlx::query!(
         r#"UPDATE video_collections SET poster = ? WHERE id = ?"#,
-        url,
+        poster.as_str(),
         id,
     )
     .execute(pool)
@@ -346,7 +359,7 @@ pub(super) async fn delete_cascade(
     tx.commit().await?;
     Ok(CollectionDeletion {
         media_paths,
-        poster_url: Some(poster),
+        poster_url: Some(PosterUrl::from_stored(poster)),
     })
 }
 
@@ -401,7 +414,7 @@ pub(super) async fn move_to_section(
 
     Ok(CollectionMove {
         from_slug: Slug::from_stored(from_slug),
-        poster_url: Some(poster),
+        poster_url: Some(PosterUrl::from_stored(poster)),
     })
 }
 

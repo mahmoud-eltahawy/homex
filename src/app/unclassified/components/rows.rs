@@ -14,8 +14,8 @@ pub fn DirRow(
     on_navigate: Callback<String>,
     folder_selection: RwSignal<Vec<UnclassifiedEntry>>,
 ) -> impl IntoView {
-    let target_open = entry.rel_path.clone();
-    let target_arrow = entry.rel_path.clone();
+    let target_open = entry.rel_path.as_str().to_string();
+    let target_arrow = entry.rel_path.as_str().to_string();
     let name = entry.name.clone();
     let key = entry.rel_path.clone();
     let entry_for_toggle = entry.clone();
@@ -71,7 +71,7 @@ pub fn FileRow(
     file_selection: RwSignal<Vec<UnclassifiedEntry>>,
     modal_open: RwSignal<bool>,
 ) -> impl IntoView {
-    let is_supported = kind_for_ext(entry.ext.as_deref()).is_some();
+    let is_supported = kind_for_ext(entry.ext.as_ref()).is_some();
     let name = entry.name.clone();
     let size = entry.size;
     let key = entry.rel_path.clone();

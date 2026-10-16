@@ -1,14 +1,11 @@
 //! Parallel classification batch tracker.
-//!
-//! Each file gets its own status signal. A single poll request every
-//! `POLL_INTERVAL_MS` updates them all. Failed slots can be re-dispatched
-//! without touching the ones that succeeded.
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use uuid::Uuid;
 
 use crate::app::error::AppError;
+use crate::app::types::{JobId, RelPath};
 use crate::app::upload_api::ConversionStatus;
 
 use super::types::{ClassifyDestination, ClassifyInput, FileJobHandle};
@@ -19,10 +16,10 @@ const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 #[derive(Clone)]
 pub struct FileSlot {
     pub name: String,
-    pub job_id: String,
+    pub job_id: JobId,
     pub section_slug: String,
     pub collection_id: Option<Uuid>,
-    pub rel_path: String,
+    pub rel_path: RelPath,
     pub title: String,
     pub season_number: Option<i64>,
     pub status: RwSignal<Option<ConversionStatus>>,
@@ -162,7 +159,7 @@ impl BatchTracker {
         self.error
     }
 
-    pub fn pending_job_ids(&self) -> Vec<String> {
+    pub fn pending_job_ids(&self) -> Vec<JobId> {
         self.slots
             .get_untracked()
             .iter()
@@ -174,7 +171,7 @@ impl BatchTracker {
                         | Some(ConversionStatus::Failed(_))
                 )
             })
-            .map(|s| s.job_id.clone())
+            .map(|s| s.job_id)
             .collect()
     }
 
@@ -276,11 +273,11 @@ async fn poll_batch_loop(tracker: BatchTracker) {
         if !tracker.running.get_untracked() {
             return;
         }
-        let job_ids: Vec<String> = tracker
+        let job_ids: Vec<JobId> = tracker
             .slots
             .get_untracked()
             .iter()
-            .map(|s| s.job_id.clone())
+            .map(|s| s.job_id)
             .collect();
         if job_ids.is_empty() {
             return;

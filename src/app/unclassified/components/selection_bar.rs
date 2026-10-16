@@ -13,7 +13,7 @@ pub fn SelectionBar(
 ) -> impl IntoView {
     let total_supported = entries
         .iter()
-        .filter(|e| !e.is_dir && kind_for_ext(e.ext.as_deref()).is_some())
+        .filter(|e| !e.is_dir && kind_for_ext(e.ext.as_ref()).is_some())
         .count();
 
     let all_files_selected = move || {

@@ -20,12 +20,15 @@ use leptos_router::hooks::{use_navigate, use_query_map};
 use uuid::Uuid;
 
 use crate::app::constants::routes;
-use crate::app::error::{AppError, ErrorCode};
+use crate::app::error::AppError;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
 #[cfg(feature = "ssr")]
 use crate::app::ids::Slug;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
 use crate::app::model::MediaKind;
+use crate::app::types::{FileExt, JobId, RelPath};
 use crate::app::upload_api::ConversionStatus;
 use leptos_page::{InfalliblePage, PageContent};
 
@@ -61,11 +64,7 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
     ensure_roots_disjoint(&root_canon, &state.config.storage.media_root)?;
 
     let clean = sanitize_rel(&rel_path)?;
-    let abs = if clean.is_empty() {
-        root.clone()
-    } else {
-        root.join(&clean)
-    };
+    let abs = clean.join_under(&root);
 
     let abs_canon = tokio::fs::canonicalize(&abs)
         .await
@@ -93,14 +92,21 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
             Err(_) => continue,
         };
         let is_dir = meta.is_dir();
+
+        let rel_string = if clean.is_empty() {
+            name.clone()
+        } else {
+            format!("{}/{}", clean.as_str(), name)
+        };
+        let Ok(rel_path) = RelPath::new(rel_string) else {
+            leptos::logging::warn!("[unclassified] skipped invalid entry {name}");
+            continue;
+        };
+
         entries.push(UnclassifiedEntry {
             size: if is_dir { 0 } else { meta.len() },
             ext: if is_dir { None } else { ext_of(&name) },
-            rel_path: if clean.is_empty() {
-                name.clone()
-            } else {
-                format!("{clean}/{name}")
-            },
+            rel_path,
             name,
             is_dir,
         });
@@ -115,8 +121,8 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
 }
 
 #[cfg(feature = "ssr")]
-fn ext_of(name: &str) -> Option<String> {
-    name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase())
+fn ext_of(name: &str) -> Option<FileExt> {
+    FileExt::from_filename(name)
 }
 
 #[server]
@@ -200,7 +206,7 @@ pub async fn fetch_sections_with_collections(
 }
 
 #[server]
-pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspection, AppError> {
+pub async fn inspect_unclassified_folder(rel_path: RelPath) -> Result<FolderInspection, AppError> {
     inspect_folders(vec![rel_path]).await.and_then(|mut v| {
         v.folders
             .pop()
@@ -210,18 +216,16 @@ pub async fn inspect_unclassified_folder(rel_path: String) -> Result<FolderInspe
 
 #[server]
 pub async fn inspect_unclassified_folders(
-    rel_paths: Vec<String>,
+    rel_paths: Vec<RelPath>,
 ) -> Result<FoldersInspection, AppError> {
     inspect_folders(rel_paths).await
 }
 
 #[cfg(feature = "ssr")]
-async fn inspect_folders(rel_paths: Vec<String>) -> Result<FoldersInspection, AppError> {
+async fn inspect_folders(rel_paths: Vec<RelPath>) -> Result<FoldersInspection, AppError> {
     use crate::app::server::AppState;
     use crate::app::server::jobs::ensure_roots_disjoint;
-    use crate::app::server::upload::{
-        collect_files, dominant_kind, read_immediate_subdirs, sanitize_rel,
-    };
+    use crate::app::server::upload::{collect_files, dominant_kind, read_immediate_subdirs};
 
     if rel_paths.is_empty() {
         return Err(AppError::public(ErrorCode::NoFoldersSelected));
@@ -240,11 +244,10 @@ async fn inspect_folders(rel_paths: Vec<String>) -> Result<FoldersInspection, Ap
 
     let mut folders = Vec::with_capacity(rel_paths.len());
     for rp in &rel_paths {
-        let clean = sanitize_rel(rp)?;
-        if clean.is_empty() {
+        if rp.is_empty() {
             return Err(AppError::public(ErrorCode::InvalidPath));
         }
-        let abs_canon = tokio::fs::canonicalize(root.join(&clean))
+        let abs_canon = tokio::fs::canonicalize(rp.join_under(&root))
             .await
             .map_err(|e| AppError::detailed(format!("Folder not found: {e}")))?;
         if !abs_canon.starts_with(&root_canon) {
@@ -265,7 +268,7 @@ async fn inspect_folders(rel_paths: Vec<String>) -> Result<FoldersInspection, Ap
         let has_subdirs = !subdir_names.is_empty();
         let files = collect_files(&root_canon, &abs_canon, has_subdirs).await?;
         folders.push(FolderInspection {
-            rel_path: clean,
+            rel_path: rp.clone(),
             name,
             has_subdirs,
             subdir_names,
@@ -297,7 +300,7 @@ async fn inspect_folders(rel_paths: Vec<String>) -> Result<FoldersInspection, Ap
 }
 
 #[server]
-pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, AppError> {
+pub async fn poll_batch(job_ids: Vec<JobId>) -> Result<Vec<ConversionStatus>, AppError> {
     use crate::app::server::AppState;
     use crate::app::server::convert::JobPhase;
 
@@ -338,7 +341,7 @@ pub async fn poll_batch(job_ids: Vec<String>) -> Result<Vec<ConversionStatus>, A
 }
 
 #[server]
-pub async fn cancel_classify(job_ids: Vec<String>) -> Result<(), AppError> {
+pub async fn cancel_classify(job_ids: Vec<JobId>) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
     let jobs = state.jobs.read().await;
@@ -507,7 +510,7 @@ pub async fn classify_unclassified_files(
     }
 
     let handles = register_and_spawn(&state, prepared, &section_slug, Some(collection_id)).await;
-    let job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
+    let job_ids: Vec<JobId> = handles.iter().map(|h| h.job_id).collect();
     spawn_lock_holder(state.clone(), job_ids, lock);
 
     Ok(handles)
@@ -520,7 +523,7 @@ const MAX_CLASSIFY_GROUPS: usize = 50;
 
 #[server]
 pub async fn classify_unclassified_folder(
-    rel_path: String,
+    rel_path: RelPath,
     destination: ClassifyDestination,
 ) -> Result<Vec<FileJobHandle>, AppError> {
     classify_unclassified_folders(vec![rel_path], destination).await
@@ -528,7 +531,7 @@ pub async fn classify_unclassified_folder(
 
 #[server]
 pub async fn classify_unclassified_folders(
-    rel_paths: Vec<String>,
+    rel_paths: Vec<RelPath>,
     destination: ClassifyDestination,
 ) -> Result<Vec<FileJobHandle>, AppError> {
     use crate::app::model::{MediaKind, SectionRow};
@@ -538,7 +541,7 @@ pub async fn classify_unclassified_folders(
     };
     use crate::app::server::upload::{
         RawFile, UploadTarget, collect_files, ensure_kind_matches,
-        extract_poster_for_new_video_collection, read_immediate_subdirs, sanitize_rel,
+        extract_poster_for_new_video_collection, read_immediate_subdirs,
     };
     use crate::app::server::{AppState, db};
 
@@ -560,11 +563,10 @@ pub async fn classify_unclassified_folders(
 
     let mut abs_canons: Vec<std::path::PathBuf> = Vec::with_capacity(rel_paths.len());
     for rp in &rel_paths {
-        let clean = sanitize_rel(rp)?;
-        if clean.is_empty() {
+        if rp.is_empty() {
             return Err(AppError::public(ErrorCode::InvalidPath));
         }
-        let abs_canon = tokio::fs::canonicalize(root.join(&clean))
+        let abs_canon = tokio::fs::canonicalize(rp.join_under(&root))
             .await
             .map_err(|e| AppError::detailed(format!("Folder not found: {e}")))?;
         if !abs_canon.starts_with(&root_canon) {
@@ -768,7 +770,7 @@ pub async fn classify_unclassified_folders(
     };
 
     let mut prepared = Vec::new();
-    let mut cleanup_watchers: Vec<(Vec<String>, std::path::PathBuf)> = Vec::new();
+    let mut cleanup_watchers: Vec<(Vec<JobId>, std::path::PathBuf)> = Vec::new();
 
     for group in groups {
         let collection_id = Uuid::new_v4();
@@ -814,7 +816,7 @@ pub async fn classify_unclassified_folders(
             }
         }
 
-        let mut group_job_ids = Vec::new();
+        let mut group_job_ids: Vec<JobId> = Vec::new();
         for raw in group.files {
             let upload = crate::app::server::upload::UploadFile {
                 title: helpers::file_stem(&raw.filename),
@@ -830,7 +832,7 @@ pub async fn classify_unclassified_folders(
                 kind,
                 raw.rel,
             )?;
-            group_job_ids.push(p.job_id.clone());
+            group_job_ids.push(p.job_id);
             prepared.push(p);
         }
 
@@ -838,7 +840,7 @@ pub async fn classify_unclassified_folders(
     }
 
     let handles = register_and_spawn(&state, prepared, &section_slug, None).await;
-    let all_job_ids: Vec<String> = handles.iter().map(|h| h.job_id.clone()).collect();
+    let all_job_ids: Vec<JobId> = handles.iter().map(|h| h.job_id).collect();
     spawn_lock_holder(state.clone(), all_job_ids, lock);
 
     for (job_ids, dir) in cleanup_watchers {
@@ -852,7 +854,7 @@ pub async fn classify_unclassified_folders(
 
 #[server]
 pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError> {
-    use crate::app::model::{File, Item};
+    use crate::app::model::Item;
     use crate::app::server::jobs::canonical_media_root;
     use crate::app::server::upload::move_file_to_incoming;
     use crate::app::server::{AppState, db, remove_poster};
@@ -893,19 +895,21 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
             Ok(Some(i)) => i,
             _ => continue,
         };
-        let file = match sqlx::query_as!(
-            File,
-            r#"SELECT id AS "id!: Uuid", relative_path, size_bytes, duration_secs
+
+        let raw_rel: Option<String> = sqlx::query_scalar!(
+            r#"SELECT relative_path AS "relative_path!: String"
                FROM files WHERE id = ?"#,
             item.file_id,
         )
         .fetch_optional(&state.db)
         .await
-        {
-            Ok(Some(f)) => f,
-            _ => continue,
-        };
-        match move_file_to_incoming(media_canon, &incoming_canon, &file.relative_path).await {
+        .ok()
+        .flatten();
+
+        let Some(raw_rel) = raw_rel else { continue };
+        let rel = RelPath::from_stored(raw_rel);
+
+        match move_file_to_incoming(media_canon, &incoming_canon, &rel).await {
             Ok(Some(_)) => moved.push(item_id),
             Ok(None) => {}
             Err(e) => leptos::logging::warn!("[move_to_incoming] {e}"),
@@ -917,7 +921,7 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
             .await
             .map_err(|e| AppError::internal("delete items cascade", e))?;
         for poster in &del.emptied_posters {
-            remove_poster(&state, Some(poster.as_str())).await;
+            remove_poster(&state, Some(poster)).await;
         }
     }
     Ok(())
@@ -933,13 +937,12 @@ async fn resolve_upload_file(
     root_canon: &std::path::Path,
     input: &ClassifyInput,
 ) -> Result<crate::app::server::upload::UploadFile, AppError> {
-    use crate::app::server::upload::{UploadFile, sanitize_rel};
+    use crate::app::server::upload::UploadFile;
 
-    let clean = sanitize_rel(&input.rel_path)?;
-    if clean.is_empty() {
+    if input.rel_path.is_empty() {
         return Err(AppError::detailed("Empty file path"));
     }
-    let source_canon = tokio::fs::canonicalize(root.join(&clean))
+    let source_canon = tokio::fs::canonicalize(input.rel_path.join_under(root))
         .await
         .map_err(|e| AppError::detailed(format!("File not found: {e}")))?;
     if !source_canon.starts_with(root_canon) {

@@ -1,5 +1,6 @@
 use crate::app::error::AppError;
 use crate::app::ids::Slug;
+use crate::app::types::RelPath;
 use crate::app::unclassified::helpers::{format_size, plural};
 use crate::app::unclassified::jobs::FolderClassifyJob;
 use crate::app::unclassified::tracker::BatchPhase;
@@ -32,7 +33,7 @@ pub fn FolderClassifyModal(
                     .get()
                     .iter()
                     .map(|e| e.rel_path.clone())
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<RelPath>>(),
             )
         },
         |paths| async move {
@@ -201,7 +202,7 @@ pub fn FolderClassifyModal(
         if sel.is_empty() {
             return;
         }
-        let paths: Vec<String> = sel.iter().map(|e| e.rel_path.clone()).collect();
+        let paths: Vec<RelPath> = sel.iter().map(|e| e.rel_path.clone()).collect();
 
         let dest = match mode.get_untracked() {
             DestinationMode::Existing => {
@@ -321,8 +322,6 @@ fn FolderSetup(
             Some(Err(e)) => view! {
                 <div class="py-4">
                     <ErrorView
-
-
                         error=Signal::derive(move || Some(e.clone()))
                         banner=true
                         heading="Cannot classify"/>

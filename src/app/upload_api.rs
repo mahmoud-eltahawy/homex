@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use server_fn::codec::{MultipartData, MultipartFormData};
 use uuid::Uuid;
 
-use crate::app::error::{AppError, ErrorCode};
+use crate::app::error::AppError;
+#[cfg(feature = "ssr")]
+use crate::app::error::ErrorCode;
+use crate::app::types::JobId;
 
 #[cfg(feature = "ssr")]
 use crate::app::constants::messages;
@@ -14,7 +17,7 @@ use crate::app::error::ErrorContext;
 pub struct UploadResult {
     pub success: bool,
     pub message: String,
-    pub job_id: Option<String>,
+    pub job_id: Option<JobId>,
     pub collection_id: Uuid,
     pub section_slug: String,
 }
@@ -76,12 +79,12 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     }
 
     // ── Async path ─────────────────────────────────────────────────────
-    let job_id = Uuid::new_v4().to_string();
+    let job_id = JobId::new_v4();
     let cancel = state.cancel.child_token();
     {
         let mut jobs = state.jobs.write().await;
         jobs.insert(
-            job_id.clone(),
+            job_id,
             Job {
                 phase: JobPhase::Writing,
                 started_at: std::time::Instant::now(),
@@ -91,20 +94,17 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
     }
 
     let state_bg = state.clone();
-    let job_id_bg = job_id.clone();
     let cancel_bg = cancel.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id_bg), &cancel_bg).await
-        {
+        if let Err(e) = process_upload(payload, &state_bg, kind, Some(&job_id), &cancel_bg).await {
             let phase = if cancel_bg.is_cancelled() {
                 JobPhase::Cancelled
             } else {
                 JobPhase::Failed(e)
             };
-            crate::app::server::convert::job_set_phase(&state_bg.jobs, Some(&job_id_bg), phase)
-                .await;
-            schedule_job_eviction(state_bg.jobs.clone(), job_id_bg);
+            crate::app::server::convert::job_set_phase(&state_bg.jobs, Some(&job_id), phase).await;
+            schedule_job_eviction(state_bg.jobs.clone(), job_id);
         }
     });
 
@@ -118,7 +118,7 @@ pub async fn upload_media(data: MultipartData) -> Result<UploadResult, AppError>
 }
 
 #[server]
-pub async fn poll_conversion(job_id: String) -> Result<ConversionStatus, AppError> {
+pub async fn poll_conversion(job_id: JobId) -> Result<ConversionStatus, AppError> {
     use crate::app::server::AppState;
     use crate::app::server::convert::JobPhase;
 
