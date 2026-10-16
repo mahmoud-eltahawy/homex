@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use leptos::{either::Either, prelude::*};
 use leptos_outcome::ResourceView;
-use leptos_outcome::action_error;
 use leptos_page::RouteError;
 use leptos_router::hooks::use_navigate;
 use uuid::Uuid;
@@ -13,8 +12,9 @@ use leptos_media_player::{MediaItem, WatchPage};
 
 use crate::app::error::AppError;
 use crate::app::ids::Slug;
+use crate::app::mutations::{FieldEditor, Mutation};
 use crate::app::route_params::{use_optional_uuid_param, use_slug_param, use_uuid_param};
-use crate::app::types::{FileName, PosterUrl, TagName, Title};
+use crate::app::types::{FileName, PosterUrl, Title};
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
@@ -22,7 +22,6 @@ use crate::app::{
         patch_collection_description, patch_collection_tags, patch_collection_title,
         patch_item_title, regenerate_collection_poster, upload_collection_poster,
     },
-    common::refetch_on_success,
     detail::{DetailHero, DetailShell, DownloadButton, HeroBadge, HeroMeta},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
@@ -39,155 +38,47 @@ use crate::app::{
 use leptos_outcome::ErrorView;
 use leptos_page::{Page, PageContent};
 
-// ─── Action type aliases ─────────────────────────────────────────────────────
-
-type PatchTitleAction = Action<(Uuid, Title), Result<(), AppError>>;
-type PatchDescriptionAction = Action<(Uuid, String), Result<(), AppError>>;
-type PosterUploadAction = Action<web_sys::FormData, Result<PosterUrl, AppError>>;
-type RegenerateAction = Action<(Slug, Uuid), Result<PosterUrl, AppError>>;
-type RenameItemAction = Action<(Uuid, Option<Title>), Result<(), AppError>>;
-type DeleteItemAction = Action<Uuid, Result<(), AppError>>;
-type TagsAction = Action<(Uuid, Vec<TagName>), Result<(), AppError>>;
-type MoveToIncomingAction = Action<Vec<Uuid>, Result<(), AppError>>;
-
-// ─── Collection actions bundle ───────────────────────────────────────────────
-
-#[derive(Clone, Copy)]
-struct CollectionActions {
-    patch_title: PatchTitleAction,
-    patch_description: PatchDescriptionAction,
-    poster_upload: PosterUploadAction,
-    regenerate: RegenerateAction,
-    rename_item: RenameItemAction,
-    delete_item: DeleteItemAction,
-    move_item: Action<(Uuid, bool), Result<(), AppError>>,
-    tags: TagsAction,
-}
-
-impl CollectionActions {
-    fn new(items: Resource<Result<Vec<Item>, AppError>>) -> Self {
-        let patch_title = Action::new_local(|(id, value): &(Uuid, Title)| {
-            patch_collection_title(*id, value.clone())
-        });
-        let patch_description = Action::new_local(|(id, value): &(Uuid, String)| {
-            patch_collection_description(*id, value.clone())
-        });
-        let poster_upload =
-            Action::new_local(|fd: &web_sys::FormData| upload_collection_poster(fd.clone().into()));
-        let regenerate = Action::new_local(|(slug, id): &(Slug, Uuid)| {
-            regenerate_collection_poster(slug.clone(), *id)
-        });
-        let rename_item =
-            Action::new_local(|(id, t): &(Uuid, Option<Title>)| patch_item_title(*id, t.clone()));
-        let delete_item = Action::new_local(|id: &Uuid| delete_item(*id));
-        let tags = Action::new_local(|(id, t): &(Uuid, Vec<TagName>)| {
-            patch_collection_tags(*id, t.clone())
-        });
-
-        refetch_on_success(rename_item, items);
-        refetch_on_success(delete_item, items);
-
-        let move_item = Action::new_local(|(id, up): &(Uuid, bool)| move_item(*id, *up));
-        refetch_on_success(move_item, items);
-
-        Self {
-            patch_title,
-            patch_description,
-            poster_upload,
-            regenerate,
-            rename_item,
-            delete_item,
-            move_item,
-            tags,
-        }
-    }
-
-    fn rename_callback(self) -> Callback<(Uuid, Option<Title>)> {
-        Callback::new(move |(id, t): (Uuid, Option<Title>)| {
-            let _ = self.rename_item.dispatch((id, t));
-        })
-    }
-
-    fn delete_callback(self) -> Callback<Uuid> {
-        Callback::new(move |id: Uuid| {
-            let _ = self.delete_item.dispatch(id);
-        })
-    }
-
-    fn move_callback(self) -> Callback<(Uuid, bool)> {
-        Callback::new(move |(id, up): (Uuid, bool)| {
-            let _ = self.move_item.dispatch((id, up));
-        })
-    }
-
-    fn patch_title_error(self) -> Signal<Option<AppError>> {
-        action_error(self.patch_title)
-    }
-    fn patch_description_error(self) -> Signal<Option<AppError>> {
-        action_error(self.patch_description)
-    }
-    fn poster_error(self) -> Signal<Option<AppError>> {
-        action_error(self.poster_upload)
-    }
-    fn regenerate_error(self) -> Signal<Option<AppError>> {
-        action_error(self.regenerate)
-    }
-    fn rename_error(self) -> Signal<Option<AppError>> {
-        action_error(self.rename_item)
-    }
-    fn delete_error(self) -> Signal<Option<AppError>> {
-        action_error(self.delete_item)
-    }
-    fn move_error(self) -> Signal<Option<AppError>> {
-        action_error(self.move_item)
-    }
-    fn tags_error(self) -> Signal<Option<AppError>> {
-        action_error(self.tags)
-    }
-}
-
 // ─── Collection edit state ───────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 struct CollectionEditState {
-    title: RwSignal<Title>,
+    title: FieldEditor<String, Title, AppError>,
     description: RwSignal<String>,
     poster: RwSignal<Option<PosterUrl>>,
-    commit_title: Callback<String>,
     commit_desc: Callback<String>,
+    desc_error: Signal<Option<AppError>>,
 }
 
-impl CollectionEditState {
-    fn new(
-        collection: &Collection,
-        patch_title: PatchTitleAction,
-        patch_desc: PatchDescriptionAction,
-    ) -> Self {
-        let collection_id = collection.id;
+fn make_edit_state(
+    collection: &Collection,
+    patch_title: Mutation<(Uuid, Title), (), AppError>,
+    patch_desc: Mutation<(Uuid, Option<String>), (), AppError>,
+) -> CollectionEditState {
+    let collection_id = collection.id;
 
-        let title = RwSignal::new(collection.title.clone());
-        let description = RwSignal::new(collection.description.clone().unwrap_or_default());
-        let poster = RwSignal::new(collection.poster.clone());
+    let title = FieldEditor::parsing(
+        collection.title.clone(),
+        collection_id,
+        |s: String| Title::new(s).ok(),
+        patch_title,
+    );
 
-        let commit_title = Callback::new(move |v: String| {
-            let Ok(t) = Title::new(v) else {
-                return;
-            };
-            title.set(t.clone());
-            let _ = patch_title.dispatch((collection_id, t));
-        });
-        let commit_desc = Callback::new(move |v: String| {
-            description.set(v.clone());
-            let _ = patch_desc.dispatch((collection_id, v));
-        });
+    let description = RwSignal::new(collection.description.clone().unwrap_or_default());
+    let desc_error = patch_desc.error();
+    let commit_desc = Callback::new(move |v: String| {
+        description.set(v.clone());
+        let opt = if v.trim().is_empty() { None } else { Some(v) };
+        patch_desc.dispatch((collection_id, opt));
+    });
 
-        Self {
-            title,
-            description,
-            poster,
-            commit_title,
-            commit_desc,
-        }
+    let poster = RwSignal::new(collection.poster.clone());
+
+    CollectionEditState {
+        title,
+        description,
+        poster,
+        commit_desc,
+        desc_error,
     }
 }
 
@@ -196,10 +87,9 @@ impl CollectionEditState {
 fn use_poster_upload(
     section_slug: Slug,
     collection_id: Uuid,
-    poster: RwSignal<Option<PosterUrl>>,
-    poster_upload: PosterUploadAction,
+    upload: Mutation<web_sys::FormData, PosterUrl, AppError>,
 ) -> Callback<web_sys::File> {
-    let on_file = Callback::new(move |file: web_sys::File| {
+    Callback::new(move |file: web_sys::File| {
         let fd = web_sys::FormData::new().unwrap();
         let form = PosterUploadForm {
             section_slug: section_slug.clone(),
@@ -208,16 +98,8 @@ fn use_poster_upload(
         let json = serde_json::to_string(&form).expect("PosterUploadForm is serializable");
         let _ = fd.append_with_str(FORM_FIELD, &json);
         let _ = fd.append_with_blob_and_filename(POSTER_FIELD, &file, &file.name());
-        poster_upload.dispatch(fd);
-    });
-
-    Effect::new(move |_| {
-        if let Some(Ok(url)) = poster_upload.value().get() {
-            poster.set(Some(url));
-        }
-    });
-
-    on_file
+        upload.dispatch(fd);
+    })
 }
 
 // ─── Placeholder & adapter builders ──────────────────────────────────────────
@@ -352,15 +234,32 @@ fn CollectionContent(
     let edit_on = use_edit_mode();
     let organizing = RwSignal::new(false);
 
-    let actions = CollectionActions::new(items);
-    let edit =
-        CollectionEditState::new(&collection, actions.patch_title, actions.patch_description);
+    // ── Edit state ──
+    let patch_title = Mutation::for_2args(patch_collection_title);
+    let patch_desc = Mutation::for_2args(patch_collection_description);
+    let edit = make_edit_state(&collection, patch_title, patch_desc);
 
-    let tags_signal = RwSignal::new(collection.tags.clone());
-    let on_tags_commit = Callback::new(move |names: Vec<TagName>| {
-        let _ = actions.tags.dispatch((collection_id, names));
+    // ── Poster mutations — write into `edit.poster` on success ──
+    let poster_upload =
+        Mutation::new(|fd: &web_sys::FormData| upload_collection_poster(fd.clone().into()))
+            .on_success({
+                let poster = edit.poster;
+                move |url| poster.set(Some(url))
+            });
+    let regenerate = Mutation::for_2args(regenerate_collection_poster).on_success({
+        let poster = edit.poster;
+        move |url| poster.set(Some(url))
     });
 
+    // ── Item mutations — invalidate `items` on success ──
+    let rename_item = Mutation::for_2args(patch_item_title).invalidates(items);
+    let delete_item = Mutation::for_1arg(delete_item).invalidates(items);
+    let move_item = Mutation::for_2args(move_item).invalidates(items);
+
+    // ── Tags — no invalidation; TagEditor holds the local list ──
+    let tags = Mutation::for_2args(patch_collection_tags);
+
+    // ── Upload (append items) — refetch items when a job finishes ──
     let upload = UploadJob::new();
     Effect::new(move |_| {
         if upload.done_tick.get() > 0 {
@@ -368,36 +267,32 @@ fn CollectionContent(
         }
     });
 
+    let tags_signal = RwSignal::new(collection.tags.clone());
+    let on_tags_commit = tags.callback_with_id(collection_id);
+
     let slug_for_poster = section_slug.clone();
     let slug_for_regen = section_slug.clone();
     let slug_for_picker = section_slug.clone();
     let slug_for_append = section_slug;
 
-    let on_poster_file = use_poster_upload(
-        slug_for_poster,
-        collection_id,
-        edit.poster,
-        actions.poster_upload,
-    );
+    let on_poster_file = use_poster_upload(slug_for_poster, collection_id, poster_upload);
 
     let on_regenerate = Callback::new(move |_: ()| {
-        actions
-            .regenerate
-            .dispatch((slug_for_regen.clone(), collection_id));
+        regenerate.dispatch((slug_for_regen.clone(), collection_id));
     });
-    Effect::new(move |_| {
-        if let Some(Ok(url)) = actions.regenerate.value().get() {
-            edit.poster.set(Some(url));
-        }
-    });
-    let regenerating = actions.regenerate.pending();
 
     let audio_picker = is_audio.then_some(on_poster_file);
     let video_regen = (!is_audio).then_some(on_regenerate);
 
-    let on_rename = actions.rename_callback();
-    let on_delete = actions.delete_callback();
-    let on_move = actions.move_callback();
+    let on_rename: Callback<(Uuid, Option<Title>)> = Callback::new(move |(id, t)| {
+        rename_item.dispatch((id, t));
+    });
+    let on_delete: Callback<Uuid> = Callback::new(move |id| {
+        delete_item.dispatch(id);
+    });
+    let on_move: Callback<(Uuid, bool)> = Callback::new(move |(id, up)| {
+        move_item.dispatch((id, up));
+    });
 
     let poster_for_shell = edit.poster.get_untracked();
     let placeholder = make_poster_placeholder(is_audio);
@@ -405,17 +300,19 @@ fn CollectionContent(
     let badge_label = section.badge_label();
     let kind = section.media_kind;
 
-    let patch_title_error = actions.patch_title_error();
-    let patch_desc_error = actions.patch_description_error();
-    let poster_error = actions.poster_error();
-    let regenerate_error = actions.regenerate_error();
-    let tags_error = actions.tags_error();
-    let rename_error = actions.rename_error();
-    let delete_error = actions.delete_error();
-    let move_error = actions.move_error();
+    let title_error = edit.title.error();
+    let desc_error = edit.desc_error;
+    let poster_error = poster_upload.error();
+    let regenerate_error = regenerate.error();
+    let tags_error = tags.error();
+    let rename_error = rename_item.error();
+    let delete_error = delete_item.error();
+    let move_error = move_item.error();
+
+    let regenerating = regenerate.pending();
 
     let playlist_adapter = Arc::new(make_playlist_adapter(
-        edit.title.get_untracked(),
+        edit.title.value().get_untracked(),
         edit.poster.get_untracked(),
         is_audio,
         is_series,
@@ -435,7 +332,7 @@ fn CollectionContent(
                     input_id=format!("poster-collection-{collection_id}")
                     on_file=audio_picker
                     on_regenerate=video_regen
-                    regenerating=Signal::derive(move || regenerating.get())
+                    regenerating=regenerating
                 />
             }>
                 <HeroBadge label=badge_label.to_string() icon=icon/>
@@ -464,8 +361,8 @@ fn CollectionContent(
                     </div>
                 </Show>
                 <EditableText
-                    value=Signal::derive(move || edit.title.get().to_string())
-                    on_commit=edit.commit_title
+                    value=edit.title.text()
+                    on_commit=edit.title.on_commit()
                     class="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight mb-2 text-white"
                 />
                 <HeroMeta>
@@ -491,8 +388,8 @@ fn CollectionContent(
                     <TagEditor tags=tags_signal on_commit=on_tags_commit/>
                 </div>
                 <div class="mt-2 max-w-2xl space-y-1">
-                    <ErrorView error=patch_title_error/>
-                    <ErrorView error=patch_desc_error/>
+                    <ErrorView error=title_error/>
+                    <ErrorView error=desc_error/>
                     <ErrorView error=tags_error/>
                     <ErrorView error=poster_error/>
                     <ErrorView error=regenerate_error/>
@@ -915,9 +812,7 @@ fn MoveCollectionPicker(
     let sections: Resource<Result<Vec<Section>, AppError>> = expect_context();
     let navigate = use_navigate();
 
-    let action =
-        Action::new_local(|(id, to): &(Uuid, Slug)| move_collection_to_section(*id, to.clone()));
-
+    let action = Mutation::for_2args(move_collection_to_section);
     let destination: RwSignal<Option<Slug>> = RwSignal::new(None);
 
     let current_for_options = current_slug.clone();
@@ -966,7 +861,7 @@ fn MoveCollectionPicker(
                         <option value=s.slug.to_string()>{s.title.to_string()}</option>
                     </For>
                 </select>
-                <ErrorView error=action_error(action)/>
+                <ErrorView error=action.error()/>
             </div>
         </Show>
     }
@@ -987,28 +882,26 @@ fn OrganizeItemsPanel(
     let selected: RwSignal<Vec<Uuid>> = RwSignal::new(Vec::new());
     let destination_id: RwSignal<Option<Uuid>> = RwSignal::new(None);
 
-    let move_action = Action::new_local(|(ids, to): &(Vec<Uuid>, Uuid)| {
-        move_items_to_collection(ids.clone(), *to)
-    });
+    let move_action = Mutation::for_2args(move_items_to_collection).invalidates(items);
+    let to_incoming: Mutation<Vec<Uuid>, (), AppError> = Mutation::for_1arg(move_items_to_incoming);
 
-    Effect::new(move |_| {
-        if matches!(move_action.value().get(), Some(Ok(()))) {
-            items.refetch();
+    let on_close_after_refetch = {
+        move || {
             selected.set(Vec::new());
             destination_id.set(None);
             on_close.run(());
         }
-    });
+    };
 
-    let to_incoming: MoveToIncomingAction =
-        Action::new_local(|ids: &Vec<Uuid>| move_items_to_incoming(ids.clone()));
+    Effect::new(move |_| {
+        if matches!(move_action.value().get(), Some(Ok(()))) {
+            on_close_after_refetch();
+        }
+    });
 
     Effect::new(move |_| {
         if matches!(to_incoming.value().get(), Some(Ok(()))) {
-            items.refetch();
-            selected.set(Vec::new());
-            destination_id.set(None);
-            on_close.run(());
+            on_close_after_refetch();
         }
     });
 
@@ -1191,8 +1084,8 @@ fn OrganizeItemsPanel(
                     }}
                 </button>
 
-                <ErrorView error=action_error(move_action)/>
-                <ErrorView error=action_error(to_incoming)/>
+                <ErrorView error=move_action.error()/>
+                <ErrorView error=to_incoming.error()/>
             </div>
         </div>
     }

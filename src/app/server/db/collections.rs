@@ -206,7 +206,7 @@ pub async fn update_collection_title(
 pub async fn update_collection_description(
     pool: &SqlitePool,
     id: Uuid,
-    value: &str,
+    value: Option<&str>,
 ) -> sqlx::Result<()> {
     let kind = kind_of(pool, id).await?;
     let Some(kind) = kind else {

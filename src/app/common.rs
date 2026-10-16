@@ -5,8 +5,6 @@ use crate::app::ids::Slug;
 use crate::app::model::{Collection, SearchQuery};
 use crate::app::tags::TagList;
 use leptos::prelude::*;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 
 #[component]
 pub fn CardsLoading() -> impl IntoView {
@@ -86,19 +84,6 @@ pub fn EmptyState(#[prop(into)] label: String) -> impl IntoView {
             <span class="text-white/40 text-sm">{label}</span>
         </div>
     }
-}
-
-pub fn refetch_on_success<V, A, R>(action: Action<A, Result<V, AppError>>, resource: Resource<R>)
-where
-    A: Send + Sync + 'static + Clone,
-    V: Send + Sync + 'static + Clone,
-    R: Serialize + DeserializeOwned + Send + Sync + 'static,
-{
-    Effect::new(move |_| {
-        if action.value().get().is_some_and(|r| r.is_ok()) {
-            resource.refetch();
-        }
-    });
 }
 
 pub type CollectionPage = Resource<Result<Vec<Collection>, AppError>>;

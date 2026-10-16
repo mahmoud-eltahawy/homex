@@ -281,7 +281,7 @@ pub(super) async fn insert(
 pub(super) async fn update_description(
     pool: &SqlitePool,
     id: Uuid,
-    value: &str,
+    value: Option<&str>,
 ) -> sqlx::Result<()> {
     sqlx::query!(
         r#"UPDATE video_collections SET description = ? WHERE id = ?"#,

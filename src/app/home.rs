@@ -2,15 +2,16 @@ use std::convert::Infallible;
 
 use leptos::either::Either;
 use leptos::prelude::*;
-use leptos_outcome::{ErrorView, ResourceView, action_error};
+use leptos_outcome::{ErrorView, ResourceView};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
+use crate::app::mutations::{FieldEditor, Mutation};
 use crate::app::types::{TagName, Title};
 use crate::app::{
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
-        collections_paginated, refetch_on_success,
+        collections_paginated,
     },
     error::AppError,
     icons::{DeleteIcon, ViewAllIcon, icon_for},
@@ -177,43 +178,38 @@ fn SectionTeaser(
     }
 }
 
+// ─── Section header ─────────────────────────────────────────────────────────
+//
+// The three operations a section supports — rename, delete, replace tags —
+// are each one `Mutation`. Rename is wrapped in a `FieldEditor` so the
+// editable title carries its own value, commit, and error.
+
 #[derive(Clone, Copy)]
 struct SectionHeaderState {
-    title: RwSignal<Title>,
-    commit_title: Callback<String>,
-    rename: Action<(Uuid, Title), Result<(), AppError>>,
-    delete_action: Action<Uuid, Result<(), AppError>>,
-    tags_action: Action<(Uuid, Vec<TagName>), Result<(), AppError>>,
+    title: FieldEditor<String, Title, AppError>,
+    delete: Mutation<Uuid, (), AppError>,
+    tags: Mutation<(Uuid, Vec<TagName>), (), AppError>,
 }
 
 fn use_section_header_state(
     section: &Section,
     sections_resource: Resource<Result<Vec<Section>, AppError>>,
 ) -> SectionHeaderState {
-    let id = section.id;
-    let title = RwSignal::new(section.title.clone());
+    let rename = Mutation::for_2args(patch_section_title).invalidates(sections_resource);
+    let delete = Mutation::for_1arg(delete_section).invalidates(sections_resource);
+    let tags = Mutation::for_2args(patch_section_tags);
 
-    let rename = Action::new_local(|(id, t): &(Uuid, Title)| patch_section_title(*id, t.clone()));
-    let delete_action = Action::new_local(|id: &Uuid| delete_section(*id));
-    let tags_action = Action::new_local(|(id, tags): &(Uuid, Vec<TagName>)| {
-        patch_section_tags(*id, tags.clone())
-    });
-
-    refetch_on_success(rename, sections_resource);
-    refetch_on_success(delete_action, sections_resource);
-
-    let commit_title = Callback::new(move |v: String| {
-        let Ok(t) = Title::new(v) else { return };
-        title.set(t.clone());
-        let _ = rename.dispatch((id, t));
-    });
+    let title = FieldEditor::parsing(
+        section.title.clone(),
+        section.id,
+        |s: String| Title::new(s).ok(),
+        rename,
+    );
 
     SectionHeaderState {
         title,
-        commit_title,
-        rename,
-        delete_action,
-        tags_action,
+        delete,
+        tags,
     }
 }
 
@@ -235,17 +231,14 @@ fn SectionHeader(
 
     let tags_signal = RwSignal::new(section.tags.clone());
 
-    let rename_error = action_error(state.rename);
-    let delete_error = action_error(state.delete_action);
-    let tags_error = action_error(state.tags_action);
-
-    let on_delete = Callback::new(move |_| {
-        let _ = state.delete_action.dispatch(id);
-    });
-
+    let on_delete = Callback::new(move |_: ()| state.delete.dispatch(id));
     let on_tags_commit = Callback::new(move |names: Vec<TagName>| {
-        let _ = state.tags_action.dispatch((id, names));
+        state.tags.dispatch((id, names));
     });
+
+    let title_error = state.title.error();
+    let delete_error = state.delete.error();
+    let tags_error = state.tags.error();
 
     view! {
         <div class="mb-6">
@@ -265,7 +258,6 @@ fn SectionHeader(
                     >
                         <SectionHeaderEditMode
                             title=state.title
-                            on_commit=state.commit_title
                             count
                             kind
                             nested
@@ -281,12 +273,12 @@ fn SectionHeader(
                 />
             </div>
             <Show when=move || {
-                rename_error.get().is_some()
+                title_error.get().is_some()
                     || delete_error.get().is_some()
                     || tags_error.get().is_some()
             }>
                 <div class="mt-2 flex flex-col items-end gap-1">
-                    <ErrorView error=rename_error/>
+                    <ErrorView error=title_error/>
                     <ErrorView error=delete_error/>
                     <ErrorView error=tags_error/>
                 </div>
@@ -298,7 +290,7 @@ fn SectionHeader(
 #[component]
 fn SectionHeaderViewMode(
     #[prop(into)] href: String,
-    title: RwSignal<Title>,
+    title: FieldEditor<String, Title, AppError>,
     count: usize,
     kind: MediaKind,
     nested: bool,
@@ -310,7 +302,7 @@ fn SectionHeaderViewMode(
         >
             <span class="flex items-center shrink-0">{icon_for(kind, nested)}</span>
             <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
-                {move || title.get().to_string()}
+                {move || title.value().get().to_string()}
             </span>
             <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
                 {count}
@@ -321,18 +313,17 @@ fn SectionHeaderViewMode(
 
 #[component]
 fn SectionHeaderEditMode(
-    title: RwSignal<Title>,
+    title: FieldEditor<String, Title, AppError>,
     count: usize,
     kind: MediaKind,
-    on_commit: Callback<String>,
     nested: bool,
 ) -> impl IntoView {
     view! {
         <div class="flex items-center gap-3 min-w-0">
             <span class="flex items-center shrink-0">{icon_for(kind, nested)}</span>
             <EditableText
-                value=Signal::derive(move || title.get().to_string())
-                on_commit=on_commit
+                value=title.text()
+                on_commit=title.on_commit()
                 class="text-lg font-bold text-white truncate"
             />
             <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
@@ -408,13 +399,15 @@ fn CollectionStrip(collections: Vec<Collection>) -> impl IntoView {
     Either::Right(view! { <CollectionGrid collections=collections/> })
 }
 
+// ─── New section form ───────────────────────────────────────────────────────
+
 #[derive(Clone, Copy)]
 struct NewSectionFormState {
     title: RwSignal<String>,
     kind: RwSignal<MediaKind>,
     nested: RwSignal<bool>,
     client_error: RwSignal<Option<String>>,
-    create: Action<(Title, MediaKind, bool), Result<Uuid, AppError>>,
+    create: Mutation<(Title, MediaKind, bool), Uuid, AppError>,
 }
 
 fn use_new_section_form(
@@ -426,9 +419,8 @@ fn use_new_section_form(
     let client_error = RwSignal::new(None::<String>);
 
     let create =
-        Action::new_local(|(t, k, n): &(Title, MediaKind, bool)| create_section(t.clone(), *k, *n));
-
-    refetch_on_success(create, sections_resource);
+        Mutation::new(|(t, k, n): &(Title, MediaKind, bool)| create_section(t.clone(), *k, *n))
+            .invalidates(sections_resource);
 
     Effect::new(move |_| {
         if matches!(create.value().get(), Some(Ok(_))) {
@@ -449,17 +441,13 @@ fn use_new_section_form(
 #[component]
 fn NewSectionForm(sections_resource: Resource<Result<Vec<Section>, AppError>>) -> impl IntoView {
     let state = use_new_section_form(sections_resource);
-    let server_error = action_error(state.create);
+    let server_error = state.create.error();
 
     let submit = move |ev: web_sys::SubmitEvent| {
         ev.prevent_default();
-        let title = Title::new(state.title.get_untracked().trim().to_string());
-        let title = match title {
-            Ok(t) => t,
-            Err(err) => {
-                state.client_error.set(Some(err.to_string()));
-                return;
-            }
+        let Ok(title) = Title::new(state.title.get_untracked()) else {
+            state.client_error.set(Some("Name is required".into()));
+            return;
         };
         state.client_error.set(None);
         state.create.dispatch((

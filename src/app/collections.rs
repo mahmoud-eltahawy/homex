@@ -78,10 +78,13 @@ pub async fn patch_collection_title(id: Uuid, title: Title) -> Result<(), AppErr
 }
 
 #[server]
-pub async fn patch_collection_description(id: Uuid, description: String) -> Result<(), AppError> {
+pub async fn patch_collection_description(
+    id: Uuid,
+    description: Option<String>,
+) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    db::update_collection_description(&state.db, id, &description)
+    db::update_collection_description(&state.db, id, description.as_deref())
         .await
         .context("patch collection description")?;
     Ok(())

@@ -99,9 +99,9 @@ impl MediaKind {
             "ape",
         ];
         let ext = ext.as_str();
-        if VIDEO_EXTS.iter().any(|e| *e == ext) {
+        if VIDEO_EXTS.contains(&ext) {
             Some(Self::Video)
-        } else if AUDIO_EXTS.iter().any(|e| *e == ext) {
+        } else if AUDIO_EXTS.contains(&ext) {
             Some(Self::Audio)
         } else {
             None
