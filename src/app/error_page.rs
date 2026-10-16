@@ -10,7 +10,7 @@ impl PageContent<Infallible> for ErrorContent {
         Ok(Self)
     }
 
-    fn render(self) -> AnyView {
+    fn render(self) -> impl IntoView {
         view! {
             <div class="min-h-[70vh] flex items-center justify-center px-4">
                 <div class="max-w-md text-center space-y-4">
@@ -31,7 +31,6 @@ impl PageContent<Infallible> for ErrorContent {
                 </div>
             </div>
         }
-        .into_any()
     }
 }
 

@@ -280,7 +280,7 @@ impl PageContent<SlugError> for CollectionDetailContent {
         })
     }
 
-    fn render(self) -> AnyView {
+    fn render(self) -> impl IntoView {
         let Self {
             section,
             collection,
@@ -296,7 +296,6 @@ impl PageContent<SlugError> for CollectionDetailContent {
         view! {
             <ResourceView resource=section view_fn=CollectionDetailBody adapter=adapter/>
         }
-        .into_any()
     }
 }
 

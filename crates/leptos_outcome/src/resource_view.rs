@@ -70,11 +70,11 @@ where
     let core = move || {
         let res = resource.get()?;
         Some(match res {
-            Ok(val) => view_fn(adapter(val)).into_any(),
+            Ok(val) => Either::Right(view_fn(adapter(val))),
             Err(e) => {
                 let err_signal = Signal::derive(move || Some(e.clone()));
                 let retry = Callback::new(move |_| resource.refetch());
-                view! {
+                Either::Left(view! {
                     <div class="py-8 text-center">
                         <ErrorView
                             error=err_signal
@@ -82,8 +82,7 @@ where
                             banner=true
                         />
                     </div>
-                }
-                .into_any()
+                })
             }
         })
     };
@@ -91,8 +90,8 @@ where
     let fallback_closure = {
         let fallback = fallback.clone();
         move || match fallback.clone() {
-            Some(f) => f.run(),
-            None => view! { <LoadingIcon/> }.into_any(),
+            Some(f) => Either::Right(f.run()),
+            None => Either::Left(view! { <LoadingIcon/> }),
         }
     };
 

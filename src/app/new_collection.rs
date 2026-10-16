@@ -27,7 +27,7 @@ impl PageContent<SlugError> for NewCollectionContent {
         Ok(Self { slug, sections })
     }
 
-    fn render(self) -> AnyView {
+    fn render(self) -> impl IntoView {
         let Self { slug, sections } = self;
         let navigate = use_navigate();
 
@@ -279,7 +279,6 @@ impl PageContent<SlugError> for NewCollectionContent {
                 }}
             </div>
         }
-        .into_any()
     }
 }
 

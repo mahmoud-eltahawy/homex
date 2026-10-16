@@ -44,7 +44,7 @@ impl PageContent<Infallible> for LoginContent {
         Ok(Self)
     }
 
-    fn render(self) -> AnyView {
+    fn render(self) -> impl IntoView {
         let token = RwSignal::new(String::new());
         let navigate = use_navigate();
         let submit = Action::new_local(|t: &String| login(t.clone()));
@@ -100,7 +100,6 @@ impl PageContent<Infallible> for LoginContent {
                 </form>
             </div>
         }
-        .into_any()
     }
 }
 

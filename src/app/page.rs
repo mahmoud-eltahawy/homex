@@ -14,7 +14,7 @@
 //!   `Page<T, std::convert::Infallible>`. The `Bad` variant is unreachable
 //!   and `load()` always produces `Good`.
 
-use leptos::prelude::*;
+use leptos::{either::Either, prelude::*};
 use leptos_router::{LazyRoute, components::Redirect};
 
 pub enum Page<T, E> {
@@ -31,7 +31,7 @@ pub type InfalliblePage<T> = Page<T, std::convert::Infallible>;
 
 pub trait PageContent<E>: Sized + Send + Sync + 'static {
     fn load() -> Result<Self, E>;
-    fn render(self) -> AnyView;
+    fn render(self) -> impl IntoView;
 }
 
 impl<T, E> Page<T, E>
@@ -45,10 +45,10 @@ where
         }
     }
 
-    pub fn into_view(self) -> AnyView {
+    pub fn into_view(self) -> impl IntoView {
         match self {
-            Page::Good(body) => body.render(),
-            Page::Bad(_) => view! { <Redirect path="/error"/> }.into_any(),
+            Page::Good(body) => Either::Left(body.render()),
+            Page::Bad(_) => Either::Right(view! { <Redirect path="/error"/> }),
         }
     }
 }
@@ -62,6 +62,6 @@ where
         Page::load()
     }
     async fn view(this: Self) -> AnyView {
-        this.into_view()
+        this.into_view().into_any()
     }
 }

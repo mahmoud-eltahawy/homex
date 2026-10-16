@@ -1152,7 +1152,7 @@ impl PageContent<Infallible> for UnclassifiedContent {
         })
     }
 
-    fn render(self) -> AnyView {
+    fn render(self) -> impl IntoView {
         let navigate = use_navigate();
 
         let on_navigate = Callback::new(move |path: String| {
@@ -1222,7 +1222,6 @@ impl PageContent<Infallible> for UnclassifiedContent {
                 <ResourceView resource=self.entries view_fn=render_entry_list adapter=adapter/>
             </div>
         }
-        .into_any()
     }
 }
 

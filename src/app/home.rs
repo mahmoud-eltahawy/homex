@@ -39,7 +39,7 @@ impl PageContent<Infallible> for HomeContent {
         })
     }
 
-    fn render(self) -> AnyView {
+    fn render(self) -> impl IntoView {
         let search_query = self.search_query;
         let sections = self.sections;
 
@@ -57,7 +57,6 @@ impl PageContent<Infallible> for HomeContent {
                 </div>
             </div>
         }
-        .into_any()
     }
 }
 

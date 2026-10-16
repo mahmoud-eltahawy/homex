@@ -58,7 +58,7 @@ impl PageContent<SlugError> for SectionListingContent {
         })
     }
 
-    fn render(self) -> AnyView {
+    fn render(self) -> impl IntoView {
         let Self {
             section,
             collections,
@@ -77,7 +77,6 @@ impl PageContent<SlugError> for SectionListingContent {
         view! {
             <ResourceView resource=section view_fn=SectionListingBody adapter=adapter/>
         }
-        .into_any()
     }
 }
 
