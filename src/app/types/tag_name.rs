@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn sorting_is_case_insensitive() {
-        let mut v = vec![
+        let mut v = [
             TagName::new("zebra").unwrap(),
             TagName::new("APPLE").unwrap(),
             TagName::new("Mango").unwrap(),

@@ -28,7 +28,9 @@ use crate::app::ids::Slug;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
 use crate::app::model::MediaKind;
-use crate::app::types::{FileExt, JobId, RelPath};
+#[cfg(feature = "ssr")]
+use crate::app::types::FileExt;
+use crate::app::types::{JobId, RelPath};
 use crate::app::upload_api::ConversionStatus;
 use leptos_page::{InfalliblePage, PageContent};
 

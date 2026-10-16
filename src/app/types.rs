@@ -23,9 +23,6 @@
 //! 3. **`FromStr`** for the domain type's own parse path.
 //! 4. **Validating `Deserialize`.** Every value crossing the wire runs
 //!    through the constructor.
-
-#![allow(dead_code)]
-
 mod file_ext;
 mod job_id;
 mod poster_url;

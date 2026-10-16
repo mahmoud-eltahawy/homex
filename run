@@ -14,8 +14,9 @@ $env.HOMEX_UNCLASSIFIED_DIR = "/home/eltahawy/Downloads"
 $env.DATABASE_URL = "sqlite://Downloads/homex.db"
 # $env.SQLX_OFFLINE = "true"
 
-sqlx database create
-sqlx migrate run
+# sqlx database create
+# sqlx migrate run
+# cargo sqlx prepare -- --features ssr
 
 cargo leptos watch --split --hot-reload
 
