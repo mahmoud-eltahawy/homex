@@ -1,8 +1,7 @@
 use crate::app::constants::routes;
 use crate::app::error::AppError;
-use crate::app::ids::{Slug, SlugError};
+use crate::app::ids::Slug;
 use crate::app::model::{MediaKind, Section, Tag};
-use crate::app::page::{Page, PageContent};
 use crate::app::route_params::use_slug_param;
 use crate::app::tags::TagEditor;
 use crate::app::upload_job::{UploadJob, UploadProgress};
@@ -12,6 +11,7 @@ use crate::app::upload_types::{
 };
 use leptos::prelude::*;
 use leptos_outcome::ErrorView;
+use leptos_page::{Page, PageContent, RouteError};
 use leptos_router::hooks::use_navigate;
 use uuid::Uuid;
 
@@ -20,8 +20,8 @@ pub struct NewCollectionContent {
     sections: Resource<Result<Vec<Section>, AppError>>,
 }
 
-impl PageContent<SlugError> for NewCollectionContent {
-    fn load() -> Result<Self, SlugError> {
+impl PageContent<RouteError> for NewCollectionContent {
+    fn load() -> Result<Self, RouteError> {
         let slug = use_slug_param("slug")?;
         let sections: Resource<Result<Vec<Section>, AppError>> = expect_context();
         Ok(Self { slug, sections })
@@ -282,7 +282,7 @@ impl PageContent<SlugError> for NewCollectionContent {
     }
 }
 
-pub type NewCollectionPage = Page<NewCollectionContent, SlugError>;
+pub type NewCollectionPage = Page<NewCollectionContent, RouteError>;
 
 fn file_stem(name: &str) -> String {
     name.rsplit_once('.')

@@ -4,10 +4,9 @@ use crate::app::{
         collections_paginated,
     },
     error::AppError,
-    ids::{Slug, SlugError},
+    ids::Slug,
     inline_edit::use_edit_mode,
     model::{Collection, Section},
-    page::{Page, PageContent},
     pagination::{PaginationControls, PaginationControlsProps},
     route_params::use_slug_param,
     search::SearchBar,
@@ -15,6 +14,7 @@ use crate::app::{
 };
 use leptos::prelude::*;
 use leptos_outcome::ResourceView;
+use leptos_page::{Page, PageContent, RouteError};
 use leptos_router::hooks::use_navigate;
 
 const LISTING_PAGE_SIZE: usize = 18;
@@ -27,8 +27,8 @@ pub struct SectionListingContent {
     search_query: RwSignal<Option<String>>,
 }
 
-impl PageContent<SlugError> for SectionListingContent {
-    fn load() -> Result<Self, SlugError> {
+impl PageContent<RouteError> for SectionListingContent {
+    fn load() -> Result<Self, RouteError> {
         let slug = use_slug_param("slug")?;
 
         let offset = RwSignal::new(0);
@@ -80,7 +80,7 @@ impl PageContent<SlugError> for SectionListingContent {
     }
 }
 
-pub type SectionListingPage = Page<SectionListingContent, SlugError>;
+pub type SectionListingPage = Page<SectionListingContent, RouteError>;
 
 #[component]
 fn SectionListingBody(

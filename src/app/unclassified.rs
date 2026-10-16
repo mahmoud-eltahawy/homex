@@ -26,8 +26,8 @@ use crate::app::ids::Slug;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
 use crate::app::model::MediaKind;
-use crate::app::page::{InfalliblePage, PageContent};
 use crate::app::upload_api::ConversionStatus;
+use leptos_page::{InfalliblePage, PageContent};
 
 use components::breadcrumb::Breadcrumb;
 use components::file_modal::ClassifyModal;

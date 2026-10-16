@@ -26,7 +26,6 @@ mod layout;
 mod login;
 mod model;
 mod new_collection;
-mod page;
 mod pagination;
 mod route_params;
 mod search;

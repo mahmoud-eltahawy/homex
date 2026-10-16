@@ -1005,6 +1005,7 @@ dependencies = [
  "leptos_media_player",
  "leptos_meta",
  "leptos_outcome",
+ "leptos_page",
  "leptos_router",
  "multer",
  "serde",
@@ -1571,6 +1572,15 @@ dependencies = [
  "leptos",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "leptos_page"
+version = "0.1.0"
+dependencies = [
+ "leptos",
+ "leptos_router",
+ "uuid",
 ]
 
 [[package]]

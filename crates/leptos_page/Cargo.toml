@@ -1,0 +1,15 @@
+[package]
+name = "leptos_page"
+version.workspace = true
+edition.workspace = true
+description = "Page-as-a-value routing for Leptos: eager parameter parsing, typed page contents, uniform failure handling."
+readme = "README.md"
+keywords = ["leptos", "router", "page", "routing"]
+
+[dependencies]
+leptos = { workspace = true }
+leptos_router = { workspace = true }
+uuid = { workspace = true }
+
+[package.metadata.docs.rs]
+targets = ["wasm32-unknown-unknown"]

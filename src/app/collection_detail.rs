@@ -4,6 +4,7 @@ use std::sync::Arc;
 use leptos::{either::Either, prelude::*};
 use leptos_outcome::ResourceView;
 use leptos_outcome::action_error;
+use leptos_page::RouteError;
 use leptos_router::hooks::use_navigate;
 use uuid::Uuid;
 use web_sys::wasm_bindgen::JsCast;
@@ -11,8 +12,7 @@ use web_sys::wasm_bindgen::JsCast;
 use leptos_media_player::{MediaItem, WatchPage};
 
 use crate::app::error::AppError;
-use crate::app::ids::{Slug, SlugError};
-use crate::app::page::{Page, PageContent};
+use crate::app::ids::Slug;
 use crate::app::route_params::{use_optional_uuid_param, use_slug_param, use_uuid_param};
 use crate::app::{
     collections::{
@@ -36,6 +36,7 @@ use crate::app::{
     },
 };
 use leptos_outcome::ErrorView;
+use leptos_page::{Page, PageContent};
 
 // ─── Action type aliases ──────────────────────────────────────────────────
 
@@ -252,11 +253,11 @@ pub struct CollectionDetailContent {
     initial_item_id: Option<Uuid>,
 }
 
-impl PageContent<SlugError> for CollectionDetailContent {
-    fn load() -> Result<Self, SlugError> {
+impl PageContent<RouteError> for CollectionDetailContent {
+    fn load() -> Result<Self, RouteError> {
         let slug = use_slug_param("slug")?;
-        let id = use_uuid_param("id")();
-        let initial_item_id = use_optional_uuid_param("item_id")();
+        let id = use_uuid_param("id")?;
+        let initial_item_id = use_optional_uuid_param("item_id")?;
 
         let slug_for_section = slug.clone();
         let section = Resource::new(
@@ -299,7 +300,7 @@ impl PageContent<SlugError> for CollectionDetailContent {
     }
 }
 
-pub type CollectionDetailPage = Page<CollectionDetailContent, SlugError>;
+pub type CollectionDetailPage = Page<CollectionDetailContent, RouteError>;
 
 // ─── Body / hero / playlist (unchanged) ───────────────────────────────────
 

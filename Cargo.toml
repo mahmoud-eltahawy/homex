@@ -3,7 +3,7 @@ members = [
     ".",
     "crates/leptos_media_player",
     "crates/leptos_outcome",
-    "crates/icons",
+    "crates/icons", "crates/leptos_page",
 ]
 resolver = "3"
 
@@ -31,6 +31,7 @@ uuid       = "1"
 icons               = { path = "crates/icons" }
 leptos_media_player = { path = "crates/leptos_media_player" }
 leptos_outcome      = { path = "crates/leptos_outcome" }
+leptos_page         = { path = "crates/leptos_page" }
 
 [package]
 name              = "homex"
@@ -60,6 +61,7 @@ web-sys = { workspace = true, features = [
 icons               = { workspace = true }
 leptos_media_player = { workspace = true }
 leptos_outcome      = { workspace = true }
+leptos_page         = { workspace = true }
 
 # ── Everything else, unchanged ────────────────────────────────────────────
 axum                     = { version = "0.8.0", optional = true }

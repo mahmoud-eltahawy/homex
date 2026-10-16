@@ -6,7 +6,7 @@ use leptos_outcome::action_error;
 use leptos_router::hooks::use_navigate;
 
 use crate::app::error::AppError;
-use crate::app::page::{InfalliblePage, PageContent};
+use leptos_page::{InfalliblePage, PageContent};
 
 #[server(endpoint = "login")]
 pub async fn login(token: String) -> Result<(), AppError> {

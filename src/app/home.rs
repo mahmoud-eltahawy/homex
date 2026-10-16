@@ -6,7 +6,6 @@ use leptos_outcome::{ErrorView, ResourceView, action_error};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
-use crate::app::page::{InfalliblePage, PageContent};
 use crate::app::{
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
@@ -23,6 +22,7 @@ use crate::app::{
     },
     tags::TagEditor,
 };
+use leptos_page::{InfalliblePage, PageContent};
 
 const MEDIA_LIST_SIZE: usize = 6;
 
