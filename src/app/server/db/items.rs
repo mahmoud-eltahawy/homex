@@ -5,14 +5,14 @@ use uuid::Uuid;
 
 use super::collections::decrement_or_delete;
 use super::files::purge_orphan_files;
-use crate::app::model::Item;
-use crate::app::types::{PosterUrl, RelPath};
+use crate::app::model::{Item, ItemRow};
+use crate::app::types::{PosterUrl, RelPath, Title};
 
-// ─── Item queries ─────────────────────────────────────────────────────────
+// ─── Item queries ────────────────────────────────────────────────────────────
 
 pub async fn fetch_items(pool: &SqlitePool, collection_id: Uuid) -> sqlx::Result<Vec<Item>> {
-    sqlx::query_as!(
-        Item,
+    let rows = sqlx::query_as!(
+        ItemRow,
         r#"SELECT id            AS "id!: Uuid",
                   collection_id AS "collection_id!: Uuid",
                   number        AS "number!: i64",
@@ -27,27 +27,29 @@ pub async fn fetch_items(pool: &SqlitePool, collection_id: Uuid) -> sqlx::Result
         collection_id,
     )
     .fetch_all(pool)
-    .await
+    .await?;
+    Ok(rows.into_iter().map(Item::from).collect())
 }
 
 pub async fn update_item_title(
     pool: &SqlitePool,
     id: Uuid,
-    title: Option<&str>,
+    title: Option<&Title>,
 ) -> sqlx::Result<()> {
-    sqlx::query!(r#"UPDATE items SET title = ? WHERE id = ?"#, title, id)
+    let title_str = title.map(|t| t.as_str());
+    sqlx::query!(r#"UPDATE items SET title = ? WHERE id = ?"#, title_str, id)
         .execute(pool)
         .await?;
     Ok(())
 }
 
-// ─── Reordering ───────────────────────────────────────────────────────────
+// ─── Reordering ──────────────────────────────────────────────────────────────
 
 pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
 
     let item = sqlx::query_as!(
-        Item,
+        ItemRow,
         r#"SELECT id            AS "id!: Uuid",
                   collection_id AS "collection_id!: Uuid",
                   number        AS "number!: i64",
@@ -62,7 +64,7 @@ pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::
     let neighbour = match (is_up, item.season_number) {
         (true, Some(s)) => {
             sqlx::query_as!(
-                Item,
+                ItemRow,
                 r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
                       number AS "number!: i64", season_number, title, poster,
                       description, file_id AS "file_id!: Uuid"
@@ -78,7 +80,7 @@ pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::
         }
         (false, Some(s)) => {
             sqlx::query_as!(
-                Item,
+                ItemRow,
                 r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
                       number AS "number!: i64", season_number, title, poster,
                       description, file_id AS "file_id!: Uuid"
@@ -94,7 +96,7 @@ pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::
         }
         (true, None) => {
             sqlx::query_as!(
-                Item,
+                ItemRow,
                 r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
                       number AS "number!: i64", season_number, title, poster,
                       description, file_id AS "file_id!: Uuid"
@@ -109,7 +111,7 @@ pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::
         }
         (false, None) => {
             sqlx::query_as!(
-                Item,
+                ItemRow,
                 r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
                       number AS "number!: i64", season_number, title, poster,
                       description, file_id AS "file_id!: Uuid"
@@ -149,7 +151,7 @@ pub async fn swap_item_order(pool: &SqlitePool, id: Uuid, is_up: bool) -> sqlx::
     Ok(())
 }
 
-// ─── Move items between collections ───────────────────────────────────────
+// ─── Move items between collections ──────────────────────────────────────────
 
 pub async fn move_items_to_collection(
     pool: &SqlitePool,
@@ -163,9 +165,10 @@ pub async fn move_items_to_collection(
         return Ok(());
     }
 
-    let dest_kind: CollectionKind = kind_of(pool, to_collection_id)
-        .await?
-        .ok_or_else(|| super::err_not_found("collection"))?;
+    let dest_kind_opt = kind_of(pool, to_collection_id).await?;
+    let Some(dest_kind): Option<CollectionKind> = dest_kind_opt else {
+        return Err(super::err_not_found("collection"));
+    };
 
     let mut tx = pool.begin().await?;
 
@@ -188,10 +191,10 @@ pub async fn move_items_to_collection(
         }
     }
 
-    let mut moved: Vec<Item> = Vec::with_capacity(item_ids.len());
+    let mut moved: Vec<ItemRow> = Vec::with_capacity(item_ids.len());
     for &id in item_ids {
         let item = sqlx::query_as!(
-            Item,
+            ItemRow,
             r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
                       number AS "number!: i64", season_number, title, poster,
                       description, file_id AS "file_id!: Uuid"
@@ -251,7 +254,7 @@ pub async fn move_items_to_collection(
 
     for &from_id in from_counts.keys() {
         let remaining = sqlx::query_as!(
-            Item,
+            ItemRow,
             r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
                       number AS "number!: i64", season_number, title, poster,
                       description, file_id AS "file_id!: Uuid"
@@ -306,7 +309,7 @@ pub async fn move_items_to_collection(
     Ok(())
 }
 
-// ─── Cascade deletion ─────────────────────────────────────────────────────
+// ─── Cascade deletion ────────────────────────────────────────────────────────
 
 pub struct ItemDeletion {
     pub media_paths: Vec<RelPath>,

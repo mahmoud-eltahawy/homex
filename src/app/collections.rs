@@ -2,10 +2,8 @@ use crate::app::error::AppError;
 #[cfg(feature = "ssr")]
 use crate::app::error::ErrorCode;
 use crate::app::ids::Slug;
-use crate::app::model::{
-    Collection, CollectionField, CollectionSummary, Item, MediaKind, SearchQuery,
-};
-use crate::app::types::{PosterUrl, TagName};
+use crate::app::model::{Collection, CollectionSummary, Item, MediaKind, SearchQuery};
+use crate::app::types::{PosterUrl, TagName, Title};
 use leptos::prelude::*;
 use uuid::Uuid;
 
@@ -70,23 +68,22 @@ pub async fn fetch_items(collection_id: Uuid) -> Result<Vec<Item>, AppError> {
 }
 
 #[server]
-pub async fn patch_collection_field(
-    id: Uuid,
-    field: CollectionField,
-    value: Option<String>,
-) -> Result<(), AppError> {
+pub async fn patch_collection_title(id: Uuid, title: Title) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-
-    if matches!(field, CollectionField::Title)
-        && value.as_deref().map(str::trim).unwrap_or("").is_empty()
-    {
-        return Err(AppError::validation(ErrorCode::TitleRequired));
-    }
-
-    db::update_collection_field(&state.db, id, field, value.as_deref())
+    db::update_collection_title(&state.db, id, &title)
         .await
-        .context("patch collection field")?;
+        .context("patch collection title")?;
+    Ok(())
+}
+
+#[server]
+pub async fn patch_collection_description(id: Uuid, description: String) -> Result<(), AppError> {
+    use crate::app::server::AppState;
+    let state: AppState = expect_context();
+    db::update_collection_description(&state.db, id, &description)
+        .await
+        .context("patch collection description")?;
     Ok(())
 }
 
@@ -101,15 +98,10 @@ pub async fn patch_collection_tags(id: Uuid, tags: Vec<TagName>) -> Result<(), A
 }
 
 #[server]
-pub async fn patch_item_title(id: Uuid, title: String) -> Result<(), AppError> {
+pub async fn patch_item_title(id: Uuid, title: Option<Title>) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    let t = if title.trim().is_empty() {
-        None
-    } else {
-        Some(title)
-    };
-    db::update_item_title(&state.db, id, t.as_deref())
+    db::update_item_title(&state.db, id, title.as_ref())
         .await
         .context("patch item title")?;
     Ok(())
@@ -197,7 +189,7 @@ pub async fn upload_collection_poster(
     )
     .await?;
 
-    db::set_collection_poster(&state.db, form.collection_id, Some(&url))
+    db::set_collection_poster(&state.db, form.collection_id, &url)
         .await
         .context("save regenerated poster")?;
 
@@ -273,7 +265,7 @@ pub async fn regenerate_collection_poster(
         crate::app::server::remove_poster(&state, Some(old)).await;
     }
 
-    db::set_collection_poster(&state.db, collection_id, Some(&url))
+    db::set_collection_poster(&state.db, collection_id, &url)
         .await
         .context("save regenerated poster")?;
 
@@ -319,7 +311,7 @@ pub async fn move_collection_to_section(
         )
         .await
     {
-        sdb::set_collection_poster(&state.db, collection_id, Some(&new_url))
+        sdb::set_collection_poster(&state.db, collection_id, &new_url)
             .await
             .context("save regenerated poster")?;
     }

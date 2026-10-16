@@ -17,11 +17,9 @@ use serde::{Deserialize, Serialize};
 /// component of the path can escape that root. [`RelPath::join_under`] is
 /// the *only* way the codebase reaches a file on disk from a stored path.
 ///
-/// An empty `RelPath` is valid and refers to the root itself. That covers
-/// the "unclassified folder at the top level" case, which is a legitimate
-/// empty path, not a malformed one.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
+/// An empty `RelPath` is valid and refers to the root itself.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct RelPath(String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,10 +43,6 @@ impl std::error::Error for RelPathError {}
 
 impl RelPath {
     /// Validate and construct.
-    ///
-    /// Leading and trailing `/` are stripped. The remaining path is split on
-    /// `/` and every component is checked to be non-empty, not `.`, and not
-    /// `..`. The empty result is valid and refers to the root.
     pub fn new(raw: impl Into<String>) -> Result<Self, RelPathError> {
         let s = raw.into();
         if s.contains('\0') {
@@ -67,19 +61,12 @@ impl RelPath {
     }
 
     /// Construct from a value that originated from our own database.
-    ///
-    /// Every path written to the database passed through [`RelPath::new`],
-    /// so the invariant holds. Skips re-validation to keep row decoding
-    /// cheap.
+    #[allow(dead_code)] // Called only by ssr-gated server code.
     pub(crate) fn from_stored(raw: String) -> Self {
         RelPath(raw)
     }
 
     /// Join this path under a trusted root.
-    ///
-    /// This is the only way the codebase ever reaches a file on disk from a
-    /// stored path. The type's invariant guarantees the result is inside
-    /// `root`, so the caller does not need a `starts_with` check.
     pub fn join_under(&self, root: &Path) -> PathBuf {
         if self.0.is_empty() {
             root.to_path_buf()
@@ -116,10 +103,16 @@ impl AsRef<str> for RelPath {
     }
 }
 
-impl<'de> Deserialize<'de> for RelPath {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        RelPath::new(s).map_err(serde::de::Error::custom)
+impl TryFrom<String> for RelPath {
+    type Error = RelPathError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        RelPath::new(s)
+    }
+}
+
+impl From<RelPath> for String {
+    fn from(r: RelPath) -> String {
+        r.0
     }
 }
 
@@ -161,5 +154,10 @@ mod tests {
             root.join("movies/a.mp4"),
         );
         assert_eq!(RelPath::new("").unwrap().join_under(root), root);
+    }
+
+    #[test]
+    fn serde_rejects_bad_component() {
+        assert!(serde_json::from_str::<RelPath>(r#""../x""#).is_err());
     }
 }

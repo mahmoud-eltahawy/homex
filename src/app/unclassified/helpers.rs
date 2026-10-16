@@ -26,12 +26,6 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-pub fn file_stem(name: &str) -> String {
-    name.rsplit_once('.')
-        .map(|(s, _)| s.to_string())
-        .unwrap_or_else(|| name.to_string())
-}
-
 pub fn encode_query_path(s: &str) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(s.len());

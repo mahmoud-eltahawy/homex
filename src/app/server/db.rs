@@ -12,12 +12,12 @@ use std::time::Duration;
 
 use super::Config;
 
-pub use crate::app::model::CollectionField;
 pub use collections::{
     CollectionDeletion, CollectionMove, MoveCollectionError, delete_collection_cascade,
     fetch_collection_any, fetch_collection_detail, fetch_collection_summaries, fetch_collections,
     fetch_collections_count, insert_audio_collection, insert_video_collection,
-    move_collection_to_section, set_collection_poster, update_collection_field,
+    move_collection_to_section, set_collection_poster, update_collection_description,
+    update_collection_title,
 };
 pub use files::{fetch_file_path, insert_file};
 
@@ -34,7 +34,7 @@ pub use tags::{
     set_section_tags,
 };
 
-// ─── Pool init ────────────────────────────────────────────────────────────
+// ─── Pool init ───────────────────────────────────────────────────────────────
 
 pub async fn init(config: &Config) -> Result<sqlx::SqlitePool, Box<dyn std::error::Error>> {
     tokio::fs::create_dir_all(&config.storage.data_dir).await?;

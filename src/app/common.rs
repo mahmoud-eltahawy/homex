@@ -57,7 +57,7 @@ pub fn CollectionCard(collection: Collection) -> impl IntoView {
                 </div>
             </div>
             <div class="p-3 space-y-1.5">
-                <div class="text-sm text-white font-semibold truncate">{title}</div>
+                <div class="text-sm text-white font-semibold truncate">{title.to_string()}</div>
                 <TagList tags=tags max=2/>
             </div>
         </a>

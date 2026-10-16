@@ -4,7 +4,7 @@ use crate::app::ids::Slug;
 use crate::app::model::{MediaKind, Section, Tag};
 use crate::app::route_params::use_slug_param;
 use crate::app::tags::TagEditor;
-use crate::app::types::TagName;
+use crate::app::types::{FileName, TagName, Title};
 use crate::app::upload_job::{UploadJob, UploadProgress};
 use crate::app::upload_types::{
     FILE_FIELD, FORM_FIELD, POSTER_FIELD, UploadFileMeta, UploadForm, UploadTarget,
@@ -88,10 +88,9 @@ impl PageContent<RouteError> for NewCollectionContent {
         let slug_for_submit = slug;
         let on_submit = move |ev: web_sys::SubmitEvent| {
             ev.prevent_default();
-            let t = title.get_untracked().trim().to_string();
-            if t.is_empty() {
+            let Ok(t) = Title::new(title.get_untracked()) else {
                 return;
-            }
+            };
             let desc = description.get_untracked();
             let tag_names: Vec<TagName> =
                 tags.get_untracked().into_iter().map(|t| t.name).collect();
@@ -107,6 +106,15 @@ impl PageContent<RouteError> for NewCollectionContent {
             };
             let file_list = files.get_untracked();
 
+            let metas: Vec<UploadFileMeta> = file_list
+                .iter()
+                .filter_map(|f| {
+                    let filename = FileName::new(f.name()).ok()?;
+                    let title = Title::new(filename.stem().to_string()).ok()?;
+                    Some(UploadFileMeta { filename, title })
+                })
+                .collect();
+
             let form = UploadForm {
                 section_slug: slug_for_submit.clone(),
                 target: UploadTarget::New {
@@ -120,13 +128,7 @@ impl PageContent<RouteError> for NewCollectionContent {
                     tags: tag_names,
                 },
                 season_number: season_opt,
-                files: file_list
-                    .iter()
-                    .map(|f| UploadFileMeta {
-                        filename: f.name(),
-                        title: file_stem(&f.name()),
-                    })
-                    .collect(),
+                files: metas,
                 has_poster: poster_opt.is_some(),
             };
 
@@ -285,12 +287,6 @@ impl PageContent<RouteError> for NewCollectionContent {
 }
 
 pub type NewCollectionPage = Page<NewCollectionContent, RouteError>;
-
-fn file_stem(name: &str) -> String {
-    name.rsplit_once('.')
-        .map(|(s, _)| s.to_string())
-        .unwrap_or_else(|| name.to_string())
-}
 
 fn event_target_files(ev: &web_sys::Event) -> Vec<web_sys::File> {
     use web_sys::wasm_bindgen::JsCast;

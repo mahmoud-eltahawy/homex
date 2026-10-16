@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 use crate::app::ids::Slug;
-use crate::app::types::{FileExt, RelPath};
+use crate::app::types::{FileExt, FileName, RelPath, Title};
 
 pub use crate::app::upload_types::UploadTarget;
 
@@ -23,8 +23,8 @@ pub struct UploadPayload {
 }
 
 pub struct UploadFile {
-    pub filename: String,
-    pub title: String,
+    pub filename: FileName,
+    pub title: Title,
     pub temp_path: PathBuf,
     pub size: u64,
 }
@@ -33,6 +33,6 @@ pub struct StagedFile {
     pub rel: RelPath,
     pub duration: i64,
     pub size: u64,
-    pub title: String,
+    pub title: Title,
     pub origin: PathBuf,
 }

@@ -4,11 +4,12 @@ use uuid::Uuid;
 use super::types::{StagedFile, UploadPayload, UploadTarget};
 use crate::app::error::{AppError, ErrorContext};
 use crate::app::server::db;
+use crate::app::types::Title;
 
 pub async fn insert_files(
     pool: &SqlitePool,
     staged: &[StagedFile],
-) -> Result<Vec<(Uuid, String)>, AppError> {
+) -> Result<Vec<(Uuid, Title)>, AppError> {
     let mut conn = pool.acquire().await.context("upload: acquire conn")?;
     let mut out = Vec::with_capacity(staged.len());
     for f in staged {
@@ -89,7 +90,7 @@ async fn bump_count(
 pub async fn insert_items_and_poster(
     pool: &SqlitePool,
     payload: &UploadPayload,
-    file_rows: &[(Uuid, String)],
+    file_rows: &[(Uuid, Title)],
 ) -> Result<(), AppError> {
     let _guard = INSERT_LOCK.lock().await;
     let mut tx = pool.begin().await.context("upload: begin transaction")?;
@@ -112,7 +113,7 @@ pub async fn insert_items_and_poster(
             collection_id,
             start + i as i64,
             payload.season_number,
-            title,
+            title.as_str(),
             fid,
         )
         .execute(&mut *tx)

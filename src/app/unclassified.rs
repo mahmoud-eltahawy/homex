@@ -28,8 +28,6 @@ use crate::app::ids::Slug;
 #[cfg(feature = "ssr")]
 use crate::app::model::CollectionSummary;
 use crate::app::model::MediaKind;
-#[cfg(feature = "ssr")]
-use crate::app::types::FileExt;
 use crate::app::types::{JobId, RelPath};
 use crate::app::upload_api::ConversionStatus;
 use leptos_page::{InfalliblePage, PageContent};
@@ -42,15 +40,16 @@ use components::selection_bar::SelectionBar;
 use helpers::encode_query_path;
 use jobs::{ClassifyJob, FolderClassifyJob};
 
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 //  Server functions
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[server]
 pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry>, AppError> {
     use crate::app::server::AppState;
     use crate::app::server::jobs::ensure_roots_disjoint;
     use crate::app::server::upload::sanitize_rel;
+    use crate::app::types::FileName;
 
     let state: AppState = expect_context();
     let root = state
@@ -85,8 +84,8 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
         .await
         .map_err(|e| AppError::internal("read dir entry", e))?
     {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
+        let name_string = entry.file_name().to_string_lossy().to_string();
+        if name_string.starts_with('.') {
             continue;
         }
         let meta = match entry.metadata().await {
@@ -96,18 +95,24 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
         let is_dir = meta.is_dir();
 
         let rel_string = if clean.is_empty() {
-            name.clone()
+            name_string.clone()
         } else {
-            format!("{}/{}", clean.as_str(), name)
+            format!("{}/{}", clean.as_str(), name_string)
         };
         let Ok(rel_path) = RelPath::new(rel_string) else {
-            leptos::logging::warn!("[unclassified] skipped invalid entry {name}");
+            leptos::logging::warn!("[unclassified] skipped invalid entry {name_string}");
             continue;
         };
 
+        let Ok(name) = FileName::new(name_string) else {
+            leptos::logging::warn!("[unclassified] skipped invalid filename");
+            continue;
+        };
+        let ext = if is_dir { None } else { name.extension() };
+
         entries.push(UnclassifiedEntry {
             size: if is_dir { 0 } else { meta.len() },
-            ext: if is_dir { None } else { ext_of(&name) },
+            ext,
             rel_path,
             name,
             is_dir,
@@ -115,16 +120,14 @@ pub async fn list_unclassified(rel_path: String) -> Result<Vec<UnclassifiedEntry
     }
 
     entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        b.is_dir.cmp(&a.is_dir).then_with(|| {
+            a.name
+                .as_str()
+                .to_lowercase()
+                .cmp(&b.name.as_str().to_lowercase())
+        })
     });
     Ok(entries)
-}
-
-#[cfg(feature = "ssr")]
-fn ext_of(name: &str) -> Option<FileExt> {
-    FileExt::from_filename(name)
 }
 
 #[server]
@@ -133,6 +136,7 @@ pub async fn fetch_sections_with_collections(
 ) -> Result<Vec<SectionWithCollections>, AppError> {
     use crate::app::model::{AudioCollectionRow, SectionRow, VideoCollectionRow};
     use crate::app::server::AppState;
+    use crate::app::types::Title;
 
     let state: AppState = expect_context();
 
@@ -168,9 +172,9 @@ pub async fn fetch_sections_with_collections(
             .into_iter()
             .map(|c| CollectionSummary {
                 id: c.id,
-                title: c.title,
+                title: Title::from_stored(c.title),
                 section_slug: Slug::from_stored(c.section_slug),
-                section_title: s.title.clone(),
+                section_title: Title::from_stored(s.title.clone()),
                 nested: s.nested,
             })
             .collect(),
@@ -188,9 +192,9 @@ pub async fn fetch_sections_with_collections(
             .into_iter()
             .map(|c| CollectionSummary {
                 id: c.id,
-                title: c.title,
+                title: Title::from_stored(c.title),
                 section_slug: Slug::from_stored(c.section_slug),
-                section_title: s.title.clone(),
+                section_title: Title::from_stored(s.title.clone()),
                 nested: s.nested,
             })
             .collect(),
@@ -199,7 +203,7 @@ pub async fn fetch_sections_with_collections(
         out.push(SectionWithCollections {
             id: s.id,
             slug: Slug::from_stored(s.slug),
-            title: s.title.clone(),
+            title: Title::from_stored(s.title),
             nested: s.nested,
             collections: rows,
         });
@@ -355,7 +359,7 @@ pub async fn cancel_classify(job_ids: Vec<JobId>) -> Result<(), AppError> {
     Ok(())
 }
 
-// ─── Classify: files ──────────────────────────────────────────────────────
+// ─── Classify: files ─────────────────────────────────────────────────────────
 
 #[server]
 pub async fn classify_unclassified_files(
@@ -518,7 +522,7 @@ pub async fn classify_unclassified_files(
     Ok(handles)
 }
 
-// ─── Classify: folders ────────────────────────────────────────────────────
+// ─── Classify: folders ───────────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 const MAX_CLASSIFY_GROUPS: usize = 50;
@@ -546,6 +550,7 @@ pub async fn classify_unclassified_folders(
         extract_poster_for_new_video_collection, read_immediate_subdirs,
     };
     use crate::app::server::{AppState, db};
+    use crate::app::types::Title;
 
     if rel_paths.is_empty() {
         return Err(AppError::public(ErrorCode::NoFoldersSelected));
@@ -603,7 +608,7 @@ pub async fn classify_unclassified_folders(
             nested: bool,
         },
         New {
-            title: String,
+            title: Title,
             kind: MediaKind,
             nested: bool,
         },
@@ -646,10 +651,6 @@ pub async fn classify_unclassified_folders(
             section_slug,
             title,
         } => {
-            let title = title.trim().to_string();
-            if title.is_empty() {
-                return Err(AppError::validation(ErrorCode::TitleRequired));
-            }
             let section = sqlx::query_as!(
                 SectionRow,
                 r#"SELECT id            AS "id!: Uuid",
@@ -680,7 +681,7 @@ pub async fn classify_unclassified_folders(
     };
 
     struct Group {
-        title: String,
+        title: Title,
         season: Option<i64>,
         files: Vec<RawFile>,
         cleanup_dir: std::path::PathBuf,
@@ -697,8 +698,10 @@ pub async fn classify_unclassified_folders(
                     continue;
                 }
                 ensure_kind_matches(&files, kind)?;
+                let title = Title::new(sub.clone())
+                    .map_err(|e| AppError::detailed(format!("Invalid collection name: {e}")))?;
                 groups.push(Group {
-                    title: sub.clone(),
+                    title,
                     season: (kind == MediaKind::Video).then_some(1),
                     files,
                     cleanup_dir: sub_abs,
@@ -714,8 +717,10 @@ pub async fn classify_unclassified_folders(
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Folder".to_string());
+            let title = Title::new(folder_name)
+                .map_err(|e| AppError::detailed(format!("Invalid collection name: {e}")))?;
             groups.push(Group {
-                title: folder_name,
+                title,
                 season: (nested && kind == MediaKind::Video).then_some(1),
                 files,
                 cleanup_dir: abs.clone(),
@@ -820,8 +825,15 @@ pub async fn classify_unclassified_folders(
 
         let mut group_job_ids: Vec<JobId> = Vec::new();
         for raw in group.files {
+            let Ok(title) = Title::new(raw.filename.stem().to_string()) else {
+                leptos::logging::warn!(
+                    "[classify] skipping file with invalid title: {}",
+                    raw.filename
+                );
+                continue;
+            };
             let upload = crate::app::server::upload::UploadFile {
-                title: helpers::file_stem(&raw.filename),
+                title,
                 filename: raw.filename,
                 temp_path: raw.abs,
                 size: raw.size,
@@ -852,11 +864,11 @@ pub async fn classify_unclassified_folders(
     Ok(handles)
 }
 
-// ─── Move items back to incoming ──────────────────────────────────────────
+// ─── Move items back to incoming ─────────────────────────────────────────────
 
 #[server]
 pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError> {
-    use crate::app::model::Item;
+    use crate::app::model::ItemRow;
     use crate::app::server::jobs::canonical_media_root;
     use crate::app::server::upload::move_file_to_incoming;
     use crate::app::server::{AppState, db, remove_poster};
@@ -884,7 +896,7 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
 
     for item_id in item_ids {
         let item = match sqlx::query_as!(
-            Item,
+            ItemRow,
             r#"SELECT id AS "id!: Uuid", collection_id AS "collection_id!: Uuid",
                       number AS "number!: i64", season_number, title, poster,
                       description, file_id AS "file_id!: Uuid"
@@ -929,9 +941,9 @@ pub async fn move_items_to_incoming(item_ids: Vec<Uuid>) -> Result<(), AppError>
     Ok(())
 }
 
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 //  SSR-only helpers
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[cfg(feature = "ssr")]
 async fn resolve_upload_file(
@@ -940,6 +952,7 @@ async fn resolve_upload_file(
     input: &ClassifyInput,
 ) -> Result<crate::app::server::upload::UploadFile, AppError> {
     use crate::app::server::upload::UploadFile;
+    use crate::app::types::FileName;
 
     if input.rel_path.is_empty() {
         return Err(AppError::detailed("Empty file path"));
@@ -956,18 +969,13 @@ async fn resolve_upload_file(
     if !meta.is_file() {
         return Err(AppError::public(ErrorCode::NotAFile));
     }
-    let filename = source_canon
+    let filename_str = source_canon
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".to_string());
-    let title = {
-        let t = input.title.trim();
-        if t.is_empty() {
-            helpers::file_stem(&filename)
-        } else {
-            t.to_string()
-        }
-    };
+    let filename =
+        FileName::new(filename_str).map_err(|e| AppError::internal("resolve upload file", e))?;
+    let title = input.title.clone();
     Ok(UploadFile {
         filename,
         title,
@@ -981,8 +989,10 @@ async fn existing_collection_titles(
     db: &sqlx::SqlitePool,
     section_slug: &Slug,
     kind: crate::app::model::MediaKind,
-) -> Result<std::collections::HashMap<String, Uuid>, AppError> {
+) -> Result<std::collections::HashMap<crate::app::types::Title, Uuid>, AppError> {
     use std::collections::HashMap;
+
+    use crate::app::types::Title;
 
     let rows: Vec<(String, Uuid)> = match kind {
         crate::app::model::MediaKind::Video => sqlx::query_as!(
@@ -1010,7 +1020,10 @@ async fn existing_collection_titles(
         .map(|r| (r.title, r.id))
         .collect(),
     };
-    Ok(rows.into_iter().collect::<HashMap<_, _>>())
+    Ok(rows
+        .into_iter()
+        .map(|(t, id)| (Title::from_stored(t), id))
+        .collect::<HashMap<_, _>>())
 }
 
 #[cfg(feature = "ssr")]
@@ -1047,9 +1060,9 @@ async fn generate_unique_slug(
     ))
 }
 
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 //  Entry list bridging
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone)]
 pub struct EntryListProps {
@@ -1130,9 +1143,9 @@ fn render_entry_list(props: EntryListProps) -> AnyView {
     .into_any()
 }
 
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 //  Page
-// ══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 
 pub struct UnclassifiedContent {
     rel_path: Signal<String>,

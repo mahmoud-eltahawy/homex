@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
-use crate::app::types::{FileExt, TagName};
+use crate::app::types::{FileExt, FileName, TagName, Title};
 
-// ─── Container classification ─────────────────────────────────────────────
+// ─── Container classification ────────────────────────────────────────────────
 
 pub const VIDEO_SUPPORTED_EXTS: &[&str] = &["mp4", "m4v", "webm"];
 pub const AUDIO_SUPPORTED_EXTS: &[&str] = &["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus"];
@@ -52,13 +52,13 @@ pub fn audio_accept_attr() -> String {
 
 pub const MAX_POSTER_BYTES: usize = 5 * 1024 * 1024;
 
-// ─── Multipart field names ────────────────────────────────────────────────
+// ─── Multipart field names ───────────────────────────────────────────────────
 
 pub const FORM_FIELD: &str = "form";
 pub const FILE_FIELD: &str = "file";
 pub const POSTER_FIELD: &str = "poster_file";
 
-// ─── Wire types ───────────────────────────────────────────────────────────
+// ─── Wire types ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UploadTarget {
@@ -67,7 +67,7 @@ pub enum UploadTarget {
     },
     New {
         id: Uuid,
-        title: String,
+        title: Title,
         description: Option<String>,
         tags: Vec<TagName>,
     },
@@ -75,8 +75,8 @@ pub enum UploadTarget {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadFileMeta {
-    pub filename: String,
-    pub title: String,
+    pub filename: FileName,
+    pub title: Title,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

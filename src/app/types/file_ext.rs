@@ -5,8 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Maximum extension length accepted. Covers every container and image format
-/// this app currently knows about (`webp`, `jpeg`, `mpeg`, …).
+/// Maximum extension length accepted.
 const MAX_LEN: usize = 8;
 
 /// A file extension.
@@ -15,11 +14,8 @@ const MAX_LEN: usize = 8;
 /// - Length `1..=8`.
 /// - Every character is ASCII alphanumeric.
 /// - Stored lowercase.
-///
-/// The constructor lowercases its input, so every comparison downstream is
-/// a straight `==` with no call-site `to_ascii_lowercase()` to forget.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct FileExt(String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,8 +57,7 @@ impl FileExt {
         Ok(FileExt(s))
     }
 
-    /// Extract the extension from a filename. Returns `None` when there is
-    /// no `.`, or when the part after the last `.` is not a valid extension.
+    /// Extract the extension from a filename.
     pub fn from_filename(name: &str) -> Option<Self> {
         let (_, ext) = name.rsplit_once('.')?;
         FileExt::new(ext).ok()
@@ -92,10 +87,16 @@ impl AsRef<str> for FileExt {
     }
 }
 
-impl<'de> Deserialize<'de> for FileExt {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        s.parse().map_err(serde::de::Error::custom)
+impl TryFrom<String> for FileExt {
+    type Error = FileExtError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        FileExt::new(s)
+    }
+}
+
+impl From<FileExt> for String {
+    fn from(e: FileExt) -> String {
+        e.0
     }
 }
 

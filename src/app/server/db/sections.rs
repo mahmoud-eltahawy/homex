@@ -4,6 +4,7 @@ use uuid::Uuid;
 use super::tags::fetch_section_tags;
 use crate::app::ids::Slug;
 use crate::app::model::{AudioCollectionRow, MediaKind, Section, SectionRow, VideoCollectionRow};
+use crate::app::types::Title;
 
 // ─── Section queries ──────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ pub async fn fetch_section_by_slug(
 pub async fn insert_section(
     pool: &SqlitePool,
     slug: &Slug,
-    title: &str,
+    title: &Title,
     media_kind: MediaKind,
     nested: bool,
 ) -> sqlx::Result<Uuid> {
@@ -74,7 +75,7 @@ pub async fn insert_section(
            VALUES (?, ?, ?, ?, ?, ?)"#,
         id,
         slug.as_str(),
-        title,
+        title.as_str(),
         media_kind.as_str(),
         nested,
         next,
@@ -103,10 +104,14 @@ pub async fn update_section(
     Ok(())
 }
 
-pub async fn update_section_title(pool: &SqlitePool, id: Uuid, title: &str) -> sqlx::Result<()> {
-    sqlx::query!(r#"UPDATE sections SET title = ? WHERE id = ?"#, title, id)
-        .execute(pool)
-        .await?;
+pub async fn update_section_title(pool: &SqlitePool, id: Uuid, title: &Title) -> sqlx::Result<()> {
+    sqlx::query!(
+        r#"UPDATE sections SET title = ? WHERE id = ?"#,
+        title.as_str(),
+        id
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

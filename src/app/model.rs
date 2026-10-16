@@ -3,16 +3,15 @@ use uuid::Uuid;
 
 use crate::app::constants::routes;
 use crate::app::ids::Slug;
-use crate::app::types::{FileExt, PosterUrl, TagName};
+use crate::app::types::{FileExt, MediaSrc, PosterUrl, TagName, Title};
 
-// ─── Tag canonicalization ─────────────────────────────────────────────────
+// ─── Tag canonicalization ────────────────────────────────────────────────────
 
 /// Sort and deduplicate tag names.
 ///
 /// Both operations use [`TagName`]'s case-insensitive `Ord` and `Eq`, so
-/// `["Action", "ACTION"]` collapses to one entry. Trimming and empty-string
-/// rejection already happened at construction, so there is nothing left to
-/// normalize here.
+/// `["Action", "ACTION"]` collapses to one entry.
+#[allow(dead_code)] // Called only by ssr-gated server code.
 pub fn canonicalize_tags(tags: impl IntoIterator<Item = TagName>) -> Vec<TagName> {
     let mut v: Vec<TagName> = tags.into_iter().collect();
     v.sort();
@@ -20,7 +19,7 @@ pub fn canonicalize_tags(tags: impl IntoIterator<Item = TagName>) -> Vec<TagName
     v
 }
 
-// ─── SearchQuery ──────────────────────────────────────────────────────────
+// ─── SearchQuery ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchQuery {
@@ -56,7 +55,7 @@ impl SearchQuery {
     }
 }
 
-// ─── MediaKind ────────────────────────────────────────────────────────────
+// ─── MediaKind ───────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -100,9 +99,9 @@ impl MediaKind {
             "ape",
         ];
         let ext = ext.as_str();
-        if VIDEO_EXTS.contains(&ext) {
+        if VIDEO_EXTS.iter().any(|e| *e == ext) {
             Some(Self::Video)
-        } else if AUDIO_EXTS.contains(&ext) {
+        } else if AUDIO_EXTS.iter().any(|e| *e == ext) {
             Some(Self::Audio)
         } else {
             None
@@ -126,16 +125,7 @@ impl TryFrom<&str> for MediaKind {
     }
 }
 
-// ─── CollectionField ──────────────────────────────────────────────────────
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CollectionField {
-    Title,
-    Description,
-    Poster,
-}
-
-// ─── CollectionKind (SSR only) ────────────────────────────────────────────
+// ─── CollectionKind (SSR only) ───────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,8 +134,9 @@ pub enum CollectionKind {
     Audio,
 }
 
-// ─── ModelError ───────────────────────────────────────────────────────────
+// ─── ModelError ──────────────────────────────────────────────────────────────
 
+#[allow(dead_code)] // Constructed only by ssr-gated row conversions.
 #[derive(Debug, Clone)]
 pub struct ModelError(String);
 
@@ -176,7 +167,7 @@ impl From<ModelError> for sqlx::Error {
     }
 }
 
-// ─── Tag ──────────────────────────────────────────────────────────────────
+// ─── Tag ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag {
@@ -184,13 +175,6 @@ pub struct Tag {
     pub name: TagName,
 }
 
-/// The raw shape of a row from the `tags` table.
-///
-/// Kept separate from [`Tag`] because `TagName` has a validating constructor
-/// and no `sqlx::Decode` impl. Every `sqlx::query_as!` that selects a tag
-/// targets this struct, and the `From` impl below runs the value through
-/// `TagName::from_stored` — the trusting path, since every name written to
-/// the DB passed through `TagName::new`.
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TagRow {
@@ -208,11 +192,34 @@ impl From<TagRow> for Tag {
     }
 }
 
-// ─── Item (wire + row) ────────────────────────────────────────────────────
+// ─── Item (wire type) ────────────────────────────────────────────────────────
 
+/// A single item in a collection.
+///
+/// `title` carries [`Title`], which has a validating constructor; SQLx has no
+/// way to decode a nullable `TEXT` column into `Option<Title>` directly, so
+/// every query targets [`ItemRow`] and converts via `From<ItemRow>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct Item {
+    pub id: Uuid,
+    pub collection_id: Uuid,
+    pub number: i64,
+    pub season_number: Option<i64>,
+    pub title: Option<Title>,
+    pub poster: Option<String>,
+    pub description: Option<String>,
+    pub file_id: Uuid,
+}
+
+/// The raw shape of a row from the `items` table.
+///
+/// Same field layout as [`Item`], but with the title as a raw `Option<String>`
+/// so `sqlx::FromRow` can decode it. The `From<ItemRow>` impl below routes the
+/// value through `Title::from_stored` — the trusting path, since every title
+/// written to the DB passed through `Title::new`.
+#[cfg(feature = "ssr")]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ItemRow {
     pub id: Uuid,
     pub collection_id: Uuid,
     pub number: i64,
@@ -223,7 +230,23 @@ pub struct Item {
     pub file_id: Uuid,
 }
 
-// ─── Row types (SSR-only) ─────────────────────────────────────────────────
+#[cfg(feature = "ssr")]
+impl From<ItemRow> for Item {
+    fn from(row: ItemRow) -> Self {
+        Self {
+            id: row.id,
+            collection_id: row.collection_id,
+            number: row.number,
+            season_number: row.season_number,
+            title: row.title.map(Title::from_stored),
+            poster: row.poster,
+            description: row.description,
+            file_id: row.file_id,
+        }
+    }
+}
+
+// ─── Row types (SSR-only) ────────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -262,13 +285,13 @@ pub struct AudioCollectionRow {
     pub items_count: i64,
 }
 
-// ─── Domain models (wire types) ───────────────────────────────────────────
+// ─── Domain models (wire types) ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
     pub id: Uuid,
     pub slug: Slug,
-    pub title: String,
+    pub title: Title,
     pub media_kind: MediaKind,
     pub nested: bool,
     pub position: i64,
@@ -281,7 +304,7 @@ pub struct Collection {
     pub id: Uuid,
     pub section_id: Uuid,
     pub section_slug: Slug,
-    pub title: String,
+    pub title: Title,
     pub poster: Option<PosterUrl>,
     pub description: Option<String>,
     pub position: i64,
@@ -293,13 +316,13 @@ pub struct Collection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollectionSummary {
     pub id: Uuid,
-    pub title: String,
+    pub title: Title,
     pub section_slug: Slug,
-    pub section_title: String,
+    pub section_title: Title,
     pub nested: bool,
 }
 
-// ─── Row → domain conversions ─────────────────────────────────────────────
+// ─── Row → domain conversions ────────────────────────────────────────────────
 
 #[cfg(feature = "ssr")]
 impl TryFrom<SectionRow> for Section {
@@ -308,7 +331,7 @@ impl TryFrom<SectionRow> for Section {
         Ok(Self {
             id: row.id,
             slug: Slug::from_stored(row.slug),
-            title: row.title,
+            title: Title::from_stored(row.title),
             media_kind: MediaKind::try_from(row.media_kind.as_str())?,
             nested: row.nested,
             position: row.position,
@@ -324,7 +347,7 @@ impl From<VideoCollectionRow> for Collection {
             id: row.id,
             section_id: row.section_id,
             section_slug: Slug::from_stored(row.section_slug),
-            title: row.title,
+            title: Title::from_stored(row.title),
             poster: Some(PosterUrl::from_stored(row.poster)),
             description: row.description,
             position: row.position,
@@ -341,7 +364,7 @@ impl From<AudioCollectionRow> for Collection {
             id: row.id,
             section_id: row.section_id,
             section_slug: Slug::from_stored(row.section_slug),
-            title: row.title,
+            title: Title::from_stored(row.title),
             poster: row.poster.map(PosterUrl::from_stored),
             description: row.description,
             position: row.position,
@@ -351,7 +374,7 @@ impl From<AudioCollectionRow> for Collection {
     }
 }
 
-// ─── Domain methods ───────────────────────────────────────────────────────
+// ─── Domain methods ──────────────────────────────────────────────────────────
 
 impl Section {
     pub fn href(&self) -> String {
@@ -384,12 +407,15 @@ impl Collection {
 impl Item {
     pub fn display_title(&self) -> String {
         self.title
-            .clone()
+            .as_ref()
+            .map(|t| t.as_str().to_string())
             .unwrap_or_else(|| format!("Item {}", self.number + 1))
     }
-    pub fn file_path(&self) -> String {
-        routes::media(self.file_id)
+
+    pub fn file_path(&self) -> MediaSrc {
+        MediaSrc::for_file(self.file_id)
     }
+
     pub fn href(&self, section_slug: &str) -> String {
         routes::item(section_slug, self.collection_id, self.id)
     }

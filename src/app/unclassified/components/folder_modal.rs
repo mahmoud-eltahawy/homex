@@ -1,6 +1,6 @@
 use crate::app::error::AppError;
 use crate::app::ids::Slug;
-use crate::app::types::RelPath;
+use crate::app::types::{RelPath, Title};
 use crate::app::unclassified::helpers::{format_size, plural};
 use crate::app::unclassified::jobs::FolderClassifyJob;
 use crate::app::unclassified::tracker::BatchPhase;
@@ -135,7 +135,7 @@ pub fn FolderClassifyModal(
         let sel = selection.get();
         match sel.len() {
             0 => String::new(),
-            1 => sel[0].name.clone(),
+            1 => sel[0].name.to_string(),
             n => format!("{n} folders"),
         }
     });
@@ -217,8 +217,10 @@ pub fn FolderClassifyModal(
                     .get_untracked()
                     .into_iter()
                     .find(|s| s.slug == slug)
-                    .map(|s| s.title)
-                    .unwrap_or_default();
+                    .map(|s| s.title);
+                let Some(title) = title else {
+                    return;
+                };
                 ClassifyDestination::New {
                     section_slug: slug,
                     title,
@@ -226,10 +228,6 @@ pub fn FolderClassifyModal(
             }
             DestinationMode::New => {
                 let t = section_title.get_untracked();
-                let t = t.trim();
-                if t.is_empty() {
-                    return;
-                }
                 let slug_str = section_slug.get_untracked();
                 if slug_str.is_empty() {
                     return;
@@ -237,9 +235,12 @@ pub fn FolderClassifyModal(
                 let Ok(slug) = Slug::new(slug_str) else {
                     return;
                 };
+                let Ok(title) = Title::new(t) else {
+                    return;
+                };
                 ClassifyDestination::New {
                     section_slug: slug,
-                    title: t.to_string(),
+                    title,
                 }
             }
         };

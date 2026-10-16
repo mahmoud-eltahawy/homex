@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use uuid::Uuid;
 
 use crate::app::error::AppError;
-use crate::app::types::{JobId, RelPath};
+use crate::app::types::{JobId, RelPath, Title};
 use crate::app::upload_api::ConversionStatus;
 
 use super::types::{ClassifyDestination, ClassifyInput, FileJobHandle};
@@ -20,7 +20,7 @@ pub struct FileSlot {
     pub section_slug: String,
     pub collection_id: Option<Uuid>,
     pub rel_path: RelPath,
-    pub title: String,
+    pub title: Title,
     pub season_number: Option<i64>,
     pub status: RwSignal<Option<ConversionStatus>>,
 }

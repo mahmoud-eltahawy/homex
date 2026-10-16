@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 
 use crate::app::error::{AppError, ErrorContext};
 use crate::app::model::MediaKind;
-use crate::app::types::RelPath;
+use crate::app::types::{FileName, RelPath};
 
 #[derive(Debug, Clone)]
 pub struct RawFile {
     pub abs: PathBuf,
     pub rel: RelPath,
-    pub filename: String,
+    pub filename: FileName,
     pub size: u64,
 }
 
@@ -45,8 +45,8 @@ pub async fn collect_files(
             Err(_) => continue,
         };
         while let Some(entry) = rd.next_entry().await.context("read dir entry")? {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
+            let name_str = entry.file_name().to_string_lossy().to_string();
+            if name_str.starts_with('.') {
                 continue;
             }
             let ft = match entry.file_type().await {
@@ -81,11 +81,15 @@ pub async fn collect_files(
                     );
                     continue;
                 };
+                let Ok(filename) = FileName::new(name_str) else {
+                    leptos::logging::warn!("[incoming] invalid filename");
+                    continue;
+                };
 
                 out.push(RawFile {
                     abs,
                     rel,
-                    filename: name,
+                    filename,
                     size,
                 });
             }
@@ -103,9 +107,9 @@ pub async fn collect_files(
 pub fn dominant_kind(files: &[RawFile]) -> Option<MediaKind> {
     let first = files
         .first()
-        .and_then(|f| MediaKind::from_filename(&f.filename))?;
+        .and_then(|f| MediaKind::from_filename(f.filename.as_str()))?;
     for f in &files[1..] {
-        if MediaKind::from_filename(&f.filename) != Some(first) {
+        if MediaKind::from_filename(f.filename.as_str()) != Some(first) {
             return None;
         }
     }
@@ -114,7 +118,7 @@ pub fn dominant_kind(files: &[RawFile]) -> Option<MediaKind> {
 
 pub fn ensure_kind_matches(files: &[RawFile], kind: MediaKind) -> Result<(), AppError> {
     for f in files {
-        if MediaKind::from_filename(&f.filename) != Some(kind) {
+        if MediaKind::from_filename(f.filename.as_str()) != Some(kind) {
             return Err(AppError::detailed(format!(
                 "File '{}' is not {} media",
                 f.filename,

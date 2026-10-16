@@ -1,8 +1,9 @@
 use crate::app::error::AppError;
 use crate::app::ids::Slug;
 use crate::app::model::MediaKind;
+use crate::app::types::Title;
 use crate::app::unclassified::fetch_sections_with_collections;
-use crate::app::unclassified::helpers::{file_stem, kind_for_ext, parse_season};
+use crate::app::unclassified::helpers::{kind_for_ext, parse_season};
 use crate::app::unclassified::jobs::ClassifyJob;
 use crate::app::unclassified::tracker::BatchPhase;
 use crate::app::unclassified::types::{
@@ -80,7 +81,7 @@ pub fn ClassifyModal(
         let sel = selection.get_untracked();
         form.reset();
         if let [single] = sel.as_slice() {
-            form.title.set(file_stem(&single.name));
+            form.title.set(single.name.stem().to_string());
         }
     });
 
@@ -102,7 +103,7 @@ pub fn ClassifyModal(
             && form.new_title.get_untracked().is_empty()
             && let Some(first) = selection.get_untracked().first()
         {
-            form.new_title.set(file_stem(&first.name));
+            form.new_title.set(first.name.stem().to_string());
         }
     });
 
@@ -165,7 +166,7 @@ pub fn ClassifyModal(
         let sel = selection.get();
         match sel.len() {
             0 => String::new(),
-            1 => sel[0].name.clone(),
+            1 => sel[0].name.to_string(),
             n => format!("{n} files"),
         }
     });
@@ -220,16 +221,18 @@ pub fn ClassifyModal(
 
         let dest = if form.creating_new.get_untracked() {
             let slug_str = form.section_slug.get_untracked();
-            let title = form.new_title.get_untracked();
-            if slug_str.is_empty() || title.trim().is_empty() {
+            if slug_str.is_empty() {
                 return;
             }
             let Ok(slug) = Slug::new(slug_str) else {
                 return;
             };
+            let Ok(title) = Title::new(form.new_title.get_untracked()) else {
+                return;
+            };
             ClassifyDestination::New {
                 section_slug: slug,
-                title: title.trim().to_string(),
+                title,
             }
         } else {
             let Some(id) = form.collection_id.get_untracked() else {
@@ -241,15 +244,21 @@ pub fn ClassifyModal(
         cancel_pending.set(false);
         let season = parse_season(&form.season.get_untracked());
         let files = if sel.len() == 1 {
+            let Ok(title) = Title::new(form.title.get_untracked()) else {
+                return;
+            };
             vec![ClassifyInput {
                 rel_path: sel[0].rel_path.clone(),
-                title: form.title.get_untracked(),
+                title,
             }]
         } else {
             sel.into_iter()
-                .map(|e| ClassifyInput {
-                    title: file_stem(&e.name),
-                    rel_path: e.rel_path,
+                .filter_map(|e| {
+                    let title = Title::new(e.name.stem().to_string()).ok()?;
+                    Some(ClassifyInput {
+                        title,
+                        rel_path: e.rel_path,
+                    })
                 })
                 .collect()
         };
@@ -371,7 +380,7 @@ fn CollectionPicker(
                                        focus:outline-none focus:ring-1 focus:ring-cyan-400">
                             <option value="">"Choose a collection…"</option>
                             {s.collections.into_iter().map(|c| view! {
-                                <option value=c.id.to_string()>{c.title.clone()}</option>
+                                <option value=c.id.to_string()>{c.title.to_string()}</option>
                             }).collect_view()}
                         </select>
                     }.into_any(),

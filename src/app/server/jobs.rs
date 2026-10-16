@@ -14,7 +14,7 @@ use crate::app::server::convert::{Job, JobPhase, job_set_phase};
 use crate::app::server::upload::{
     UploadFile, UploadPayload, UploadTarget, process_upload, schedule_job_eviction,
 };
-use crate::app::types::{JobId, RelPath};
+use crate::app::types::{JobId, RelPath, Title};
 use crate::app::unclassified::FileJobHandle;
 
 pub const JOB_TIMEOUT_SECS: u64 = 15 * 60;
@@ -32,7 +32,7 @@ pub fn upload_semaphore() -> &'static tokio::sync::Semaphore {
     })
 }
 
-// ─── Path locks ───────────────────────────────────────────────────────────
+// ─── Path locks ──────────────────────────────────────────────────────────────
 
 fn active_classifications() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf>> {
     use std::collections::HashSet;
@@ -73,7 +73,7 @@ pub fn acquire_classify_locks(paths: Vec<PathBuf>) -> Result<ClassifyLocks, AppE
     Ok(ClassifyLocks(paths))
 }
 
-// ─── Config validation ────────────────────────────────────────────────────
+// ─── Config validation ───────────────────────────────────────────────────────
 
 pub fn canonical_media_root(media_root: &Path) -> Result<&'static Path, AppError> {
     use std::sync::OnceLock;
@@ -108,7 +108,7 @@ pub fn ensure_roots_disjoint(unclassified_canon: &Path, media_root: &Path) -> Re
     Ok(())
 }
 
-// ─── Job preparation ──────────────────────────────────────────────────────
+// ─── Job preparation ─────────────────────────────────────────────────────────
 
 pub fn make_dummy_tempdir() -> Result<tempfile::TempDir, AppError> {
     tempfile::TempDir::new().map_err(|e| AppError::internal("create dummy temp dir", e))
@@ -118,7 +118,7 @@ pub struct PreparedJob {
     pub name: String,
     pub job_id: JobId,
     pub rel_path: RelPath,
-    pub title: String,
+    pub title: Title,
     pub season_number: Option<i64>,
     pub payload: UploadPayload,
     pub kind: MediaKind,
@@ -134,7 +134,7 @@ pub fn prepare_file_job(
     kind: MediaKind,
     rel_path: RelPath,
 ) -> Result<PreparedJob, AppError> {
-    let name = file.filename.clone();
+    let name = file.filename.as_str().to_string();
     let title = file.title.clone();
     Ok(PreparedJob {
         name,
@@ -155,7 +155,7 @@ pub fn prepare_file_job(
     })
 }
 
-// ─── Registration + spawn ─────────────────────────────────────────────────
+// ─── Registration + spawn ────────────────────────────────────────────────────
 
 pub async fn register_and_spawn(
     state: &AppState,
@@ -228,7 +228,7 @@ fn spawn_job_worker(state: AppState, p: PreparedJob) {
     });
 }
 
-// ─── Watchers ─────────────────────────────────────────────────────────────
+// ─── Watchers ────────────────────────────────────────────────────────────────
 
 pub async fn wait_for_terminal(state: &AppState, job_ids: &[JobId]) {
     let wait = async {

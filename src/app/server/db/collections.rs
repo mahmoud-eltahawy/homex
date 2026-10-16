@@ -7,11 +7,9 @@ use uuid::Uuid;
 use super::err_not_found;
 use crate::app::ids::Slug;
 use crate::app::model::{Collection, CollectionKind, CollectionSummary, MediaKind, SearchQuery};
-use crate::app::types::{PosterUrl, RelPath, TagName};
+use crate::app::types::{PosterUrl, RelPath, TagName, Title};
 
-pub use crate::app::model::CollectionField;
-
-// ─── Kind lookups ─────────────────────────────────────────────────────────
+// ─── Kind lookups ────────────────────────────────────────────────────────────
 
 pub(crate) async fn kind_of(pool: &SqlitePool, id: Uuid) -> sqlx::Result<Option<CollectionKind>> {
     let video_hit: i64 = sqlx::query_scalar!(
@@ -73,7 +71,7 @@ pub(crate) async fn section_kind(
         .ok_or_else(|| err_not_found("section"))
 }
 
-// ─── Read entry points ────────────────────────────────────────────────────
+// ─── Read entry points ───────────────────────────────────────────────────────
 
 pub async fn fetch_collections(
     pool: &SqlitePool,
@@ -160,14 +158,14 @@ pub async fn fetch_collection_summaries(
     }
 }
 
-// ─── Insert entry points ──────────────────────────────────────────────────
+// ─── Insert entry points ─────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_video_collection(
     pool: &SqlitePool,
     id: Uuid,
     section_slug: &Slug,
-    title: &str,
+    title: &Title,
     description: Option<&str>,
     tags: &[TagName],
     poster: &PosterUrl,
@@ -180,7 +178,7 @@ pub async fn insert_audio_collection(
     pool: &SqlitePool,
     id: Uuid,
     section_slug: &Slug,
-    title: &str,
+    title: &Title,
     description: Option<&str>,
     tags: &[TagName],
     poster: Option<PosterUrl>,
@@ -188,52 +186,64 @@ pub async fn insert_audio_collection(
     audio::insert(pool, id, section_slug, title, description, tags, poster).await
 }
 
-// ─── Field / poster updates ───────────────────────────────────────────────
+// ─── Field / poster updates ──────────────────────────────────────────────────
 
-pub async fn update_collection_field(
+pub async fn update_collection_title(
     pool: &SqlitePool,
     id: Uuid,
-    field: CollectionField,
-    value: Option<&str>,
+    title: &Title,
 ) -> sqlx::Result<()> {
-    match kind_of(pool, id)
-        .await?
-        .ok_or_else(|| err_not_found("collection"))?
-    {
-        CollectionKind::Video => video::update_field(pool, id, field, value).await,
-        CollectionKind::Audio => audio::update_field(pool, id, field, value).await,
+    let kind = kind_of(pool, id).await?;
+    let Some(kind) = kind else {
+        return Err(err_not_found("collection"));
+    };
+    match kind {
+        CollectionKind::Video => video::update_title(pool, id, title).await,
+        CollectionKind::Audio => audio::update_title(pool, id, title).await,
+    }
+}
+
+pub async fn update_collection_description(
+    pool: &SqlitePool,
+    id: Uuid,
+    value: &str,
+) -> sqlx::Result<()> {
+    let kind = kind_of(pool, id).await?;
+    let Some(kind) = kind else {
+        return Err(err_not_found("collection"));
+    };
+    match kind {
+        CollectionKind::Video => video::update_description(pool, id, value).await,
+        CollectionKind::Audio => audio::update_description(pool, id, value).await,
     }
 }
 
 pub async fn set_collection_poster(
     pool: &SqlitePool,
     id: Uuid,
-    poster: Option<&PosterUrl>,
+    poster: &PosterUrl,
 ) -> sqlx::Result<()> {
-    match kind_of(pool, id)
-        .await?
-        .ok_or_else(|| err_not_found("collection"))?
-    {
-        CollectionKind::Video => {
-            let poster = poster.ok_or_else(|| {
-                sqlx::Error::Protocol("video collection poster cannot be cleared".into())
-            })?;
-            video::set_poster(pool, id, poster).await
-        }
+    let kind = kind_of(pool, id).await?;
+    let Some(kind) = kind else {
+        return Err(err_not_found("collection"));
+    };
+    match kind {
+        CollectionKind::Video => video::set_poster(pool, id, poster).await,
         CollectionKind::Audio => audio::set_poster(pool, id, poster).await,
     }
 }
 
-// ─── Delete / move ────────────────────────────────────────────────────────
+// ─── Delete / move ───────────────────────────────────────────────────────────
 
 pub async fn delete_collection_cascade(
     pool: &SqlitePool,
     id: Uuid,
 ) -> sqlx::Result<CollectionDeletion> {
-    match kind_of(pool, id)
-        .await?
-        .ok_or_else(|| err_not_found("collection"))?
-    {
+    let kind = kind_of(pool, id).await?;
+    let Some(kind) = kind else {
+        return Err(err_not_found("collection"));
+    };
+    match kind {
         CollectionKind::Video => video::delete_cascade(pool, id).await,
         CollectionKind::Audio => audio::delete_cascade(pool, id).await,
     }
@@ -244,24 +254,27 @@ pub async fn move_collection_to_section(
     collection_id: Uuid,
     to_section_slug: &Slug,
 ) -> Result<CollectionMove, MoveCollectionError> {
-    match kind_of(pool, collection_id)
+    let kind = kind_of(pool, collection_id)
         .await
-        .map_err(MoveCollectionError::Db)?
-        .ok_or_else(|| MoveCollectionError::Db(err_not_found("collection")))?
-    {
+        .map_err(MoveCollectionError::Db)?;
+    let Some(kind) = kind else {
+        return Err(MoveCollectionError::Db(err_not_found("collection")));
+    };
+    match kind {
         CollectionKind::Video => video::move_to_section(pool, collection_id, to_section_slug).await,
         CollectionKind::Audio => audio::move_to_section(pool, collection_id, to_section_slug).await,
     }
 }
 
-// ─── Decrement-or-delete ──────────────────────────────────────────────────
+// ─── Decrement-or-delete ─────────────────────────────────────────────────────
 
 pub(crate) async fn decrement_or_delete(
     conn: &mut sqlx::SqliteConnection,
     collection_id: Uuid,
     delta: i64,
 ) -> sqlx::Result<Option<PosterUrl>> {
-    let Some(kind) = kind_of_tx(conn, collection_id).await? else {
+    let kind = kind_of_tx(conn, collection_id).await?;
+    let Some(kind) = kind else {
         return Ok(None);
     };
 
@@ -355,7 +368,7 @@ struct _AudioCount {
     poster: Option<String>,
 }
 
-// ─── Shared shapes ────────────────────────────────────────────────────────
+// ─── Shared shapes ───────────────────────────────────────────────────────────
 
 pub struct CollectionDeletion {
     pub media_paths: Vec<RelPath>,

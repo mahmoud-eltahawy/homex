@@ -3,7 +3,7 @@ use crate::app::error::AppError;
 use crate::app::error::ErrorCode;
 use crate::app::ids::Slug;
 use crate::app::model::{MediaKind, Section};
-use crate::app::types::TagName;
+use crate::app::types::{TagName, Title};
 use leptos::prelude::*;
 use uuid::Uuid;
 
@@ -13,14 +13,10 @@ use crate::app::error::ErrorContext;
 use crate::app::server::db;
 
 #[server]
-pub async fn patch_section_title(id: Uuid, title: String) -> Result<(), AppError> {
+pub async fn patch_section_title(id: Uuid, title: Title) -> Result<(), AppError> {
     use crate::app::server::AppState;
     let state: AppState = expect_context();
-    let t = title.trim();
-    if t.is_empty() {
-        return Err(AppError::validation(ErrorCode::TitleRequired));
-    }
-    db::update_section_title(&state.db, id, t)
+    db::update_section_title(&state.db, id, &title)
         .await
         .context("patch section title")?;
     Ok(())
@@ -81,18 +77,13 @@ pub fn short_hash() -> String {
 
 #[server]
 pub async fn create_section(
-    title: String,
+    title: Title,
     media_kind: MediaKind,
     nested: bool,
 ) -> Result<Uuid, AppError> {
     use crate::app::server::AppState;
 
     let state: AppState = expect_context();
-
-    let title = title.trim().to_string();
-    if title.is_empty() {
-        return Err(AppError::validation(ErrorCode::NameRequired));
-    }
 
     let prefix = prefix_for(media_kind, nested);
 

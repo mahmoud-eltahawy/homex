@@ -11,29 +11,15 @@ use crate::app::server::convert::{
     JobPhase, Jobs, TargetFormat, convert_file, ffprobe_duration, is_audio_container_supported,
     is_video_container_supported, job_set_phase,
 };
-use crate::app::types::{FileExt, JobId, RelPath};
+use crate::app::types::{FileName, JobId, RelPath};
 
-use super::naming::{sanitize_filename, slugify};
+use super::naming::slugify;
 use super::types::{StagedFile, UploadFile, UploadPayload, UploadTarget};
 
 const COPY_CHUNK: usize = 4 * 1024 * 1024;
 
-fn extension_of(name: &str) -> Option<FileExt> {
-    FileExt::from_filename(name)
-}
-
-fn stem_of(name: &str) -> String {
-    name.rsplit_once('.')
-        .map(|(s, _)| s.to_string())
-        .unwrap_or_else(|| name.to_string())
-}
-
-fn safe_stem(name: &str) -> String {
-    sanitize_filename(&stem_of(name))
-}
-
-fn target_for(kind: MediaKind, filename: &str) -> Option<TargetFormat> {
-    let ext = extension_of(filename);
+fn target_for(kind: MediaKind, filename: &FileName) -> Option<TargetFormat> {
+    let ext = filename.extension();
     match kind {
         MediaKind::Video if ext.as_ref().is_some_and(is_video_container_supported) => None,
         MediaKind::Video => Some(TargetFormat::Mp4),
@@ -69,7 +55,7 @@ impl StagingPlan {
 fn storage_slug(payload: &UploadPayload) -> String {
     match &payload.target {
         UploadTarget::New { title, .. } => {
-            let raw = slugify(title);
+            let raw = slugify(title.as_str());
             if raw.is_empty() {
                 Uuid::new_v4().to_string()
             } else {
@@ -169,9 +155,9 @@ async fn place_raw_file(
     ctx: &StagingContext<'_>,
     file: &UploadFile,
 ) -> Result<PlacedRaw, AppError> {
-    let ext = extension_of(&file.filename);
+    let ext = file.filename.extension();
     let ext_str = ext.as_ref().map(|e| e.as_str()).unwrap_or("");
-    let stem = safe_stem(&file.filename);
+    let stem = file.filename.stem().to_string();
     let token = Uuid::new_v4();
     let rel = ctx.plan.rel_for(&stem, token, ext_str);
     let abs = rel.join_under(ctx.media_root);
@@ -180,7 +166,7 @@ async fn place_raw_file(
         &file.temp_path,
         &abs,
         file.size,
-        &file.filename,
+        file.filename.as_str(),
         &ctx.state.jobs,
         ctx.job_id,
     )
@@ -235,7 +221,7 @@ async fn stage_converted_file(
         total_secs,
         ctx.conversion_pos,
         ctx.conversion_count,
-        &file.filename,
+        file.filename.as_str(),
         &ctx.state.jobs,
         ctx.job_id,
         ctx.cancel,

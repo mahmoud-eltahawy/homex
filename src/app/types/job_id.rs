@@ -10,15 +10,9 @@ use uuid::Uuid;
 ///
 /// Wraps a [`Uuid`]. Used as the key of the job map, as the parameter of
 /// polling and cancellation, and as a wire field. `Display` and `FromStr`
-/// use the canonical UUID string form, so the on-wire representation is
-/// unchanged from the previous `Uuid::new_v4().to_string()` — but every
-/// intermediate step carries the type.
-///
-/// A `String` key can be typo'd into a lookup that silently returns `None`.
-/// A `JobId` cannot: the map, the poll request, and the cancellation request
-/// all agree on the type, and the compiler is the check.
+/// use the canonical UUID string form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(try_from = "String", into = "String")]
 pub struct JobId(Uuid);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +50,19 @@ impl FromStr for JobId {
     }
 }
 
+impl TryFrom<String> for JobId {
+    type Error = JobIdError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl From<JobId> for String {
+    fn from(j: JobId) -> String {
+        j.0.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +78,13 @@ mod tests {
     #[test]
     fn rejects_garbage() {
         assert!("not-a-uuid".parse::<JobId>().is_err());
+    }
+
+    #[test]
+    fn serde_roundtrip() {
+        let id = JobId::new_v4();
+        let s = serde_json::to_string(&id).unwrap();
+        let back: JobId = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, id);
     }
 }

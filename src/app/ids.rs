@@ -1,14 +1,7 @@
 //! Strongly-typed identifiers and small domain newtypes.
-//!
-//! A `String` that reaches a domain boundary is parsed into one of these
-//! types immediately. From that point on, the type system carries the
-//! invariant, and the rest of the codebase never has to wonder whether a
-//! value is a valid slug.
 
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-
-// ─── Slug ─────────────────────────────────────────────────────────────────
 
 /// A URL-safe section identifier.
 ///
@@ -17,11 +10,8 @@ use std::fmt::{self, Display};
 /// - Characters limited to `[a-z0-9-]`.
 /// - Does not begin or end with `-`.
 /// - Contains no `--`.
-///
-/// [`Slug::new`] enforces these; the `Deserialize` impl routes every
-/// inbound value through `new`, so a slug arriving from JSON or a URL is
-/// already valid by the time it reaches a server function.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct Slug(String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,9 +59,7 @@ impl Slug {
     }
 
     /// Construct from a value that originated from our own database.
-    ///
-    /// Every slug written to the database passed through [`Slug::new`], so
-    /// the invariant holds. Skips re-validation to keep row decoding cheap.
+    #[allow(dead_code)] // Called only by ssr-gated server code.
     pub(crate) fn from_stored(raw: String) -> Self {
         Slug(raw)
     }
@@ -100,8 +88,15 @@ impl AsRef<str> for Slug {
     }
 }
 
+impl TryFrom<String> for Slug {
+    type Error = SlugError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Slug::new(s)
+    }
+}
+
 impl From<Slug> for String {
-    fn from(s: Slug) -> Self {
+    fn from(s: Slug) -> String {
         s.0
     }
 }

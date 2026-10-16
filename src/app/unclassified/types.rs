@@ -1,14 +1,15 @@
 //! Wire types shared between client and server for the unclassified feature.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
 use crate::app::model::{CollectionSummary, MediaKind};
-use crate::app::types::{FileExt, JobId, RelPath};
+use crate::app::types::{FileExt, FileName, JobId, RelPath, Title};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnclassifiedEntry {
-    pub name: String,
+    pub name: FileName,
     pub rel_path: RelPath,
     pub is_dir: bool,
     pub size: u64,
@@ -19,7 +20,7 @@ pub struct UnclassifiedEntry {
 pub struct SectionWithCollections {
     pub id: Uuid,
     pub slug: Slug,
-    pub title: String,
+    pub title: Title,
     pub nested: bool,
     pub collections: Vec<CollectionSummary>,
 }
@@ -27,13 +28,13 @@ pub struct SectionWithCollections {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClassifyInput {
     pub rel_path: RelPath,
-    pub title: String,
+    pub title: Title,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClassifyDestination {
     Existing(Uuid),
-    New { section_slug: Slug, title: String },
+    New { section_slug: Slug, title: Title },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,7 +64,7 @@ pub struct FileJobHandle {
     pub section_slug: String,
     pub collection_id: Option<Uuid>,
     pub rel_path: RelPath,
-    pub title: String,
+    pub title: Title,
     pub season_number: Option<i64>,
 }
 

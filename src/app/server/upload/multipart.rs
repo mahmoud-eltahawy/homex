@@ -4,8 +4,8 @@ use server_fn::codec::MultipartData;
 use tokio::io::AsyncWriteExt;
 
 use crate::app::error::{AppError, ErrorCode};
-use crate::app::types::FileExt;
-use crate::app::upload_types::{FILE_FIELD, FORM_FIELD, POSTER_FIELD, UploadFileMeta, UploadForm};
+use crate::app::types::{FileExt, FileName};
+use crate::app::upload_types::{FILE_FIELD, FORM_FIELD, POSTER_FIELD, UploadForm};
 
 use super::naming::extension_of;
 use super::types::{UploadFile, UploadPayload};
@@ -91,15 +91,17 @@ pub async fn parse_upload_multipart(data: MultipartData) -> Result<UploadPayload
         .files
         .into_iter()
         .zip(files)
-        .map(
-            |(UploadFileMeta { title, .. }, (filename, temp_path, size))| UploadFile {
+        .map(|(meta, (filename, temp_path, size))| {
+            let filename = FileName::new(filename)
+                .map_err(|e| AppError::hidden(ErrorCode::InvalidPath, "upload filename", e))?;
+            Ok::<UploadFile, AppError>(UploadFile {
                 filename,
-                title,
+                title: meta.title,
                 temp_path,
                 size,
-            },
-        )
-        .collect();
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
 
     if upload_files.is_empty() {
         return Err(AppError::public(ErrorCode::NoFilesReceived));

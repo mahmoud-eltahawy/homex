@@ -4,15 +4,15 @@ use uuid::Uuid;
 use super::super::err_not_found;
 use super::super::files::purge_orphan_files;
 use super::super::tags::{collection_ids_with_all_tags, fetch_collection_tags};
-use super::{CollectionDeletion, CollectionField, CollectionMove, MoveCollectionError};
+use super::{CollectionDeletion, CollectionMove, MoveCollectionError};
 use crate::app::ids::Slug;
 use crate::app::model::{
     Collection, CollectionSummary, MediaKind, SearchQuery, SectionRow, VideoCollectionRow,
     canonicalize_tags,
 };
-use crate::app::types::{PosterUrl, TagName};
+use crate::app::types::{PosterUrl, TagName, Title};
 
-// ─── Read ─────────────────────────────────────────────────────────────────
+// ─── Read ────────────────────────────────────────────────────────────────────
 
 pub(super) async fn fetch(
     pool: &SqlitePool,
@@ -163,18 +163,19 @@ pub(super) async fn summaries(
         .fetch_all(pool)
         .await?;
 
+        let section_title = Title::from_stored(section.title.clone());
         out.extend(rows.into_iter().map(|c| CollectionSummary {
-            section_title: section.title.clone(),
             id: c.id,
-            title: c.title,
+            title: Title::from_stored(c.title),
             section_slug: Slug::from_stored(c.section_slug),
+            section_title: section_title.clone(),
             nested: section.nested,
         }));
     }
     Ok(out)
 }
 
-// ─── Insert ───────────────────────────────────────────────────────────────
+// ─── Insert ──────────────────────────────────────────────────────────────────
 
 async fn next_position(conn: &mut sqlx::SqliteConnection, section_id: Uuid) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
@@ -231,7 +232,7 @@ pub(super) async fn insert(
     pool: &SqlitePool,
     id: Uuid,
     section_slug: &Slug,
-    title: &str,
+    title: &Title,
     description: Option<&str>,
     tags: &[TagName],
     poster: &PosterUrl,
@@ -262,7 +263,7 @@ pub(super) async fn insert(
         id,
         section.id,
         section.slug,
-        title,
+        title.as_str(),
         poster.as_str(),
         description,
         next,
@@ -275,35 +276,31 @@ pub(super) async fn insert(
     Ok(())
 }
 
-// ─── Field / poster updates ───────────────────────────────────────────────
+// ─── Field / poster updates ──────────────────────────────────────────────────
 
-pub(super) async fn update_field(
+pub(super) async fn update_description(
     pool: &SqlitePool,
     id: Uuid,
-    field: CollectionField,
-    value: Option<&str>,
+    value: &str,
 ) -> sqlx::Result<()> {
-    match field {
-        CollectionField::Title => {
-            sqlx::query!(
-                r#"UPDATE video_collections SET title = ? WHERE id = ?"#,
-                value.unwrap_or_default(),
-                id,
-            )
-            .execute(pool)
-            .await?;
-        }
-        CollectionField::Description => {
-            sqlx::query!(
-                r#"UPDATE video_collections SET description = ? WHERE id = ?"#,
-                value,
-                id,
-            )
-            .execute(pool)
-            .await?;
-        }
-        CollectionField::Poster => {}
-    }
+    sqlx::query!(
+        r#"UPDATE video_collections SET description = ? WHERE id = ?"#,
+        value,
+        id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub(super) async fn update_title(pool: &SqlitePool, id: Uuid, value: &Title) -> sqlx::Result<()> {
+    sqlx::query!(
+        r#"UPDATE video_collections SET title = ? WHERE id = ?"#,
+        value.as_str(),
+        id,
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -322,7 +319,7 @@ pub(super) async fn set_poster(
     Ok(())
 }
 
-// ─── Delete ───────────────────────────────────────────────────────────────
+// ─── Delete ──────────────────────────────────────────────────────────────────
 
 pub(super) async fn delete_cascade(
     pool: &SqlitePool,
@@ -363,7 +360,7 @@ pub(super) async fn delete_cascade(
     })
 }
 
-// ─── Move to another section ──────────────────────────────────────────────
+// ─── Move to another section ─────────────────────────────────────────────────
 
 pub(super) async fn move_to_section(
     pool: &SqlitePool,

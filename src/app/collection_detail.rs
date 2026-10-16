@@ -14,19 +14,19 @@ use leptos_media_player::{MediaItem, WatchPage};
 use crate::app::error::AppError;
 use crate::app::ids::Slug;
 use crate::app::route_params::{use_optional_uuid_param, use_slug_param, use_uuid_param};
-use crate::app::types::{PosterUrl, TagName};
+use crate::app::types::{FileName, PosterUrl, TagName, Title};
 use crate::app::{
     collections::{
         delete_item, fetch_collection_detail, fetch_collection_summaries, fetch_items,
-        move_collection_to_section, move_item, move_items_to_collection, patch_collection_field,
-        patch_collection_tags, patch_item_title, regenerate_collection_poster,
-        upload_collection_poster,
+        move_collection_to_section, move_item, move_items_to_collection,
+        patch_collection_description, patch_collection_tags, patch_collection_title,
+        patch_item_title, regenerate_collection_poster, upload_collection_poster,
     },
     common::refetch_on_success,
     detail::{DetailHero, DetailShell, DownloadButton, HeroBadge, HeroMeta},
     icons::{ClockIcon, MoviePosterSvg, MusicPosterSvg, UploadIcon, icon_for},
     inline_edit::{EditablePoster, EditableText, EditableTextArea, use_edit_mode},
-    model::{Collection, CollectionField, CollectionSummary, Item, MediaKind, Section},
+    model::{Collection, CollectionSummary, Item, MediaKind, Section},
     sections::fetch_section_by_slug,
     tags::TagEditor,
     unclassified::move_items_to_incoming,
@@ -39,21 +39,23 @@ use crate::app::{
 use leptos_outcome::ErrorView;
 use leptos_page::{Page, PageContent};
 
-// ─── Action type aliases ──────────────────────────────────────────────────
+// ─── Action type aliases ─────────────────────────────────────────────────────
 
-type PatchAction = Action<(Uuid, CollectionField, Option<String>), Result<(), AppError>>;
+type PatchTitleAction = Action<(Uuid, Title), Result<(), AppError>>;
+type PatchDescriptionAction = Action<(Uuid, String), Result<(), AppError>>;
 type PosterUploadAction = Action<web_sys::FormData, Result<PosterUrl, AppError>>;
 type RegenerateAction = Action<(Slug, Uuid), Result<PosterUrl, AppError>>;
-type RenameItemAction = Action<(Uuid, String), Result<(), AppError>>;
+type RenameItemAction = Action<(Uuid, Option<Title>), Result<(), AppError>>;
 type DeleteItemAction = Action<Uuid, Result<(), AppError>>;
 type TagsAction = Action<(Uuid, Vec<TagName>), Result<(), AppError>>;
 type MoveToIncomingAction = Action<Vec<Uuid>, Result<(), AppError>>;
 
-// ─── Collection actions bundle ────────────────────────────────────────────
+// ─── Collection actions bundle ───────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 struct CollectionActions {
-    patch: PatchAction,
+    patch_title: PatchTitleAction,
+    patch_description: PatchDescriptionAction,
     poster_upload: PosterUploadAction,
     regenerate: RegenerateAction,
     rename_item: RenameItemAction,
@@ -64,18 +66,19 @@ struct CollectionActions {
 
 impl CollectionActions {
     fn new(items: Resource<Result<Vec<Item>, AppError>>) -> Self {
-        let patch = Action::new_local(
-            |(id, field, value): &(Uuid, CollectionField, Option<String>)| {
-                patch_collection_field(*id, *field, value.clone())
-            },
-        );
+        let patch_title = Action::new_local(|(id, value): &(Uuid, Title)| {
+            patch_collection_title(*id, value.clone())
+        });
+        let patch_description = Action::new_local(|(id, value): &(Uuid, String)| {
+            patch_collection_description(*id, value.clone())
+        });
         let poster_upload =
             Action::new_local(|fd: &web_sys::FormData| upload_collection_poster(fd.clone().into()));
         let regenerate = Action::new_local(|(slug, id): &(Slug, Uuid)| {
             regenerate_collection_poster(slug.clone(), *id)
         });
         let rename_item =
-            Action::new_local(|(id, t): &(Uuid, String)| patch_item_title(*id, t.clone()));
+            Action::new_local(|(id, t): &(Uuid, Option<Title>)| patch_item_title(*id, t.clone()));
         let delete_item = Action::new_local(|id: &Uuid| delete_item(*id));
         let tags = Action::new_local(|(id, t): &(Uuid, Vec<TagName>)| {
             patch_collection_tags(*id, t.clone())
@@ -88,7 +91,8 @@ impl CollectionActions {
         refetch_on_success(move_item, items);
 
         Self {
-            patch,
+            patch_title,
+            patch_description,
             poster_upload,
             regenerate,
             rename_item,
@@ -98,8 +102,8 @@ impl CollectionActions {
         }
     }
 
-    fn rename_callback(self) -> Callback<(Uuid, String)> {
-        Callback::new(move |(id, t): (Uuid, String)| {
+    fn rename_callback(self) -> Callback<(Uuid, Option<Title>)> {
+        Callback::new(move |(id, t): (Uuid, Option<Title>)| {
             let _ = self.rename_item.dispatch((id, t));
         })
     }
@@ -116,8 +120,11 @@ impl CollectionActions {
         })
     }
 
-    fn patch_error(self) -> Signal<Option<AppError>> {
-        action_error(self.patch)
+    fn patch_title_error(self) -> Signal<Option<AppError>> {
+        action_error(self.patch_title)
+    }
+    fn patch_description_error(self) -> Signal<Option<AppError>> {
+        action_error(self.patch_description)
     }
     fn poster_error(self) -> Signal<Option<AppError>> {
         action_error(self.poster_upload)
@@ -139,11 +146,11 @@ impl CollectionActions {
     }
 }
 
-// ─── Collection edit state ────────────────────────────────────────────────
+// ─── Collection edit state ───────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 struct CollectionEditState {
-    title: RwSignal<String>,
+    title: RwSignal<Title>,
     description: RwSignal<String>,
     poster: RwSignal<Option<PosterUrl>>,
     commit_title: Callback<String>,
@@ -151,7 +158,11 @@ struct CollectionEditState {
 }
 
 impl CollectionEditState {
-    fn new(collection: &Collection, patch: PatchAction) -> Self {
+    fn new(
+        collection: &Collection,
+        patch_title: PatchTitleAction,
+        patch_desc: PatchDescriptionAction,
+    ) -> Self {
         let collection_id = collection.id;
 
         let title = RwSignal::new(collection.title.clone());
@@ -159,13 +170,15 @@ impl CollectionEditState {
         let poster = RwSignal::new(collection.poster.clone());
 
         let commit_title = Callback::new(move |v: String| {
-            title.set(v.clone());
-            patch.dispatch((collection_id, CollectionField::Title, Some(v)));
+            let Ok(t) = Title::new(v) else {
+                return;
+            };
+            title.set(t.clone());
+            let _ = patch_title.dispatch((collection_id, t));
         });
         let commit_desc = Callback::new(move |v: String| {
             description.set(v.clone());
-            let val = if v.is_empty() { None } else { Some(v) };
-            patch.dispatch((collection_id, CollectionField::Description, val));
+            let _ = patch_desc.dispatch((collection_id, v));
         });
 
         Self {
@@ -178,7 +191,7 @@ impl CollectionEditState {
     }
 }
 
-// ─── Poster upload (audio only) ───────────────────────────────────────────
+// ─── Poster upload (audio only) ──────────────────────────────────────────────
 
 fn use_poster_upload(
     section_slug: Slug,
@@ -207,7 +220,7 @@ fn use_poster_upload(
     on_file
 }
 
-// ─── Placeholder & adapter builders ───────────────────────────────────────
+// ─── Placeholder & adapter builders ──────────────────────────────────────────
 
 fn make_poster_placeholder(is_audio: bool) -> ViewFn {
     ViewFn::from(move || {
@@ -221,13 +234,13 @@ fn make_poster_placeholder(is_audio: bool) -> ViewFn {
 
 #[allow(clippy::too_many_arguments)]
 fn make_playlist_adapter(
-    playlist_title: String,
+    playlist_title: Title,
     poster: Option<PosterUrl>,
     is_audio: bool,
     is_series: bool,
     selected_season: RwSignal<Option<i64>>,
     initial_item_id: Option<Uuid>,
-    on_rename: Callback<(Uuid, String)>,
+    on_rename: Callback<(Uuid, Option<Title>)>,
     on_delete: Callback<Uuid>,
     on_move: Callback<(Uuid, bool)>,
 ) -> impl Fn(Vec<Item>) -> PlaylistProps {
@@ -237,7 +250,7 @@ fn make_playlist_adapter(
         is_series,
         selected_season,
         artwork: poster.as_ref().map(|p| p.to_string()),
-        playlist_title: playlist_title.clone(),
+        playlist_title: playlist_title.as_str().to_string(),
         initial_item_id,
         on_rename,
         on_delete,
@@ -245,7 +258,7 @@ fn make_playlist_adapter(
     }
 }
 
-// ─── Page content ─────────────────────────────────────────────────────────
+// ─── Page content ────────────────────────────────────────────────────────────
 
 pub struct CollectionDetailContent {
     section: Resource<Result<Section, AppError>>,
@@ -303,7 +316,7 @@ impl PageContent<RouteError> for CollectionDetailContent {
 
 pub type CollectionDetailPage = Page<CollectionDetailContent, RouteError>;
 
-// ─── Body / hero / playlist ───────────────────────────────────────────────
+// ─── Body / hero / playlist ──────────────────────────────────────────────────
 
 #[component]
 fn CollectionDetailBody(
@@ -340,7 +353,8 @@ fn CollectionContent(
     let organizing = RwSignal::new(false);
 
     let actions = CollectionActions::new(items);
-    let edit = CollectionEditState::new(&collection, actions.patch);
+    let edit =
+        CollectionEditState::new(&collection, actions.patch_title, actions.patch_description);
 
     let tags_signal = RwSignal::new(collection.tags.clone());
     let on_tags_commit = Callback::new(move |names: Vec<TagName>| {
@@ -391,7 +405,8 @@ fn CollectionContent(
     let badge_label = section.badge_label();
     let kind = section.media_kind;
 
-    let patch_error = actions.patch_error();
+    let patch_title_error = actions.patch_title_error();
+    let patch_desc_error = actions.patch_description_error();
     let poster_error = actions.poster_error();
     let regenerate_error = actions.regenerate_error();
     let tags_error = actions.tags_error();
@@ -449,7 +464,7 @@ fn CollectionContent(
                     </div>
                 </Show>
                 <EditableText
-                    value=Signal::derive(move || edit.title.get())
+                    value=Signal::derive(move || edit.title.get().to_string())
                     on_commit=edit.commit_title
                     class="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight mb-2 text-white"
                 />
@@ -476,7 +491,8 @@ fn CollectionContent(
                     <TagEditor tags=tags_signal on_commit=on_tags_commit/>
                 </div>
                 <div class="mt-2 max-w-2xl space-y-1">
-                    <ErrorView error=patch_error/>
+                    <ErrorView error=patch_title_error/>
+                    <ErrorView error=patch_desc_error/>
                     <ErrorView error=tags_error/>
                     <ErrorView error=poster_error/>
                     <ErrorView error=regenerate_error/>
@@ -534,7 +550,7 @@ fn CollectionContent(
     }
 }
 
-// ─── Append items ─────────────────────────────────────────────────────────
+// ─── Append items ────────────────────────────────────────────────────────────
 
 fn accept_for_kind(is_audio: bool) -> String {
     if is_audio {
@@ -542,12 +558,6 @@ fn accept_for_kind(is_audio: bool) -> String {
     } else {
         video_accept_attr()
     }
-}
-
-fn file_stem(name: &str) -> String {
-    name.rsplit_once('.')
-        .map(|(s, _)| s.to_string())
-        .unwrap_or_else(|| name.to_string())
 }
 
 fn build_append_formdata(
@@ -564,10 +574,13 @@ fn build_append_formdata(
         if let Some(f) = files.get(i) {
             let file: web_sys::File = f.unchecked_into();
             let name = file.name();
-            metas.push(UploadFileMeta {
-                filename: name.clone(),
-                title: file_stem(&name),
-            });
+            let Ok(filename) = FileName::new(name) else {
+                continue;
+            };
+            let Ok(title) = Title::new(filename.stem().to_string()) else {
+                continue;
+            };
+            metas.push(UploadFileMeta { filename, title });
             file_vec.push(file);
         }
     }
@@ -691,7 +704,7 @@ fn AppendItems(
     }
 }
 
-// ─── Playlist ─────────────────────────────────────────────────────────────
+// ─── Playlist ────────────────────────────────────────────────────────────────
 
 #[component]
 fn Playlist(
@@ -702,7 +715,7 @@ fn Playlist(
     artwork: Option<String>,
     playlist_title: String,
     initial_item_id: Option<Uuid>,
-    on_rename: Callback<(Uuid, String)>,
+    on_rename: Callback<(Uuid, Option<Title>)>,
     on_delete: Callback<Uuid>,
     on_move: Callback<(Uuid, bool)>,
 ) -> impl IntoView {
@@ -723,6 +736,14 @@ fn Playlist(
     }
 
     let items_for_body = items.clone();
+
+    // WatchPage's rename callback takes a String (it has no knowledge of the
+    // Title newtype). Adapt at the boundary.
+    let on_rename_for_watch: Callback<(Uuid, String)> =
+        Callback::new(move |(id, s): (Uuid, String)| {
+            let title = Title::new(s).ok();
+            on_rename.run((id, title));
+        });
 
     let body = move || {
         let current = selected_season.get();
@@ -755,7 +776,7 @@ fn Playlist(
         let media_items: Vec<MediaItem> = filtered
             .iter()
             .map(|it| {
-                let mut mi = MediaItem::new(it.id, it.display_title(), it.file_path());
+                let mut mi = MediaItem::new(it.id, it.display_title(), it.file_path().as_str());
                 if let Some(season) = it.season_number {
                     mi = mi.with_subtitle(format!("S{season:02}"));
                 }
@@ -765,7 +786,7 @@ fn Playlist(
 
         let single_item_download = if filtered.len() == 1 {
             let item = &filtered[0];
-            Some((item.file_path(), item.display_title()))
+            Some((item.file_path().as_str().to_string(), item.display_title()))
         } else {
             None
         };
@@ -784,7 +805,7 @@ fn Playlist(
                     audio=audio
                     artwork=artwork.clone()
                     playlist_title=playlist_title.clone()
-                    on_rename=on_rename
+                    on_rename=on_rename_for_watch
                     on_delete=on_delete
                     on_move=on_move
                     show_download=true
@@ -803,7 +824,7 @@ fn Playlist(
     }
 }
 
-// ─── Season bar ───────────────────────────────────────────────────────────
+// ─── Season bar ──────────────────────────────────────────────────────────────
 
 fn next_season_number(seasons: &[i64]) -> i64 {
     seasons.iter().copied().max().unwrap_or(0) + 1
@@ -883,7 +904,7 @@ fn SeasonBar(seasons: Vec<i64>, selected_season: RwSignal<Option<i64>>) -> impl 
     }
 }
 
-// ─── Move collection to another section ───────────────────────────────────
+// ─── Move collection to another section ──────────────────────────────────────
 
 #[component]
 fn MoveCollectionPicker(
@@ -942,7 +963,7 @@ fn MoveCollectionPicker(
                 >
                     <option value="">"Move to…"</option>
                     <For each=move || options.get() key=|s| s.slug.clone() let:s>
-                        <option value=s.slug.to_string()>{s.title.clone()}</option>
+                        <option value=s.slug.to_string()>{s.title.to_string()}</option>
                     </For>
                 </select>
                 <ErrorView error=action_error(action)/>
@@ -951,7 +972,7 @@ fn MoveCollectionPicker(
     }
 }
 
-// ─── Organize items panel ─────────────────────────────────────────────────
+// ─── Organize items panel ────────────────────────────────────────────────────
 
 #[component]
 fn OrganizeItemsPanel(

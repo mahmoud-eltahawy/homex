@@ -6,7 +6,7 @@ use leptos_outcome::{ErrorView, ResourceView, action_error};
 use uuid::Uuid;
 
 use crate::app::ids::Slug;
-use crate::app::types::TagName;
+use crate::app::types::{TagName, Title};
 use crate::app::{
     common::{
         CardsLoading, CollectionCount, CollectionGrid, CollectionPage, EmptyState,
@@ -179,9 +179,9 @@ fn SectionTeaser(
 
 #[derive(Clone, Copy)]
 struct SectionHeaderState {
-    title: RwSignal<String>,
+    title: RwSignal<Title>,
     commit_title: Callback<String>,
-    rename: Action<(Uuid, String), Result<(), AppError>>,
+    rename: Action<(Uuid, Title), Result<(), AppError>>,
     delete_action: Action<Uuid, Result<(), AppError>>,
     tags_action: Action<(Uuid, Vec<TagName>), Result<(), AppError>>,
 }
@@ -193,7 +193,7 @@ fn use_section_header_state(
     let id = section.id;
     let title = RwSignal::new(section.title.clone());
 
-    let rename = Action::new_local(|(id, t): &(Uuid, String)| patch_section_title(*id, t.clone()));
+    let rename = Action::new_local(|(id, t): &(Uuid, Title)| patch_section_title(*id, t.clone()));
     let delete_action = Action::new_local(|id: &Uuid| delete_section(*id));
     let tags_action = Action::new_local(|(id, tags): &(Uuid, Vec<TagName>)| {
         patch_section_tags(*id, tags.clone())
@@ -203,8 +203,9 @@ fn use_section_header_state(
     refetch_on_success(delete_action, sections_resource);
 
     let commit_title = Callback::new(move |v: String| {
-        title.set(v.clone());
-        let _ = rename.dispatch((id, v));
+        let Ok(t) = Title::new(v) else { return };
+        title.set(t.clone());
+        let _ = rename.dispatch((id, t));
     });
 
     SectionHeaderState {
@@ -297,7 +298,7 @@ fn SectionHeader(
 #[component]
 fn SectionHeaderViewMode(
     #[prop(into)] href: String,
-    title: RwSignal<String>,
+    title: RwSignal<Title>,
     count: usize,
     kind: MediaKind,
     nested: bool,
@@ -309,7 +310,7 @@ fn SectionHeaderViewMode(
         >
             <span class="flex items-center shrink-0">{icon_for(kind, nested)}</span>
             <span class="text-lg font-bold text-white group-hover:text-cyan-300 transition truncate">
-                {move || title.get()}
+                {move || title.get().to_string()}
             </span>
             <span class="text-sm font-mono text-white/60 bg-white/10 px-3 py-0.5 rounded-full shrink-0">
                 {count}
@@ -320,7 +321,7 @@ fn SectionHeaderViewMode(
 
 #[component]
 fn SectionHeaderEditMode(
-    title: RwSignal<String>,
+    title: RwSignal<Title>,
     count: usize,
     kind: MediaKind,
     on_commit: Callback<String>,
@@ -330,7 +331,7 @@ fn SectionHeaderEditMode(
         <div class="flex items-center gap-3 min-w-0">
             <span class="flex items-center shrink-0">{icon_for(kind, nested)}</span>
             <EditableText
-                value=Signal::derive(move || title.get())
+                value=Signal::derive(move || title.get().to_string())
                 on_commit=on_commit
                 class="text-lg font-bold text-white truncate"
             />
@@ -413,7 +414,7 @@ struct NewSectionFormState {
     kind: RwSignal<MediaKind>,
     nested: RwSignal<bool>,
     client_error: RwSignal<Option<String>>,
-    create: Action<(String, MediaKind, bool), Result<Uuid, AppError>>,
+    create: Action<(Title, MediaKind, bool), Result<Uuid, AppError>>,
 }
 
 fn use_new_section_form(
@@ -424,9 +425,8 @@ fn use_new_section_form(
     let nested = RwSignal::new(false);
     let client_error = RwSignal::new(None::<String>);
 
-    let create = Action::new_local(|(t, k, n): &(String, MediaKind, bool)| {
-        create_section(t.clone(), *k, *n)
-    });
+    let create =
+        Action::new_local(|(t, k, n): &(Title, MediaKind, bool)| create_section(t.clone(), *k, *n));
 
     refetch_on_success(create, sections_resource);
 
@@ -453,15 +453,20 @@ fn NewSectionForm(sections_resource: Resource<Result<Vec<Section>, AppError>>) -
 
     let submit = move |ev: web_sys::SubmitEvent| {
         ev.prevent_default();
-        let t = state.title.get_untracked().trim().to_string();
-        if t.is_empty() {
-            state.client_error.set(Some("Name is required".into()));
-            return;
-        }
+        let title = Title::new(state.title.get_untracked().trim().to_string());
+        let title = match title {
+            Ok(t) => t,
+            Err(err) => {
+                state.client_error.set(Some(err.to_string()));
+                return;
+            }
+        };
         state.client_error.set(None);
-        state
-            .create
-            .dispatch((t, state.kind.get_untracked(), state.nested.get_untracked()));
+        state.create.dispatch((
+            title,
+            state.kind.get_untracked(),
+            state.nested.get_untracked(),
+        ));
     };
 
     view! {

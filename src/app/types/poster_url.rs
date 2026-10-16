@@ -16,14 +16,8 @@ const PREFIX: &str = routes::POSTERS_URL_PREFIX;
 /// - Starts with `/posters/`.
 /// - `<subdir>` is non-empty, contains no `/`.
 /// - `<filename>` is non-empty, contains no `/`.
-///
-/// The prefix is what every consumer of a raw poster string had to strip and
-/// then re-check, in three places, each with its own error handling. With
-/// the type, the prefix is a fact of the value: `subdir()` and `filename()`
-/// return the parsed parts, and `to_filesystem_path()` gives the on-disk
-/// location.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct PosterUrl(String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,10 +46,6 @@ impl std::error::Error for PosterUrlError {}
 
 impl PosterUrl {
     /// Build one from its parts.
-    ///
-    /// `subdir` and `filename` must be non-empty and free of `/`. `subdir` is
-    /// typically a section slug, which is already validated elsewhere, but
-    /// this constructor does not assume that.
     pub fn for_file(subdir: &str, filename: &str) -> Result<Self, PosterUrlError> {
         if subdir.is_empty() || filename.is_empty() {
             return Err(PosterUrlError::EmptyComponent);
@@ -67,9 +57,7 @@ impl PosterUrl {
     }
 
     /// Construct from a value that originated from our own database.
-    ///
-    /// Every URL written to the database passed through [`PosterUrl::for_file`]
-    /// or was produced by a path that did. Skips re-validation.
+    #[allow(dead_code)] // Called only by ssr-gated server code.
     pub(crate) fn from_stored(raw: String) -> Self {
         PosterUrl(raw)
     }
@@ -124,10 +112,16 @@ impl AsRef<str> for PosterUrl {
     }
 }
 
-impl<'de> Deserialize<'de> for PosterUrl {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        s.parse().map_err(serde::de::Error::custom)
+impl TryFrom<String> for PosterUrl {
+    type Error = PosterUrlError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().parse()
+    }
+}
+
+impl From<PosterUrl> for String {
+    fn from(u: PosterUrl) -> String {
+        u.0
     }
 }
 
@@ -160,5 +154,10 @@ mod tests {
     #[test]
     fn rejects_missing_prefix() {
         assert!("/media/abc.jpg".parse::<PosterUrl>().is_err());
+    }
+
+    #[test]
+    fn serde_rejects_bad_prefix() {
+        assert!(serde_json::from_str::<PosterUrl>(r#""/media/x.jpg""#).is_err());
     }
 }
