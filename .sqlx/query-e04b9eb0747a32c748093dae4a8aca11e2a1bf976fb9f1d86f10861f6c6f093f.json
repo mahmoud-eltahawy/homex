@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(MAX(number), -1) + 1 AS \"n!: i64\"\n                       FROM items WHERE collection_id = ? AND season_number = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e04b9eb0747a32c748093dae4a8aca11e2a1bf976fb9f1d86f10861f6c6f093f"
+}
